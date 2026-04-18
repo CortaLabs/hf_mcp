@@ -5,12 +5,26 @@ import tomllib
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-MANIFEST_PATH = REPO_ROOT / "products/hf_mcp/export_manifest.toml"
+EXPORT_MANIFEST_PATH = REPO_ROOT / "products/hf_mcp/export_manifest.toml"
+SDIST_MANIFEST_PATH = REPO_ROOT / "products/hf_mcp/MANIFEST.in"
+PYPROJECT_PATH = REPO_ROOT / "products/hf_mcp/pyproject.toml"
 CONFIGURATION_DOC_PATH = REPO_ROOT / "products/hf_mcp/docs/configuration.md"
 EXPORT_BOUNDARY_DOC_PATH = REPO_ROOT / "products/hf_mcp/docs/export_boundary.md"
 ALLOWED_PREFIX = "products/hf_mcp/"
 YAML_EXAMPLE = "products/hf_mcp/config.example.yaml"
 TOML_EXAMPLE = "products/hf_mcp/config.example.toml"
+FORBIDDEN_EXPORT_REFERENCES = (".council", ".scribe", ".claude", ".codex", "../", "..\\")
+EXPECTED_MANIFEST_LINES = {
+    "include README.md",
+    "include pyproject.toml",
+    "include MANIFEST.in",
+    "include config.example.yaml",
+    "include export_manifest.toml",
+    "recursive-include docs *.md",
+    "recursive-include tests *.py",
+    "recursive-include src/hf_mcp *.py",
+    "global-exclude __pycache__ *.py[cod]",
+}
 
 
 def _validate_allowlist(entries: list[str]) -> None:
@@ -20,7 +34,7 @@ def _validate_allowlist(entries: list[str]) -> None:
 
 
 def test_export_manifest_is_product_subtree_only() -> None:
-    manifest = tomllib.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
+    manifest = tomllib.loads(EXPORT_MANIFEST_PATH.read_text(encoding="utf-8"))
     allowlist = manifest["allowlist"]
 
     assert isinstance(allowlist, list)
@@ -61,3 +75,26 @@ def test_export_manifest_rejects_root_level_assets() -> None:
     except AssertionError:
         return
     raise AssertionError("Expected root-level asset to fail export boundary validation")
+
+
+def test_pyproject_release_contract_and_metadata_boundary() -> None:
+    project = tomllib.loads(PYPROJECT_PATH.read_text(encoding="utf-8"))["project"]
+
+    assert project["name"] == "hf-mcp"
+    assert isinstance(project["version"], str) and project["version"].strip()
+    assert project["scripts"]["hf-mcp"] == "hf_mcp.cli:main"
+    assert project["keywords"] == ["hackforums", "mcp", "model-context-protocol"]
+    assert "Programming Language :: Python :: 3.11" in project["classifiers"]
+
+    pyproject_text = PYPROJECT_PATH.read_text(encoding="utf-8").lower()
+    for forbidden in FORBIDDEN_EXPORT_REFERENCES:
+        assert forbidden not in pyproject_text, f"Forbidden reference in pyproject metadata: {forbidden}"
+
+
+def test_sdist_manifest_is_explicit_and_package_local() -> None:
+    manifest_text = SDIST_MANIFEST_PATH.read_text(encoding="utf-8")
+    lines = [line.strip() for line in manifest_text.splitlines() if line.strip() and not line.strip().startswith("#")]
+
+    assert set(lines) == EXPECTED_MANIFEST_LINES
+    for forbidden in FORBIDDEN_EXPORT_REFERENCES:
+        assert forbidden not in manifest_text.lower(), f"Forbidden reference in MANIFEST.in: {forbidden}"

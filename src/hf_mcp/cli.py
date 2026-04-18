@@ -8,6 +8,7 @@ from typing import Any, Mapping, Sequence
 
 from .auth import authorize_via_loopback
 from .config import HFMCPSettings, PRESET_CAPABILITIES, PRESET_PARAMETER_FAMILIES, load_settings
+from .onboarding import run_doctor, run_setup_init
 from .server import serve_stdio
 from .token_store import TokenBundle, TokenStore, load_token_store
 
@@ -44,6 +45,24 @@ def build_cli() -> Any:
     status_parser = auth_subparsers.add_parser("status", help="Show local token/config status")
     status_parser.add_argument("--config", type=Path, default=None, help="Path to config YAML")
     status_parser.add_argument("--token-path", type=Path, default=None, help="Absolute path for token JSON")
+
+    setup_parser = subparsers.add_parser("setup", help="First-run local setup helpers")
+    setup_subparsers = setup_parser.add_subparsers(dest="setup_command")
+    setup_init_parser = setup_subparsers.add_parser("init", help="Create first-run config and print next steps")
+    setup_init_parser.add_argument("--config", type=Path, default=None, help="Path to config YAML")
+    setup_init_parser.add_argument("--profile", type=str, default="reader", help="Profile to write into config")
+    setup_init_parser.add_argument("--token-path", type=Path, default=None, help="Absolute token path to persist")
+    setup_init_parser.add_argument("--force", action="store_true", help="Overwrite existing config file")
+
+    doctor_parser = subparsers.add_parser("doctor", help="Check local onboarding readiness without network calls")
+    doctor_parser.add_argument("--config", type=Path, default=None, help="Path to config YAML")
+    doctor_parser.add_argument("--token-path", type=Path, default=None, help="Absolute path for token JSON")
+    doctor_parser.add_argument(
+        "--profile",
+        type=str,
+        default=None,
+        help="Optional profile override for serve-equivalent local checks",
+    )
 
     parser.set_defaults(command="serve", config=None, token_path=None, profile=None)
     return parser
@@ -143,5 +162,30 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.auth_command == "status":
             return _run_auth_status(args)
         parser.error("auth command requires a subcommand: bootstrap or status")
+
+    if args.command == "setup":
+        if args.setup_command == "init":
+            try:
+                return run_setup_init(
+                    config_path=args.config,
+                    token_path=args.token_path,
+                    profile=args.profile,
+                    force=args.force,
+                )
+            except (OSError, RuntimeError, ValueError, PermissionError) as exc:
+                print(f"Setup init failed: {exc}", file=sys.stderr)
+                return 2
+        parser.error("setup command requires a subcommand: init")
+
+    if args.command == "doctor":
+        try:
+            return run_doctor(
+                config_path=args.config,
+                token_path=args.token_path,
+                profile=args.profile,
+            )
+        except (OSError, RuntimeError, ValueError, PermissionError) as exc:
+            print(f"Doctor failed: {exc}", file=sys.stderr)
+            return 2
 
     return 0

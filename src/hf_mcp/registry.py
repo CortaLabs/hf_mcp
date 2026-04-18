@@ -33,8 +33,6 @@ class _MatrixRow:
 
 _EXPECTED_COVERAGE_FAMILIES = frozenset(
     {
-        "transport.read",
-        "transport.write",
         "me.read",
         "users.read",
         "forums.read",
@@ -60,22 +58,6 @@ _EXPECTED_COVERAGE_FAMILIES = frozenset(
 )
 
 _MATRIX_ROWS: tuple[_MatrixRow, ...] = (
-    _MatrixRow(
-        tool_name="transport.read",
-        coverage_family="transport.read",
-        capability_family="transport.read",
-        operation="read",
-        helper_path=None,
-        transport_kind="generic",
-    ),
-    _MatrixRow(
-        tool_name="transport.write",
-        coverage_family="transport.write",
-        capability_family="transport.write",
-        operation="write",
-        helper_path=None,
-        transport_kind="generic",
-    ),
     _MatrixRow(
         tool_name="me.read",
         coverage_family="me.read",

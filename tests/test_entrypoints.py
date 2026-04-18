@@ -125,6 +125,41 @@ def test_auth_status_help_exists() -> None:
     assert "--token-path" in result.stdout
 
 
+def test_setup_init_help_exists() -> None:
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(SRC_PATH)
+    result = subprocess.run(
+        [sys.executable, "-m", "hf_mcp", "setup", "init", "--help"],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert "--config" in result.stdout
+    assert "--profile" in result.stdout
+    assert "--token-path" in result.stdout
+    assert "--force" in result.stdout
+
+
+def test_doctor_help_exists() -> None:
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(SRC_PATH)
+    result = subprocess.run(
+        [sys.executable, "-m", "hf_mcp", "doctor", "--help"],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert "--config" in result.stdout
+    assert "--token-path" in result.stdout
+    assert "--profile" in result.stdout
+
+
 def test_serve_startup_failure_returns_clear_launch_error(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:

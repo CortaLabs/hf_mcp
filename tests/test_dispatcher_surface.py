@@ -147,6 +147,9 @@ def test_create_server_full_api_registers_extended_reads_concretely_and_retains_
     monkeypatch.setattr("hf_mcp.server.resolve_runtime_bundle", lambda _: _runtime_bundle())
     server = create_server(settings)
 
+    assert "transport.read" not in server.tools
+    assert "transport.write" not in server.tools
+
     concrete_read_rows = (
         "bytes.read",
         "contracts.read",

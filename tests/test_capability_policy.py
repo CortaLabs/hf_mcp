@@ -57,8 +57,22 @@ def _extract_commented_csv_rows(example_text: str, heading: str) -> set[str]:
     return values
 
 
-def test_default_profile_is_full_api_complete_matrix() -> None:
-    settings = load_settings(config_path=None, env={})
+def test_default_profile_is_reader_when_profile_omitted(tmp_path: Path) -> None:
+    settings = load_settings(config_path=tmp_path / "missing.yaml", env={})
+
+    assert settings.profile == "reader"
+    assert settings.enabled_capabilities == PRESET_CAPABILITIES["reader"]
+    assert settings.enabled_parameter_families == PRESET_PARAMETER_FAMILIES["reader"]
+
+
+def test_full_api_profile_is_explicit_opt_in(tmp_path: Path) -> None:
+    config_path = _write_config(
+        tmp_path,
+        """
+        profile: full_api
+        """,
+    )
+    settings = load_settings(config_path=config_path, env={})
 
     assert settings.profile == "full_api"
     assert settings.enabled_capabilities == ALL_CAPABILITIES
@@ -209,9 +223,9 @@ def test_prune_schema_returns_closed_schema_for_disabled_tool() -> None:
     assert pruned == {"type": "object", "properties": {}, "additionalProperties": False}
 
 
-def test_example_config_preserves_full_api_profile() -> None:
+def test_example_config_defaults_to_reader_profile() -> None:
     data = yaml.safe_load((PRODUCT_ROOT / "config.example.yaml").read_text(encoding="utf-8"))
-    assert data["profile"] == "full_api"
+    assert data["profile"] == "reader"
 
 
 def test_example_config_full_api_commentary_matches_runtime_presets() -> None:

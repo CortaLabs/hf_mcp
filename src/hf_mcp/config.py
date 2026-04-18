@@ -161,7 +161,7 @@ PARAMETER_FAMILY_CAPABILITY_PARENTS: dict[str, frozenset[str]] = {
     "confirm.live": WRITE_CAPABILITIES,
 }
 
-DEFAULT_PROFILE = "full_api"
+DEFAULT_PROFILE = "reader"
 DEFAULT_CONFIG_PATH = Path.home() / ".config" / "hf_mcp" / "config.yaml"
 DEFAULT_TOKEN_PATH = Path.home() / ".config" / "hf_mcp" / "token.json"
 

@@ -23,8 +23,32 @@ This means a deployment can disable `sigmarket`, `contract`, or
 - `full_api`: broadest shipped exposure profile.
 - `custom`: starts empty; caller opts in explicitly.
 
-`full_api` is the recommended starting profile for validation because it exposes
-all currently shipped capability families.
+`reader` is the recommended first-run profile. Use `full_api` as an explicit
+opt-in when validating the full documented coverage surface.
+
+## First-run setup flow
+
+Run the terminal-native onboarding commands in this order:
+
+```bash
+pip install hf-mcp
+hf-mcp setup init
+```
+
+Then set local secrets (for example in `.env` or shell):
+
+```bash
+export HF_MCP_CLIENT_ID=your_client_id
+export HF_MCP_CLIENT_SECRET=your_client_secret
+```
+
+Complete auth/bootstrap and local readiness validation:
+
+```bash
+hf-mcp auth bootstrap
+hf-mcp doctor
+hf-mcp serve
+```
 
 ## Runtime configuration responsibilities
 
@@ -52,7 +76,7 @@ Unknown names fail fast during config load.
 ## Example
 
 ```yaml
-profile: full_api
+profile: reader
 
 disabled_capabilities:
   - sigmarket.market.read

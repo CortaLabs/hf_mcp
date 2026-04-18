@@ -1,0 +1,54 @@
+name: Publish hf-mcp to PyPI
+
+'on':
+  push:
+    paths:
+      - pyproject.toml
+      - MANIFEST.in
+      - README.md
+      - docs/**
+      - scripts/build_release_dists.sh
+      - scripts/check_pypi_version_available.py
+      - .github/workflows/publish-hf-mcp-pypi.yml
+  workflow_dispatch:
+
+jobs:
+  publish-pypi:
+    name: Build and publish hf-mcp
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install build dependencies
+        run: python -m pip install --upgrade build twine
+
+      - name: Ensure version is not already on PyPI
+        run: python scripts/check_pypi_version_available.py
+
+      - name: Build release distributions
+        env:
+          OUT_DIR: ${{ runner.temp }}/hf-mcp-dist
+        run: |
+          mkdir -p "$OUT_DIR"
+          bash scripts/build_release_dists.sh "$OUT_DIR"
+
+      - name: Upload distribution artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: hf-mcp-dist
+          path: ${{ runner.temp }}/hf-mcp-dist/*
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: ${{ runner.temp }}/hf-mcp-dist

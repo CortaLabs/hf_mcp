@@ -3,7 +3,7 @@
 # Presets:
 # - reader: read-oriented exposure
 # - forum_operator: read + core content/bytes write exposure
-# - full_api: broadest shipped exposure preset (default)
+# - full_api: broadest shipped exposure preset (explicit opt-in)
 # - custom: start empty and explicitly opt in
 #
 # IMPORTANT:
@@ -12,7 +12,7 @@
 # later-lane contract, sigmarket, and admin/high-risk rows tracked in
 # docs/coverage_matrix.md.
 
-profile: full_api
+profile: reader
 
 # Optional explicit overlays for any profile.
 # These keep naming human-readable and fail closed on unknown values.

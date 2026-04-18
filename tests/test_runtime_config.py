@@ -109,7 +109,7 @@ def test_profile_from_dotenv_is_ignored_when_yaml_omits_profile(tmp_path: Path) 
         env={"HF_MCP_ENV_FILE": str(env_file)},
     )
 
-    assert settings.profile == "full_api"
+    assert settings.profile == "reader"
 
 
 def test_profile_from_process_env_is_ignored_when_yaml_omits_profile(tmp_path: Path) -> None:
@@ -121,7 +121,7 @@ def test_profile_from_process_env_is_ignored_when_yaml_omits_profile(tmp_path: P
         env={"HF_MCP_PROFILE": "reader"},
     )
 
-    assert settings.profile == "full_api"
+    assert settings.profile == "reader"
 
 
 def test_explicit_missing_env_file_fails_closed(tmp_path: Path) -> None:
@@ -143,7 +143,32 @@ def test_token_path_from_yaml_must_be_absolute(tmp_path: Path) -> None:
         load_settings(config_path=config_path, env={})
 
 
-def test_load_token_store_rejects_repo_internal_absolute_path(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_load_token_store_accepts_canonical_user_path_independent_of_cwd(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    home_dir = tmp_path / "home"
+    home_dir.mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(home_dir))
+    monkeypatch.chdir(home_dir)
+    config_path = tmp_path / "config.yaml"
+    _write_yaml(config_path, {"profile": "reader"})
+
+    expected = (home_dir / ".config" / "hf_mcp" / "token.json").resolve(strict=False)
+    settings = load_settings(config_path=config_path, env={"HF_MCP_TOKEN_PATH": "~/.config/hf_mcp/token.json"})
+    store = load_token_store(settings)
+
+    assert settings.token_path == expected
+    assert store.path == expected
+
+
+def test_load_token_store_rejects_repo_internal_absolute_path(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    isolated_cwd = tmp_path / "outside-cwd"
+    isolated_cwd.mkdir(parents=True)
+    monkeypatch.chdir(isolated_cwd)
     repo_internal = PRODUCT_ROOT / "token.json"
     settings = load_settings(
         config_path=None,

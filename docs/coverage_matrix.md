@@ -8,8 +8,6 @@ coverage.
 
 | Coverage family | Operation | Helper path | Product scope status | Exposure note |
 |---|---|---|---|---|
-| `transport.read` | read | generic | in scope | can be disabled by capability policy |
-| `transport.write` | write | generic | in scope | write path still requires local write guards |
 | `me.read` | read | `me` | in scope | can be disabled by capability policy |
 | `users.read` | read | `users` | in scope | can be disabled by capability policy |
 | `forums.read` | read | `forums` | in scope | can be disabled by capability policy |

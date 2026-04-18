@@ -28,12 +28,14 @@ def _policy(capabilities: set[str], parameter_families: set[str]) -> CapabilityP
 
 def test_registry_covers_documented_matrix_once() -> None:
     specs = build_registry()
+    tool_names = {spec.tool_name for spec in specs}
 
     assert len(specs) == len(registry_module._EXPECTED_COVERAGE_FAMILIES)
     assert {spec.coverage_family for spec in specs} == registry_module._EXPECTED_COVERAGE_FAMILIES
-    assert len({spec.tool_name for spec in specs}) == len(specs)
-    assert any(spec.transport_kind == "generic" for spec in specs)
-    assert any(spec.transport_kind == "helper" for spec in specs)
+    assert len(tool_names) == len(specs)
+    assert "transport.read" not in tool_names
+    assert "transport.write" not in tool_names
+    assert all(spec.transport_kind == "helper" for spec in specs)
 
 
 def test_get_tool_spec_returns_helper_row_metadata() -> None:

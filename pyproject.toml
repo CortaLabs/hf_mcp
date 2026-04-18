@@ -6,6 +6,16 @@ build-backend = "setuptools.build_meta"
 name = "hf-mcp"
 version = "0.1.0"
 description = "Standalone Hack Forums MCP launch surface"
+keywords = ["hackforums", "mcp", "model-context-protocol"]
+classifiers = [
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.11",
+  "Topic :: Internet",
+  "Topic :: Software Development :: Libraries :: Python Modules",
+]
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = ["PyYAML>=6.0", "mcp>=1.0.0"]

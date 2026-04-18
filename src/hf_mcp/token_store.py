@@ -9,6 +9,8 @@ from typing import Mapping
 
 from .config import HFMCPSettings
 
+_PRODUCT_ROOT = Path(__file__).resolve(strict=False).parents[2]
+
 
 @dataclass(frozen=True)
 class TokenBundle:
@@ -100,15 +102,14 @@ def load_token_store(settings: HFMCPSettings) -> TokenStore:
         raise ValueError("HF_MCP_TOKEN_PATH must be an absolute path.")
 
     resolved_path = selected_path.resolve(strict=False)
-    if _is_within_repo(resolved_path):
+    if _is_within_product_tree(resolved_path):
         raise ValueError("Token path may not point inside the tracked repository tree.")
 
     return TokenStore(path=resolved_path)
 
 
-def _is_within_repo(path: Path) -> bool:
-    repo_root = Path.cwd().resolve()
-    return repo_root == path or repo_root in path.parents
+def _is_within_product_tree(path: Path) -> bool:
+    return _PRODUCT_ROOT == path or _PRODUCT_ROOT in path.parents
 
 
 __all__ = ["TokenBundle", "TokenStore", "load_token_store"]
