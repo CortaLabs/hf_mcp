@@ -130,7 +130,5 @@ Thumbs.db
 .scribe/docs/dev_plans/**/*.preflight-*.bak
 .scribe/docs/dev_plans/**/DOC_LOG.md
 tool_calls.jsonl
-# Local Product Repos
-/products/hf_mcp/
 
 
