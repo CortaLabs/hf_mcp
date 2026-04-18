@@ -1,0 +1,12 @@
+manifest_version = 1
+package_root = "products/hf_mcp"
+
+allowlist = [
+  "products/hf_mcp/README.md",
+  "products/hf_mcp/pyproject.toml",
+  "products/hf_mcp/config.example.yaml",
+  "products/hf_mcp/export_manifest.toml",
+  "products/hf_mcp/docs/**",
+  "products/hf_mcp/src/hf_mcp/**",
+  "products/hf_mcp/tests/**",
+]

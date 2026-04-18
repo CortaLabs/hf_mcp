@@ -1,0 +1,39 @@
+# hf-mcp capability exposure configuration
+#
+# Presets:
+# - reader: read-oriented exposure
+# - forum_operator: read + core content/bytes write exposure
+# - full_api: broadest shipped exposure preset (default)
+# - custom: start empty and explicitly opt in
+#
+# IMPORTANT:
+# Presets are exposure control for a user/deployment. They do not reduce product
+# scope. The product target remains full documented HF API coverage, including
+# later-lane contract, sigmarket, and admin/high-risk rows tracked in
+# docs/coverage_matrix.md.
+
+profile: full_api
+
+# Optional explicit overlays for any profile.
+# These keep naming human-readable and fail closed on unknown values.
+# enabled_capabilities: []
+# enabled_parameter_families: []
+# disabled_capabilities: []
+# disabled_parameter_families: []
+
+# Optional runtime path override. Must be absolute and outside this repository.
+# token_path: /home/you/.config/hf_mcp/token.json
+
+# Capabilities currently exposed by profile = "full_api":
+# me.read, users.read, forums.read, threads.read, posts.read, bytes.read,
+# contracts.read, disputes.read, bratings.read, sigmarket.market.read,
+# sigmarket.order.read, threads.create, posts.reply, bytes.transfer,
+# bytes.deposit, bytes.withdraw, bytes.bump, contracts.write,
+# sigmarket.write, admin.high_risk.read, admin.high_risk.write
+
+# Parameter families currently exposed by profile = "full_api":
+# selectors.user, selectors.forum, selectors.thread, selectors.post,
+# selectors.bytes, selectors.contract, selectors.dispute, selectors.sigmarket,
+# filters.pagination, fields.me.basic, fields.me.advanced,
+# fields.users.profile, fields.posts.body, fields.bytes.amount,
+# writes.content, writes.bytes, confirm.live
