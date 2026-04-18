@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="hf-mcp is a Hack Forums API v2 MCP server with explicit setup, OAuth bootstrap, and local runtime checks.">
+  <title>hf-mcp | Hack Forums MCP Server</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header" role="banner">
+    <div class="shell">
+      <p class="kicker">Hack Forums API v2</p>
+      <h1>hf-mcp</h1>
+      <p class="lede">
+        A focused MCP server for read/write-safe Hack Forums workflows.
+        Start local, verify auth wiring, then serve with a bounded, inspectable setup.
+      </p>
+      <nav aria-label="Primary">
+        <ul class="inline-nav">
+          <li><a href="#setup">Setup Flow</a></li>
+          <li><a href="#callback">Hosted Callback</a></li>
+          <li><a href="#docs">Docs Directory</a></li>
+          <li><a href="#links">Project Links</a></li>
+        </ul>
+      </nav>
+    </div>
+  </header>
+
+  <main id="main">
+    <section class="panel" aria-labelledby="what-is-title">
+      <div class="shell">
+        <h2 id="what-is-title">What It Is</h2>
+        <p>
+          <strong>hf-mcp</strong> provides a practical local MCP service layer over Hack Forums API v2.
+          It is designed for explicit setup, observable auth flow, and clear operator control.
+        </p>
+      </div>
+    </section>
+
+    <section class="panel panel-accent" id="setup" aria-labelledby="setup-title">
+      <div class="shell">
+        <h2 id="setup-title">Install &amp; Setup</h2>
+        <ol class="flow-list">
+          <li>
+            <h3>Install package</h3>
+            <pre><code>pip install hf-mcp</code></pre>
+            <button class="copy-btn" type="button" data-copy="pip install hf-mcp">Copy</button>
+          </li>
+          <li>
+            <h3>Initialize local config</h3>
+            <pre><code>hf-mcp setup init</code></pre>
+            <button class="copy-btn" type="button" data-copy="hf-mcp setup init">Copy</button>
+          </li>
+          <li>
+            <h3>Run OAuth bootstrap</h3>
+            <pre><code>hf-mcp auth bootstrap</code></pre>
+            <button class="copy-btn" type="button" data-copy="hf-mcp auth bootstrap">Copy</button>
+          </li>
+          <li>
+            <h3>Check local health</h3>
+            <pre><code>hf-mcp doctor</code></pre>
+            <button class="copy-btn" type="button" data-copy="hf-mcp doctor">Copy</button>
+          </li>
+          <li>
+            <h3>Serve MCP endpoint</h3>
+            <pre><code>hf-mcp serve</code></pre>
+            <button class="copy-btn" type="button" data-copy="hf-mcp serve">Copy</button>
+          </li>
+        </ol>
+      </div>
+    </section>
+
+    <section class="panel" id="callback" aria-labelledby="callback-title">
+      <div class="shell">
+        <h2 id="callback-title">Hosted OAuth Callback</h2>
+        <p>
+          Use the hosted callback page during OAuth authorization:
+        </p>
+        <p>
+          <a class="terminal-link" href="https://cortalabs.github.io/hf_mcp/oauth_callback.html">https://cortalabs.github.io/hf_mcp/oauth_callback.html</a>
+        </p>
+        <p>
+          The hosted page forwards approved OAuth params to the fixed local target:
+          <code>http://127.0.0.1:8765/callback</code>
+        </p>
+        <p>
+          Callback artifact source: <a href="oauth_callback.html">oauth_callback.html</a>
+        </p>
+      </div>
+    </section>
+
+    <section class="panel" id="docs" aria-labelledby="docs-title">
+      <div class="shell">
+        <h2 id="docs-title">Docs Directory</h2>
+        <ul class="docs-list">
+          <li><a href="configuration.md">configuration.md</a></li>
+          <li><a href="coverage_matrix.md">coverage_matrix.md</a></li>
+          <li><a href="export_boundary.md">export_boundary.md</a></li>
+          <li><a href="security_model.md">security_model.md</a></li>
+          <li><a href="oauth_callback.html">oauth_callback.html</a></li>
+        </ul>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer" id="links">
+    <div class="shell">
+      <h2>Project Links</h2>
+      <ul class="inline-nav">
+        <li><a href="https://github.com/cortalabs/hf_mcp">GitHub</a></li>
+        <li><a href="https://pypi.org/project/hf-mcp/">PyPI</a></li>
+      </ul>
+      <p class="timestamp">Build target: public GitHub Pages docs entrypoint.</p>
+      <p class="timestamp">© <span id="year">2026</span> CortaLabs</p>
+    </div>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>

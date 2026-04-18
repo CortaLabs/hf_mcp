@@ -1,0 +1,252 @@
+:root {
+  --bg: #0d1117;
+  --bg-elevated: #161b22;
+  --bg-soft: #1f242d;
+  --text: #e6edf3;
+  --muted: #9da8b5;
+  --signal-amber: #e3a236;
+  --signal-cyan: #3bc9db;
+  --border: #30363d;
+  --focus: #3bc9db;
+  --radius: 0.625rem;
+  --shadow: 0 14px 36px rgba(0, 0, 0, 0.35);
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: "IBM Plex Sans", "Segoe UI", "Helvetica Neue", sans-serif;
+  background:
+    radial-gradient(circle at 10% 10%, rgba(59, 201, 219, 0.08), transparent 45%),
+    radial-gradient(circle at 90% 0%, rgba(227, 162, 54, 0.12), transparent 40%),
+    linear-gradient(160deg, #0b0f14 0%, #11161f 50%, #0d1117 100%);
+  color: var(--text);
+  line-height: 1.6;
+  min-height: 100vh;
+}
+
+.shell {
+  width: min(72rem, 100% - 2rem);
+  margin: 0 auto;
+}
+
+.skip-link {
+  position: absolute;
+  left: -999px;
+  top: 0.5rem;
+  z-index: 1000;
+  background: var(--bg-elevated);
+  border: 2px solid var(--focus);
+  color: var(--text);
+  padding: 0.5rem 0.75rem;
+  border-radius: var(--radius);
+}
+
+.skip-link:focus-visible {
+  left: 0.75rem;
+}
+
+.site-header {
+  border-bottom: 1px solid var(--border);
+  background: linear-gradient(135deg, rgba(227, 162, 54, 0.12), rgba(59, 201, 219, 0.05) 55%, rgba(13, 17, 23, 0.85));
+}
+
+.site-header .shell {
+  padding: 3.5rem 0 2.5rem;
+}
+
+.kicker {
+  font-family: "IBM Plex Mono", "Consolas", monospace;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--signal-cyan);
+  margin: 0 0 0.5rem;
+  font-size: 0.85rem;
+}
+
+h1,
+h2,
+h3 {
+  font-family: "Rajdhani", "IBM Plex Sans", sans-serif;
+  letter-spacing: 0.02em;
+  margin: 0 0 0.8rem;
+  line-height: 1.15;
+}
+
+h1 {
+  font-size: clamp(2rem, 6vw, 3.5rem);
+  color: var(--signal-amber);
+}
+
+h2 {
+  font-size: clamp(1.4rem, 4vw, 2rem);
+}
+
+h3 {
+  font-size: 1.15rem;
+  color: var(--signal-cyan);
+}
+
+.lede {
+  max-width: 48rem;
+  margin: 0 0 1.5rem;
+  color: var(--text);
+}
+
+.panel {
+  padding: 2rem 0;
+}
+
+.panel + .panel {
+  border-top: 1px solid var(--border);
+}
+
+.panel-accent {
+  background: linear-gradient(180deg, rgba(22, 27, 34, 0.7), rgba(22, 27, 34, 0.25));
+}
+
+.inline-nav {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.inline-nav a {
+  display: inline-block;
+  color: var(--text);
+  text-decoration: none;
+  border: 1px solid var(--border);
+  padding: 0.45rem 0.7rem;
+  border-radius: 999px;
+  background: rgba(31, 36, 45, 0.75);
+}
+
+.flow-list {
+  margin: 1rem 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 1rem;
+}
+
+.flow-list li {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1rem;
+  background: var(--bg-soft);
+  box-shadow: var(--shadow);
+}
+
+pre {
+  margin: 0.6rem 0 0.8rem;
+  padding: 0.8rem 0.9rem;
+  overflow-x: auto;
+  max-width: 100%;
+  border-radius: 0.5rem;
+  border: 1px solid rgba(59, 201, 219, 0.28);
+  background: #0a0f14;
+}
+
+code {
+  font-family: "IBM Plex Mono", "Fira Code", "Consolas", monospace;
+  font-size: 0.96rem;
+  word-break: break-word;
+}
+
+.copy-btn {
+  border: 1px solid var(--signal-cyan);
+  color: var(--text);
+  background: rgba(59, 201, 219, 0.12);
+  padding: 0.4rem 0.65rem;
+  border-radius: 0.45rem;
+  cursor: pointer;
+}
+
+.copy-btn[disabled] {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.terminal-link {
+  color: var(--signal-amber);
+  overflow-wrap: anywhere;
+}
+
+.docs-list {
+  margin: 1rem 0 0;
+  padding-left: 1rem;
+}
+
+.docs-list a {
+  color: var(--signal-cyan);
+}
+
+.site-footer {
+  border-top: 1px solid var(--border);
+  background: rgba(10, 12, 16, 0.86);
+}
+
+.site-footer .shell {
+  padding: 2rem 0 2.8rem;
+}
+
+.timestamp {
+  margin: 0.35rem 0 0;
+  color: var(--muted);
+}
+
+a {
+  color: var(--signal-cyan);
+}
+
+a:focus-visible,
+button:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 3px;
+}
+
+a:hover,
+button:hover {
+  filter: brightness(1.1);
+}
+
+@media (max-width: 42rem) {
+  .site-header .shell {
+    padding-top: 2.5rem;
+  }
+
+  .panel {
+    padding: 1.6rem 0;
+  }
+
+  .inline-nav {
+    gap: 0.5rem;
+  }
+
+  .inline-nav a {
+    font-size: 0.95rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
+  }
+}
