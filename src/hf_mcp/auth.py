@@ -11,7 +11,11 @@ import webbrowser
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import Mapping
 
-from .config import HFMCPSettings
+from .config import (
+    DEFAULT_LOOPBACK_REDIRECT_URI,
+    HOSTED_MODE_LOOPBACK_CALLBACK_URI,
+    HFMCPSettings,
+)
 from .token_store import TokenBundle
 
 DEFAULT_AUTHORIZE_ENDPOINT = "https://hackforums.net/api/v2/authorize"
@@ -21,7 +25,14 @@ def authorize_via_loopback(settings: HFMCPSettings, open_browser: bool = True) -
     client_id = _required_setting(settings, "HF_MCP_CLIENT_ID")
     client_secret = _required_setting(settings, "HF_MCP_CLIENT_SECRET")
 
-    redirect_uri = settings.runtime_env.get("HF_MCP_REDIRECT_URI", "http://127.0.0.1:8765/callback")
+    external_redirect_uri = settings.runtime_env.get("HF_MCP_EXTERNAL_REDIRECT_URI", "").strip()
+    if external_redirect_uri:
+        redirect_uri = _validate_external_redirect_uri(external_redirect_uri)
+        callback_redirect_uri = HOSTED_MODE_LOOPBACK_CALLBACK_URI
+    else:
+        redirect_uri = settings.runtime_env.get("HF_MCP_REDIRECT_URI", DEFAULT_LOOPBACK_REDIRECT_URI)
+        callback_redirect_uri = redirect_uri
+
     authorize_url = settings.runtime_env.get("HF_MCP_AUTHORIZE_URL", DEFAULT_AUTHORIZE_ENDPOINT)
     token_url = settings.runtime_env.get("HF_MCP_TOKEN_URL", DEFAULT_AUTHORIZE_ENDPOINT)
 
@@ -42,7 +53,10 @@ def authorize_via_loopback(settings: HFMCPSettings, open_browser: bool = True) -
     if open_browser:
         webbrowser.open(browser_url)
 
-    callback_params = _await_loopback_callback(redirect_uri=redirect_uri, timeout_seconds=timeout_seconds)
+    callback_params = _await_loopback_callback(
+        redirect_uri=callback_redirect_uri,
+        timeout_seconds=timeout_seconds,
+    )
     callback_state = callback_params.get("state")
     if callback_state != state:
         raise ValueError("OAuth callback state mismatch. Aborting token exchange.")
@@ -173,6 +187,20 @@ def _required_setting(settings: HFMCPSettings, name: str) -> str:
     if value is None or not value.strip():
         raise ValueError(f"Missing required environment variable: {name}")
     return value.strip()
+
+
+def _validate_external_redirect_uri(redirect_uri: str) -> str:
+    parsed_uri = urllib.parse.urlparse(redirect_uri)
+    host = parsed_uri.hostname
+    if parsed_uri.scheme != "https" or host is None:
+        raise ValueError(
+            "Invalid HF_MCP_EXTERNAL_REDIRECT_URI: hosted redirect URI must be a valid HTTPS URL."
+        )
+    if host in {"127.0.0.1", "localhost"}:
+        raise ValueError(
+            "Invalid HF_MCP_EXTERNAL_REDIRECT_URI: hosted redirect URI cannot use a loopback host."
+        )
+    return redirect_uri
 
 
 __all__ = ["authorize_via_loopback"]

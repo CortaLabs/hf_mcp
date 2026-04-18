@@ -50,13 +50,27 @@ hf-mcp doctor
 hf-mcp serve
 ```
 
+Hosted callback contract:
+
+- Hosted mode (recommended): host `docs/oauth_callback.html` (for example on GitHub Pages), set
+  `HF_MCP_EXTERNAL_REDIRECT_URI` to that hosted HTTPS callback URL, and register the same URL in
+  your Hack Forums developer app settings (example:
+  `https://cortalabs.github.io/hf_mcp/oauth_callback.html`).
+- Hosted mode always forwards from the hosted page to the fixed local callback target:
+  `http://127.0.0.1:8765/callback`.
+- Legacy fallback: if `HF_MCP_EXTERNAL_REDIRECT_URI` is unset, `HF_MCP_REDIRECT_URI` remains the
+  loopback-only redirect URI input (for example `http://127.0.0.1:8765/callback`).
+
 ## Runtime configuration responsibilities
 
 - YAML is the canonical runtime config input for non-secret policy:
   `profile`, capability overlays, parameter-family overlays, and optional
   `token_path`.
 - `.env` is for secrets and machine-local overrides only (for example
-  `HF_MCP_CLIENT_ID`, `HF_MCP_CLIENT_SECRET`, `HF_MCP_TOKEN_PATH`).
+  `HF_MCP_CLIENT_ID`, `HF_MCP_CLIENT_SECRET`, `HF_MCP_TOKEN_PATH`,
+  `HF_MCP_EXTERNAL_REDIRECT_URI`, `HF_MCP_REDIRECT_URI`).
+- Callback URI inputs are machine-local auth settings from env (`.env`/shell), not YAML policy
+  keys.
 - `.env` must not be used to choose non-secret runtime policy such as
   `profile`, capability families, or parameter families.
 - `token_path` must resolve to an absolute path outside the tracked repository.

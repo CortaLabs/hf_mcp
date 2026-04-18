@@ -132,6 +132,133 @@ def test_authorize_via_loopback_successful_exchange(monkeypatch: pytest.MonkeyPa
     assert exchange_inputs["redirect_uri"] == "http://127.0.0.1:8765/callback"
 
 
+def test_authorize_via_loopback_hosted_mode_uses_external_redirect_and_fixed_local_listener(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("hf_mcp.auth.secrets.token_urlsafe", lambda _: "expected-state")
+
+    authorize_inputs: dict[str, str] = {}
+    callback_inputs: dict[str, object] = {}
+    exchange_inputs: dict[str, str] = {}
+
+    def _fake_build_authorize_url(**kwargs: str) -> str:
+        authorize_inputs.update(kwargs)
+        return "https://example.test/authorize"
+
+    def _fake_await_loopback_callback(redirect_uri: str, timeout_seconds: int) -> dict[str, str]:
+        callback_inputs["redirect_uri"] = redirect_uri
+        callback_inputs["timeout_seconds"] = timeout_seconds
+        return {"code": "abc", "state": "expected-state"}
+
+    def _fake_exchange(**kwargs: str) -> dict[str, object]:
+        exchange_inputs.update(kwargs)
+        return {"access_token": "token", "token_type": "Bearer", "scope": "Basic Info"}
+
+    monkeypatch.setattr("hf_mcp.auth._build_authorize_url", _fake_build_authorize_url)
+    monkeypatch.setattr("hf_mcp.auth._await_loopback_callback", _fake_await_loopback_callback)
+    monkeypatch.setattr("hf_mcp.auth._exchange_code_for_token", _fake_exchange)
+
+    bundle = authorize_via_loopback(
+        _settings(
+            runtime_env={
+                "HF_MCP_CLIENT_ID": "client",
+                "HF_MCP_CLIENT_SECRET": "secret",
+                "HF_MCP_EXTERNAL_REDIRECT_URI": "https://example.github.io/hf-callback/",
+                "HF_MCP_REDIRECT_URI": "http://127.0.0.1:9999/not-used",
+            }
+        ),
+        open_browser=False,
+    )
+
+    assert bundle.access_token == "token"
+    assert authorize_inputs["redirect_uri"] == "https://example.github.io/hf-callback/"
+    assert callback_inputs["redirect_uri"] == "http://127.0.0.1:8765/callback"
+    assert exchange_inputs["redirect_uri"] == "https://example.github.io/hf-callback/"
+
+
+def test_authorize_via_loopback_hosted_mode_rejects_state_mismatch_before_token_exchange(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("hf_mcp.auth.secrets.token_urlsafe", lambda _: "expected-state")
+    monkeypatch.setattr("hf_mcp.auth._build_authorize_url", lambda **_: "https://example.test/authorize")
+
+    callback_inputs: dict[str, object] = {}
+    exchange_called = False
+
+    def _fake_await_loopback_callback(redirect_uri: str, timeout_seconds: int) -> dict[str, str]:
+        callback_inputs["redirect_uri"] = redirect_uri
+        callback_inputs["timeout_seconds"] = timeout_seconds
+        return {"code": "abc", "state": "wrong-state"}
+
+    def _should_not_exchange(**kwargs: str) -> dict[str, object]:
+        nonlocal exchange_called
+        del kwargs
+        exchange_called = True
+        raise AssertionError("token exchange should not run after callback state mismatch")
+
+    monkeypatch.setattr("hf_mcp.auth._await_loopback_callback", _fake_await_loopback_callback)
+    monkeypatch.setattr("hf_mcp.auth._exchange_code_for_token", _should_not_exchange)
+
+    with pytest.raises(ValueError, match="state mismatch"):
+        authorize_via_loopback(
+            _settings(
+                runtime_env={
+                    "HF_MCP_CLIENT_ID": "client",
+                    "HF_MCP_CLIENT_SECRET": "secret",
+                    "HF_MCP_EXTERNAL_REDIRECT_URI": "https://example.github.io/hf-callback/",
+                    "HF_MCP_REDIRECT_URI": "http://127.0.0.1:9999/not-used",
+                }
+            ),
+            open_browser=False,
+        )
+
+    assert callback_inputs["redirect_uri"] == "http://127.0.0.1:8765/callback"
+    assert exchange_called is False
+
+
+@pytest.mark.parametrize(
+    "external_redirect",
+    [
+        "http://example.github.io/hf-callback/",
+        "https://127.0.0.1:8765/callback",
+        "not-a-uri",
+    ],
+)
+def test_authorize_via_loopback_rejects_invalid_hosted_external_redirect(
+    monkeypatch: pytest.MonkeyPatch,
+    external_redirect: str,
+) -> None:
+    called = {"callback": False, "exchange": False}
+
+    def _should_not_callback(redirect_uri: str, timeout_seconds: int) -> dict[str, str]:
+        del redirect_uri, timeout_seconds
+        called["callback"] = True
+        raise AssertionError("callback listener should not start for invalid hosted config")
+
+    def _should_not_exchange(**kwargs: str) -> dict[str, object]:
+        del kwargs
+        called["exchange"] = True
+        raise AssertionError("token exchange should not run for invalid hosted config")
+
+    monkeypatch.setattr("hf_mcp.auth._await_loopback_callback", _should_not_callback)
+    monkeypatch.setattr("hf_mcp.auth._exchange_code_for_token", _should_not_exchange)
+
+    with pytest.raises(ValueError, match="HF_MCP_EXTERNAL_REDIRECT_URI"):
+        authorize_via_loopback(
+            _settings(
+                runtime_env={
+                    "HF_MCP_CLIENT_ID": "client",
+                    "HF_MCP_CLIENT_SECRET": "secret",
+                    "HF_MCP_EXTERNAL_REDIRECT_URI": external_redirect,
+                }
+            ),
+            open_browser=False,
+        )
+
+    assert called["callback"] is False
+    assert called["exchange"] is False
+
+
 def test_auth_bootstrap_saves_bundle_through_token_store(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],

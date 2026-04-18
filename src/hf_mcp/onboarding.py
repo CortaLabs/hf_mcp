@@ -15,7 +15,11 @@ from .config import (
 )
 from .token_store import TokenBundle, TokenStore, load_token_store
 
-_DEFAULT_REDIRECT_URI = "http://127.0.0.1:8765/callback"
+_HOSTED_CALLBACK_ARTIFACT_PATH = "docs/oauth_callback.html"
+_HOSTED_EXTERNAL_REDIRECT_ENV = "HF_MCP_EXTERNAL_REDIRECT_URI"
+_HOSTED_EXTERNAL_REDIRECT_EXAMPLE_URI = "https://cortalabs.github.io/hf_mcp/oauth_callback.html"
+_LEGACY_REDIRECT_ENV = "HF_MCP_REDIRECT_URI"
+_HOSTED_LOCAL_CALLBACK_URI = "http://127.0.0.1:8765/callback"
 
 
 def run_setup_init(
@@ -122,6 +126,7 @@ def run_doctor(config_path: Path | None, token_path: Path | None, profile: str |
         for issue in issues:
             print(f"- {issue}")
         print("Next steps:")
+        _print_callback_guidance()
         print(f"- Run: {_command_with_paths('hf-mcp setup init', selected_config_path, selected_token_path)}")
         print("- Set: HF_MCP_CLIENT_ID")
         print("- Set: HF_MCP_CLIENT_SECRET")
@@ -198,13 +203,24 @@ def _env_status(value: str | None) -> str:
 def _print_next_steps(config_path: Path, token_path: Path | None) -> None:
     print("Next steps:")
     print("- Create or update your Hack Forums developer app.")
-    print(f"- Set the redirect URI to: {_DEFAULT_REDIRECT_URI}")
+    _print_callback_guidance()
     print("- Set required environment variables:")
     print("  HF_MCP_CLIENT_ID=your_client_id")
     print("  HF_MCP_CLIENT_SECRET=your_client_secret")
     print(f"- Run: {_command_with_paths('hf-mcp auth bootstrap', config_path, token_path)}")
     print(f"- Run: {_command_with_paths('hf-mcp doctor', config_path, token_path)}")
     print(f"- Run: {_command_with_paths('hf-mcp serve', config_path, token_path)}")
+
+
+def _print_callback_guidance() -> None:
+    print(f"- Hosted callback artifact: {_HOSTED_CALLBACK_ARTIFACT_PATH}")
+    print(f"- Hosted mode: set {_HOSTED_EXTERNAL_REDIRECT_ENV} to your hosted HTTPS callback page URL.")
+    print(f"  Example: {_HOSTED_EXTERNAL_REDIRECT_EXAMPLE_URI}")
+    print(f"- Hosted page forwards to fixed local callback target: {_HOSTED_LOCAL_CALLBACK_URI}")
+    print(
+        f"- Legacy fallback: if {_HOSTED_EXTERNAL_REDIRECT_ENV} is unset, use {_LEGACY_REDIRECT_ENV} "
+        f"for loopback-only auth (for example {_HOSTED_LOCAL_CALLBACK_URI})."
+    )
 
 
 def _command_with_paths(base: str, config_path: Path, token_path: Path | None) -> str:
@@ -215,5 +231,12 @@ def _command_with_paths(base: str, config_path: Path, token_path: Path | None) -
         parts.extend(["--token-path", str(token_path)])
     return " ".join(parts)
 
-
-__all__ = ["run_setup_init", "run_doctor"]
+__all__ = [
+    "run_setup_init",
+    "run_doctor",
+    "_HOSTED_CALLBACK_ARTIFACT_PATH",
+    "_HOSTED_EXTERNAL_REDIRECT_ENV",
+    "_HOSTED_EXTERNAL_REDIRECT_EXAMPLE_URI",
+    "_LEGACY_REDIRECT_ENV",
+    "_HOSTED_LOCAL_CALLBACK_URI",
+]

@@ -8,7 +8,15 @@ from typing import Any, Mapping, Sequence
 
 from .auth import authorize_via_loopback
 from .config import HFMCPSettings, PRESET_CAPABILITIES, PRESET_PARAMETER_FAMILIES, load_settings
-from .onboarding import run_doctor, run_setup_init
+from .onboarding import (
+    _HOSTED_CALLBACK_ARTIFACT_PATH,
+    _HOSTED_EXTERNAL_REDIRECT_ENV,
+    _HOSTED_EXTERNAL_REDIRECT_EXAMPLE_URI,
+    _HOSTED_LOCAL_CALLBACK_URI,
+    _LEGACY_REDIRECT_ENV,
+    run_doctor,
+    run_setup_init,
+)
 from .server import serve_stdio
 from .token_store import TokenBundle, TokenStore, load_token_store
 
@@ -21,7 +29,7 @@ def build_cli() -> Any:
     parser.add_argument(
         "--version",
         action="version",
-        version="hf-mcp 0.1.0",
+        version="hf-mcp 0.1.1",
     )
     subparsers = parser.add_subparsers(dest="command")
     serve_parser = subparsers.add_parser("serve", help="Start the MCP runtime")
@@ -37,7 +45,18 @@ def build_cli() -> Any:
     auth_parser = subparsers.add_parser("auth", help="Bootstrap and inspect auth state")
     auth_subparsers = auth_parser.add_subparsers(dest="auth_command")
 
-    bootstrap_parser = auth_subparsers.add_parser("bootstrap", help="Run loopback OAuth bootstrap")
+    bootstrap_parser = auth_subparsers.add_parser(
+        "bootstrap",
+        help="Run OAuth bootstrap (hosted callback + loopback fallback)",
+        description=(
+            "Run OAuth bootstrap.\n\n"
+            f"Hosted mode: set {_HOSTED_EXTERNAL_REDIRECT_ENV} to your hosted callback page URL "
+            f"(artifact path: {_HOSTED_CALLBACK_ARTIFACT_PATH}; example: {_HOSTED_EXTERNAL_REDIRECT_EXAMPLE_URI}). "
+            f"The hosted page forwards to the fixed local callback target {_HOSTED_LOCAL_CALLBACK_URI}.\n"
+            f"Legacy fallback: if {_HOSTED_EXTERNAL_REDIRECT_ENV} is unset, {_LEGACY_REDIRECT_ENV} "
+            "keeps loopback-only bootstrap."
+        ),
+    )
     bootstrap_parser.add_argument("--config", type=Path, default=None, help="Path to config YAML")
     bootstrap_parser.add_argument("--token-path", type=Path, default=None, help="Absolute path for token JSON")
     bootstrap_parser.add_argument("--no-browser", action="store_true", help="Do not open the browser automatically")
@@ -54,7 +73,17 @@ def build_cli() -> Any:
     setup_init_parser.add_argument("--token-path", type=Path, default=None, help="Absolute token path to persist")
     setup_init_parser.add_argument("--force", action="store_true", help="Overwrite existing config file")
 
-    doctor_parser = subparsers.add_parser("doctor", help="Check local onboarding readiness without network calls")
+    doctor_parser = subparsers.add_parser(
+        "doctor",
+        help="Check local onboarding readiness without network calls",
+        description=(
+            "Check local onboarding readiness without network calls.\n\n"
+            f"Hosted callback guidance: {_HOSTED_CALLBACK_ARTIFACT_PATH}, "
+            f"{_HOSTED_EXTERNAL_REDIRECT_ENV}, fixed local target {_HOSTED_LOCAL_CALLBACK_URI}, "
+            f"example {_HOSTED_EXTERNAL_REDIRECT_EXAMPLE_URI}, "
+            f"and legacy {_LEGACY_REDIRECT_ENV} fallback."
+        ),
+    )
     doctor_parser.add_argument("--config", type=Path, default=None, help="Path to config YAML")
     doctor_parser.add_argument("--token-path", type=Path, default=None, help="Absolute path for token JSON")
     doctor_parser.add_argument(

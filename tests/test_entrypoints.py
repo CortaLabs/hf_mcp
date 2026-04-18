@@ -16,6 +16,8 @@ if str(SRC_PATH) not in sys.path:
 
 from hf_mcp.cli import build_cli, main
 
+_HOSTED_EXTERNAL_REDIRECT_EXAMPLE_URI = "https://cortalabs.github.io/hf_mcp/oauth_callback.html"
+
 
 def _parse_hf_mcp_script_target(pyproject_text: str) -> str:
     in_scripts = False
@@ -107,6 +109,11 @@ def test_auth_bootstrap_help_exists() -> None:
     assert "--config" in result.stdout
     assert "--token-path" in result.stdout
     assert "--no-browser" in result.stdout
+    assert "HF_MCP_EXTERNAL_REDIRECT_URI" in result.stdout
+    assert "HF_MCP_REDIRECT_URI" in result.stdout
+    assert "http://127.0.0.1:8765/callback" in result.stdout
+    assert "docs/oauth_callback.html" in result.stdout
+    assert _HOSTED_EXTERNAL_REDIRECT_EXAMPLE_URI in result.stdout
 
 
 def test_auth_status_help_exists() -> None:
@@ -158,6 +165,11 @@ def test_doctor_help_exists() -> None:
     assert "--config" in result.stdout
     assert "--token-path" in result.stdout
     assert "--profile" in result.stdout
+    assert "HF_MCP_EXTERNAL_REDIRECT_URI" in result.stdout
+    assert "HF_MCP_REDIRECT_URI" in result.stdout
+    assert "http://127.0.0.1:8765/callback" in result.stdout
+    assert "docs/oauth_callback.html" in result.stdout
+    assert _HOSTED_EXTERNAL_REDIRECT_EXAMPLE_URI in result.stdout
 
 
 def test_serve_startup_failure_returns_clear_launch_error(

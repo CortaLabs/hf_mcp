@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>hf-mcp OAuth Callback</title>
+  <style>
+    :root {
+      color-scheme: light;
+      font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    }
+
+    body {
+      margin: 0;
+      background: #f5f7fb;
+      color: #1b2430;
+    }
+
+    main {
+      max-width: 680px;
+      margin: 6vh auto;
+      padding: 0 1rem;
+    }
+
+    .card {
+      background: #ffffff;
+      border: 1px solid #dde4ee;
+      border-radius: 12px;
+      box-shadow: 0 8px 20px rgba(27, 36, 48, 0.06);
+      padding: 1rem 1.1rem;
+    }
+
+    h1 {
+      margin: 0 0 0.5rem;
+      font-size: 1.3rem;
+    }
+
+    p {
+      margin: 0.55rem 0;
+      line-height: 1.45;
+    }
+
+    code {
+      background: #eef3fa;
+      border-radius: 6px;
+      padding: 0.15rem 0.35rem;
+    }
+
+    .ok { color: #116b2f; }
+    .warn { color: #7a4b00; }
+    .err { color: #8a1f1f; }
+  </style>
+</head>
+<body>
+  <main>
+    <section class="card" aria-live="polite">
+      <h1>hf-mcp OAuth Callback</h1>
+      <p id="status">Processing callback parameters.</p>
+      <p id="detail"></p>
+      <p>
+        Local callback target:
+        <code id="target">http://127.0.0.1:8765/callback</code>
+      </p>
+      <p id="next"></p>
+    </section>
+  </main>
+  <script>
+    (function () {
+      "use strict";
+
+      const LOOPBACK_TARGET = "http://127.0.0.1:8765/callback";
+      const ALLOWED_PARAMS = ["code", "state", "error"];
+      const searchParams = new URLSearchParams(window.location.search);
+      const forwardParams = new URLSearchParams();
+
+      for (const key of ALLOWED_PARAMS) {
+        const value = searchParams.get(key);
+        if (value !== null) {
+          forwardParams.set(key, value);
+        }
+      }
+
+      const statusEl = document.getElementById("status");
+      const detailEl = document.getElementById("detail");
+      const nextEl = document.getElementById("next");
+      const nextUrl = forwardParams.toString()
+        ? LOOPBACK_TARGET + "?" + forwardParams.toString()
+        : LOOPBACK_TARGET;
+
+      if (forwardParams.has("error")) {
+        statusEl.className = "err";
+        statusEl.textContent = "OAuth returned an error from Hack Forums.";
+        detailEl.textContent = "Forwarding error details to your local hf-mcp callback listener.";
+      } else if (forwardParams.has("code")) {
+        statusEl.className = "ok";
+        statusEl.textContent = "Authorization code received.";
+        detailEl.textContent = "Forwarding code and state to your local hf-mcp callback listener.";
+      } else {
+        statusEl.className = "warn";
+        statusEl.textContent = "No authorization code or OAuth error was found in this URL.";
+        detailEl.textContent = "Opening the local callback endpoint so hf-mcp can finish or fail closed.";
+      }
+
+      nextEl.textContent = "If nothing happens, ensure hf-mcp auth bootstrap is running locally on 127.0.0.1:8765.";
+      window.location.replace(nextUrl);
+    }());
+  </script>
+</body>
+</html>

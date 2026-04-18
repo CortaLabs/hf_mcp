@@ -24,6 +24,13 @@ profile: reader
 # Optional runtime path override. Must be absolute and outside this repository.
 # token_path: /home/you/.config/hf_mcp/token.json
 
+# OAuth redirect variables are machine-local env inputs, not YAML policy keys.
+# Put these in .env or your shell:
+# - HF_MCP_EXTERNAL_REDIRECT_URI=https://cortalabs.github.io/hf_mcp/oauth_callback.html
+#   Hosted callback artifact path: docs/oauth_callback.html
+#   Hosted page forwards to fixed local callback target: http://127.0.0.1:8765/callback
+# - Legacy fallback (loopback-only): HF_MCP_REDIRECT_URI=http://127.0.0.1:8765/callback
+
 # Capabilities currently exposed by profile = "full_api":
 # me.read, users.read, forums.read, threads.read, posts.read, bytes.read,
 # contracts.read, disputes.read, bratings.read, sigmarket.market.read,

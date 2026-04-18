@@ -14,6 +14,8 @@ if str(SRC_PATH) not in sys.path:
 
 from hf_mcp.onboarding import run_doctor, run_setup_init
 
+_HOSTED_EXTERNAL_REDIRECT_EXAMPLE_URI = "https://cortalabs.github.io/hf_mcp/oauth_callback.html"
+
 
 def _load_yaml(path: Path) -> dict[str, object]:
     content = yaml.safe_load(path.read_text(encoding="utf-8"))
@@ -31,6 +33,11 @@ def test_setup_init_writes_reader_first_yaml_and_next_steps(tmp_path: Path, caps
     assert _load_yaml(config_path) == {"profile": "reader"}
     assert "HF_MCP_CLIENT_ID" in out
     assert "HF_MCP_CLIENT_SECRET" in out
+    assert "HF_MCP_EXTERNAL_REDIRECT_URI" in out
+    assert "HF_MCP_REDIRECT_URI" in out
+    assert "http://127.0.0.1:8765/callback" in out
+    assert "docs/oauth_callback.html" in out
+    assert _HOSTED_EXTERNAL_REDIRECT_EXAMPLE_URI in out
     assert "hf-mcp auth bootstrap" in out
     assert "hf-mcp doctor" in out
     assert "hf-mcp serve" in out
@@ -84,6 +91,11 @@ def test_doctor_reports_missing_config_secrets_and_token(tmp_path: Path, monkeyp
     assert "HF_MCP_CLIENT_SECRET: missing" in out
     assert "Token file: missing" in out
     assert "Ready to serve: no" in out
+    assert "HF_MCP_EXTERNAL_REDIRECT_URI" in out
+    assert "HF_MCP_REDIRECT_URI" in out
+    assert "http://127.0.0.1:8765/callback" in out
+    assert "docs/oauth_callback.html" in out
+    assert _HOSTED_EXTERNAL_REDIRECT_EXAMPLE_URI in out
 
 
 def test_doctor_reports_ready_to_serve_with_local_state(tmp_path: Path, monkeypatch, capsys) -> None:

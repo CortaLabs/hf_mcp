@@ -45,6 +45,20 @@ export HF_MCP_CLIENT_ID=your_client_id
 export HF_MCP_CLIENT_SECRET=your_client_secret
 ```
 
+Configure OAuth redirect handling in your local environment (`.env` or shell):
+
+```bash
+# Hosted mode (recommended): register your hosted callback page URL in HF app settings.
+# Host the static artifact at docs/oauth_callback.html (for example via GitHub Pages).
+export HF_MCP_EXTERNAL_REDIRECT_URI=https://cortalabs.github.io/hf_mcp/oauth_callback.html
+
+# The hosted callback page forwards to this fixed local target:
+# http://127.0.0.1:8765/callback
+
+# Legacy fallback (loopback only): if hosted mode is not used, set this instead.
+export HF_MCP_REDIRECT_URI=http://127.0.0.1:8765/callback
+```
+
 Finish local bootstrap and readiness checks:
 
 ```bash

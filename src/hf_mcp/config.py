@@ -164,6 +164,8 @@ PARAMETER_FAMILY_CAPABILITY_PARENTS: dict[str, frozenset[str]] = {
 DEFAULT_PROFILE = "reader"
 DEFAULT_CONFIG_PATH = Path.home() / ".config" / "hf_mcp" / "config.yaml"
 DEFAULT_TOKEN_PATH = Path.home() / ".config" / "hf_mcp" / "token.json"
+DEFAULT_LOOPBACK_REDIRECT_URI = "http://127.0.0.1:8765/callback"
+HOSTED_MODE_LOOPBACK_CALLBACK_URI = "http://127.0.0.1:8765/callback"
 
 
 @dataclass(frozen=True)
@@ -353,9 +355,11 @@ __all__ = [
     "ALL_CAPABILITIES",
     "ALL_PARAMETER_FAMILIES",
     "DEFAULT_CONFIG_PATH",
+    "DEFAULT_LOOPBACK_REDIRECT_URI",
     "DEFAULT_PROFILE",
     "DEFAULT_TOKEN_PATH",
     "HFMCPSettings",
+    "HOSTED_MODE_LOOPBACK_CALLBACK_URI",
     "PARAMETER_FAMILY_CAPABILITY_PARENTS",
     "PRESET_CAPABILITIES",
     "PRESET_PARAMETER_FAMILIES",
