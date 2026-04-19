@@ -17,7 +17,14 @@ from hf_mcp.dispatcher import RuntimeBundle, register_tools
 from hf_mcp.registry import get_core_read_specs, get_tool_spec
 from hf_mcp.schemas import build_tool_schema
 from hf_mcp.token_store import TokenBundle
-from hf_mcp.tools.read_core import build_core_read_handlers, get_profile, list_posts, list_threads
+from hf_mcp.tools.read_core import (
+    build_core_read_handlers,
+    get_profile,
+    get_user,
+    list_forums,
+    list_posts,
+    list_threads,
+)
 from hf_mcp.transport import HFTransport
 
 
@@ -199,8 +206,15 @@ def test_me_handler_reads_authenticated_profile_without_uid_selector(
     assert "_uid" not in me_asks
     assert me_asks["uid"] is True
     assert me_asks["username"] is True
+    assert me_asks["usergroup"] is True
+    assert me_asks["avatar"] is True
     assert "unreadpms" not in me_asks
     assert "unreadalerts" not in me_asks
+    assert "invisible" not in me_asks
+    assert "totalpms" not in me_asks
+    assert "lastactive" not in me_asks
+    assert "warningpoints" not in me_asks
+    assert "regdate" not in me_asks
     assert result["me"] == [{"uid": "5", "username": "forge", "unreadpms": "99"}]
 
 
@@ -224,9 +238,112 @@ def test_get_profile_omits_uid_selector_when_called_directly(monkeypatch: pytest
     result = get_profile(transport=transport)
 
     assert captured["route"] == "/read/me"
-    assert captured["payload"]["asks"]["me"] == {"uid": True, "username": True}
+    assert captured["payload"]["asks"]["me"] == {
+        "uid": True,
+        "username": True,
+        "usergroup": True,
+        "avatar": True,
+    }
     assert captured["headers"]["Authorization"] == "Bearer token"
     assert result["me"] == [{"uid": "5", "username": "forge"}]
+
+
+def test_get_profile_includes_advanced_fields_only_when_opted_in_and_allowed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    def _fake_post_json(
+        self: HFTransport,
+        route: str,
+        payload: dict[str, Any],
+        headers: dict[str, str],
+    ) -> dict[str, Any]:
+        captured["route"] = route
+        captured["payload"] = payload
+        captured["headers"] = headers
+        return {"me": {"uid": 5, "username": "forge", "unreadpms": 3, "unreadalerts": 2}}
+
+    monkeypatch.setattr(HFTransport, "_post_json", _fake_post_json)
+
+    transport = HFTransport(token_store=_StubTokenStore(), base_url="https://example.test")
+    result = get_profile(transport=transport, include_advanced_fields=True, allow_advanced_fields=True)
+
+    me_asks = captured["payload"]["asks"]["me"]
+    assert captured["route"] == "/read/me"
+    assert me_asks["uid"] is True
+    assert me_asks["username"] is True
+    assert me_asks["usergroup"] is True
+    assert me_asks["avatar"] is True
+    assert me_asks["unreadpms"] is True
+    assert me_asks["unreadalerts"] is True
+    assert me_asks["invisible"] is True
+    assert me_asks["totalpms"] is True
+    assert me_asks["lastactive"] is True
+    assert me_asks["warningpoints"] is True
+    assert me_asks["regdate"] is True
+    assert set(me_asks.keys()) == {
+        "uid",
+        "username",
+        "usergroup",
+        "avatar",
+        "unreadpms",
+        "unreadalerts",
+        "invisible",
+        "totalpms",
+        "lastactive",
+        "warningpoints",
+        "regdate",
+    }
+    assert captured["headers"]["Authorization"] == "Bearer token"
+    assert result["me"] == [{"uid": "5", "username": "forge", "unreadpms": "3", "unreadalerts": "2"}]
+
+
+def test_get_user_defaults_optional_values_and_requests_profile_bundle(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    def _fake_post_json(
+        self: HFTransport,
+        route: str,
+        payload: dict[str, Any],
+        headers: dict[str, str],
+    ) -> dict[str, Any]:
+        captured["route"] = route
+        captured["payload"] = payload
+        captured["headers"] = headers
+        return {"users": {"uid": 5, "username": "forge", "reputation": 42}}
+
+    monkeypatch.setattr(HFTransport, "_post_json", _fake_post_json)
+
+    transport = HFTransport(token_store=_StubTokenStore(), base_url="https://example.test")
+    result = get_user(transport=transport, uid=5, page=None, per_page=None, include_profile_fields=True)
+
+    user_asks = captured["payload"]["asks"]["users"]
+    assert captured["route"] == "/read/users"
+    assert user_asks["_uid"] == 5
+    assert user_asks["_page"] == 1
+    assert user_asks["_perpage"] == 30
+    assert user_asks["uid"] is True
+    assert user_asks["username"] is True
+    assert user_asks["avatar"] is True
+    assert user_asks["usergroup"] is True
+    assert user_asks["usertitle"] is True
+    assert user_asks["reputation"] is True
+    assert set(user_asks.keys()) == {
+        "_uid",
+        "_page",
+        "_perpage",
+        "uid",
+        "username",
+        "avatar",
+        "usergroup",
+        "usertitle",
+        "reputation",
+    }
+    assert captured["headers"]["Authorization"] == "Bearer token"
+    assert result["users"] == [{"uid": "5", "username": "forge", "reputation": "42"}]
 
 
 def test_list_threads_defaults_optional_values_and_requests_record_fields(
@@ -257,11 +374,79 @@ def test_list_threads_defaults_optional_values_and_requests_record_fields(
     assert thread_asks["_page"] == 1
     assert thread_asks["_perpage"] == 30
     assert thread_asks["tid"] is True
+    assert thread_asks["fid"] is True
     assert thread_asks["subject"] is True
+    assert thread_asks["dateline"] is True
     assert thread_asks["uid"] is True
     assert thread_asks["username"] is True
+    assert thread_asks["views"] is True
+    assert thread_asks["lastpost"] is True
+    assert thread_asks["sticky"] is True
+    assert thread_asks["firstpost"]["pid"] is True
+    assert thread_asks["firstpost"]["message"] is True
+    assert thread_asks["firstpost"]["author"]["uid"] is True
+    assert thread_asks["firstpost"]["author"]["username"] is True
+    assert set(thread_asks.keys()) == {
+        "_fid",
+        "_page",
+        "_perpage",
+        "tid",
+        "fid",
+        "subject",
+        "dateline",
+        "uid",
+        "username",
+        "views",
+        "lastpost",
+        "sticky",
+        "firstpost",
+    }
     assert captured["headers"]["Authorization"] == "Bearer token"
     assert result["threads"] == [{"tid": "123", "subject": "Topic"}]
+
+
+def test_list_forums_defaults_optional_values_and_requests_forum_card_fields(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    def _fake_post_json(
+        self: HFTransport,
+        route: str,
+        payload: dict[str, Any],
+        headers: dict[str, str],
+    ) -> dict[str, Any]:
+        captured["route"] = route
+        captured["payload"] = payload
+        captured["headers"] = headers
+        return {
+            "forums": {
+                "fid": 375,
+                "name": "General",
+                "description": "General discussion",
+                "type": "f",
+            }
+        }
+
+    monkeypatch.setattr(HFTransport, "_post_json", _fake_post_json)
+
+    transport = HFTransport(token_store=_StubTokenStore(), base_url="https://example.test")
+    result = list_forums(transport=transport, fid=375, page=None, per_page=None)
+
+    forum_asks = captured["payload"]["asks"]["forums"]
+    assert captured["route"] == "/read/forums"
+    assert forum_asks["_fid"] == 375
+    assert forum_asks["_page"] == 1
+    assert forum_asks["_perpage"] == 30
+    assert forum_asks["fid"] is True
+    assert forum_asks["name"] is True
+    assert forum_asks["description"] is True
+    assert forum_asks["type"] is True
+    assert set(forum_asks.keys()) == {"_fid", "_page", "_perpage", "fid", "name", "description", "type"}
+    assert captured["headers"]["Authorization"] == "Bearer token"
+    assert result["forums"] == [
+        {"fid": "375", "name": "General", "description": "General discussion", "type": "f"}
+    ]
 
 
 def test_list_posts_defaults_optional_values_and_requests_record_fields(
@@ -298,8 +483,90 @@ def test_list_posts_defaults_optional_values_and_requests_record_fields(
     assert post_asks["_page"] == 1
     assert post_asks["_perpage"] == 30
     assert post_asks["pid"] is True
+    assert post_asks["tid"] is True
     assert post_asks["uid"] is True
+    assert post_asks["fid"] is True
+    assert post_asks["dateline"] is True
     assert post_asks["subject"] is True
     assert post_asks["message"] is True
+    assert post_asks["edituid"] is True
+    assert post_asks["edittime"] is True
+    assert post_asks["editreason"] is True
+    assert set(post_asks.keys()) == {
+        "_tid",
+        "_page",
+        "_perpage",
+        "pid",
+        "tid",
+        "uid",
+        "fid",
+        "dateline",
+        "subject",
+        "message",
+        "edituid",
+        "edittime",
+        "editreason",
+    }
     assert captured["headers"]["Authorization"] == "Bearer token"
     assert result["posts"] == [{"pid": "88", "subject": "No PID filter", "message": "Text"}]
+
+
+def test_list_posts_include_post_body_false_removes_only_message(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    def _fake_post_json(
+        self: HFTransport,
+        route: str,
+        payload: dict[str, Any],
+        headers: dict[str, str],
+    ) -> dict[str, Any]:
+        captured["route"] = route
+        captured["payload"] = payload
+        captured["headers"] = headers
+        return {"posts": {"pid": 99, "subject": "No Body"}}
+
+    monkeypatch.setattr(HFTransport, "_post_json", _fake_post_json)
+
+    transport = HFTransport(token_store=_StubTokenStore(), base_url="https://example.test")
+    result = list_posts(
+        transport=transport,
+        tid=123,
+        page=None,
+        per_page=None,
+        include_post_body=False,
+    )
+
+    post_asks = captured["payload"]["asks"]["posts"]
+    assert captured["route"] == "/read/posts"
+    assert post_asks["_tid"] == 123
+    assert "_pid" not in post_asks
+    assert post_asks["_page"] == 1
+    assert post_asks["_perpage"] == 30
+    assert post_asks["pid"] is True
+    assert post_asks["tid"] is True
+    assert post_asks["uid"] is True
+    assert post_asks["fid"] is True
+    assert post_asks["dateline"] is True
+    assert post_asks["subject"] is True
+    assert "message" not in post_asks
+    assert post_asks["edituid"] is True
+    assert post_asks["edittime"] is True
+    assert post_asks["editreason"] is True
+    assert set(post_asks.keys()) == {
+        "_tid",
+        "_page",
+        "_perpage",
+        "pid",
+        "tid",
+        "uid",
+        "fid",
+        "dateline",
+        "subject",
+        "edituid",
+        "edittime",
+        "editreason",
+    }
+    assert captured["headers"]["Authorization"] == "Bearer token"
+    assert result["posts"] == [{"pid": "99", "subject": "No Body"}]

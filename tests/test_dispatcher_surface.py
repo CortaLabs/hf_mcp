@@ -110,6 +110,11 @@ def test_metadata_and_annotations_are_remote_tier4_and_operation_honest() -> Non
     assert read_annotations["_meta"]["x-hf-locality"] == "remote"
     assert read_annotations["_meta"]["x-hf-runtime-tier"] == 4
     assert read_annotations["_meta"]["x-hf-operation"] == "read"
+    assert read_annotations["_meta"]["x-hf-output-default"] == "structured"
+    assert read_annotations["_meta"]["x-hf-output-readable"] == "additive"
+    assert (
+        read_annotations["_meta"]["x-hf-output-field-bundles"] == "separate_from_rendering"
+    )
 
     write_annotations = server.tools["posts.reply"]["annotations"]
     assert write_annotations["readOnlyHint"] is False
@@ -118,6 +123,11 @@ def test_metadata_and_annotations_are_remote_tier4_and_operation_honest() -> Non
     assert write_annotations["_meta"]["x-hf-locality"] == "remote"
     assert write_annotations["_meta"]["x-hf-runtime-tier"] == 4
     assert write_annotations["_meta"]["x-hf-operation"] == "write"
+    assert write_annotations["_meta"]["x-hf-output-default"] == "structured"
+    assert write_annotations["_meta"]["x-hf-output-readable"] == "additive"
+    assert (
+        write_annotations["_meta"]["x-hf-output-field-bundles"] == "separate_from_rendering"
+    )
 
 
 def test_create_server_uses_dispatcher_as_single_registration_authority(

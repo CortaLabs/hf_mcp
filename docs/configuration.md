@@ -45,6 +45,12 @@ user or deployment:
 This means a deployment can disable `sigmarket`, `contract`, or
 `admin/high-risk` rows without redefining the product target.
 
+Output-contract boundary (published in metadata/annotations):
+
+- `x-hf-output-default=structured` means canonical structured payloads are the default contract.
+- `x-hf-output-readable=additive` means any readable/operator rendering is additive-only and cannot replace structured data.
+- `x-hf-output-field-bundles=separate_from_rendering` means field-bundle controls are independent of rendering mode.
+
 ## Profiles
 
 - `reader`: read-oriented exposure profile.

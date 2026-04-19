@@ -10,8 +10,49 @@ from hf_mcp.transport import HFTransport
 ReadHandler = Callable[..., dict[str, Any]]
 DEFAULT_PAGE = 1
 DEFAULT_PER_PAGE = 30
-_DEFAULT_THREAD_FIELDS = ("tid", "subject", "uid", "username")
-_DEFAULT_POST_FIELDS = ("pid", "uid", "subject")
+_DEFAULT_THREAD_FIELDS = (
+    "tid",
+    "fid",
+    "subject",
+    "dateline",
+    "uid",
+    "username",
+    "views",
+    "lastpost",
+    "sticky",
+)
+_DEFAULT_THREAD_FIRSTPOST_FIELDS = {
+    "pid": True,
+    "message": True,
+    "author": {
+        "uid": True,
+        "username": True,
+    },
+}
+_DEFAULT_POST_FIELDS = (
+    "pid",
+    "tid",
+    "uid",
+    "fid",
+    "dateline",
+    "subject",
+    "message",
+    "edituid",
+    "edittime",
+    "editreason",
+)
+_DEFAULT_FORUM_FIELDS = ("fid", "name", "description", "type")
+_DEFAULT_ME_BASIC_FIELDS = ("uid", "username", "usergroup", "avatar")
+_DEFAULT_ME_ADVANCED_FIELDS = (
+    "unreadpms",
+    "unreadalerts",
+    "invisible",
+    "totalpms",
+    "lastactive",
+    "warningpoints",
+    "regdate",
+)
+_DEFAULT_USER_PROFILE_FIELDS = ("uid", "username", "avatar", "usergroup", "usertitle", "reputation")
 
 
 def get_profile(
@@ -23,11 +64,11 @@ def get_profile(
 ) -> dict[str, Any]:
     asks: dict[str, dict[str, Any]] = {"me": {}}
     if include_basic_fields is not False:
-        asks["me"]["uid"] = True
-        asks["me"]["username"] = True
+        for field_name in _DEFAULT_ME_BASIC_FIELDS:
+            asks["me"][field_name] = True
     if include_advanced_fields is True and allow_advanced_fields:
-        asks["me"]["unreadpms"] = True
-        asks["me"]["unreadalerts"] = True
+        for field_name in _DEFAULT_ME_ADVANCED_FIELDS:
+            asks["me"][field_name] = True
     return transport.read(asks=asks, helper="me")
 
 
@@ -43,9 +84,8 @@ def get_user(
         "users": {"_uid": uid, "_page": _coerce_page(page), "_perpage": _coerce_per_page(per_page)},
     }
     if include_profile_fields is not False:
-        asks["users"]["username"] = True
-        asks["users"]["avatar"] = True
-        asks["users"]["usergroup"] = True
+        for field_name in _DEFAULT_USER_PROFILE_FIELDS:
+            asks["users"][field_name] = True
     return transport.read(asks=asks, helper="users")
 
 
@@ -56,7 +96,11 @@ def list_forums(
     page: int | None = DEFAULT_PAGE,
     per_page: int | None = DEFAULT_PER_PAGE,
 ) -> dict[str, Any]:
-    asks = {"forums": {"_fid": fid, "_page": _coerce_page(page), "_perpage": _coerce_per_page(per_page)}}
+    asks: dict[str, dict[str, Any]] = {
+        "forums": {"_fid": fid, "_page": _coerce_page(page), "_perpage": _coerce_per_page(per_page)}
+    }
+    for field_name in _DEFAULT_FORUM_FIELDS:
+        asks["forums"][field_name] = True
     return transport.read(asks=asks, helper="forums")
 
 
@@ -75,6 +119,11 @@ def list_threads(
         asks["threads"]["_tid"] = tid
     for field_name in _DEFAULT_THREAD_FIELDS:
         asks["threads"][field_name] = True
+    asks["threads"]["firstpost"] = {
+        "pid": _DEFAULT_THREAD_FIRSTPOST_FIELDS["pid"],
+        "message": _DEFAULT_THREAD_FIRSTPOST_FIELDS["message"],
+        "author": dict(_DEFAULT_THREAD_FIRSTPOST_FIELDS["author"]),
+    }
     return transport.read(asks=asks, helper="threads")
 
 
@@ -94,8 +143,8 @@ def list_posts(
         asks["posts"]["_pid"] = pid
     for field_name in _DEFAULT_POST_FIELDS:
         asks["posts"][field_name] = True
-    if include_post_body is not False:
-        asks["posts"]["message"] = True
+    if include_post_body is False:
+        asks["posts"].pop("message", None)
     return transport.read(asks=asks, helper="posts")
 
 

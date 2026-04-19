@@ -32,6 +32,9 @@ Allowed entries are scoped to `products/hf_mcp/` only.
   required, optional `pid`).
 - MCP tool outputs are JSON-first dict payloads today. Any future readable
   formatting must be additive only and cannot replace JSON output.
+- Published tool metadata/annotations make this boundary explicit via
+  `x-hf-output-default=structured`, `x-hf-output-readable=additive`, and
+  `x-hf-output-field-bundles=separate_from_rendering`.
 - Live-write validation stays manual: no automated live writes. Manual checks
   are limited to `TID 6083735` or `FID 375`, ideally one testing thread total.
 
