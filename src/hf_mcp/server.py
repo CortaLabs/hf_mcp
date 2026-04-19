@@ -103,7 +103,7 @@ def _schema_annotation(parameter_schema: object) -> object:
     return object
 
 
-def _signature_from_schema(input_schema: dict[str, object]) -> inspect.Signature:
+def _signature_from_schema(handler: Any, input_schema: dict[str, object]) -> inspect.Signature:
     properties = input_schema.get("properties")
     if not isinstance(properties, dict):
         return inspect.Signature()
@@ -115,12 +115,22 @@ def _signature_from_schema(input_schema: dict[str, object]) -> inspect.Signature
         else set()
     )
 
+    handler_parameters = inspect.signature(handler).parameters
     parameters: list[inspect.Parameter] = []
     for parameter_name, parameter_schema in properties.items():
         if not isinstance(parameter_name, str) or not parameter_name.isidentifier():
             raise ValueError(f"Unsupported parameter name in tool schema: {parameter_name!r}")
 
-        default = inspect.Parameter.empty if parameter_name in required else None
+        default = inspect.Parameter.empty
+        if parameter_name not in required:
+            if isinstance(parameter_schema, dict) and "default" in parameter_schema:
+                default = parameter_schema["default"]
+            else:
+                handler_parameter = handler_parameters.get(parameter_name)
+                if handler_parameter is not None and handler_parameter.default is not inspect.Parameter.empty:
+                    default = handler_parameter.default
+                else:
+                    default = None
         parameters.append(
             inspect.Parameter(
                 name=parameter_name,
@@ -134,7 +144,7 @@ def _signature_from_schema(input_schema: dict[str, object]) -> inspect.Signature
 
 
 def _with_schema_signature(handler: Any, input_schema: dict[str, object]) -> Any:
-    signature = _signature_from_schema(input_schema)
+    signature = _signature_from_schema(handler, input_schema)
 
     def _wrapped_handler(**kwargs: Any) -> Any:
         return handler(**kwargs)

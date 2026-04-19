@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 from dataclasses import dataclass
 from typing import Any
 
@@ -51,6 +52,41 @@ def _build_unimplemented_handler(tool_name: str) -> Any:
     return _handler
 
 
+def _shape_live_input_schema(tool_name: str, input_schema: dict[str, object], handler: Any) -> dict[str, object]:
+    properties = input_schema.get("properties")
+    if not isinstance(properties, dict):
+        return input_schema
+
+    schema = dict(input_schema)
+    shaped_properties: dict[str, object] = {}
+    handler_parameters = inspect.signature(handler).parameters
+    for parameter_name, parameter_schema in properties.items():
+        if tool_name == "me.read" and parameter_name == "uid":
+            continue
+
+        if not isinstance(parameter_schema, dict):
+            shaped_properties[parameter_name] = parameter_schema
+            continue
+
+        shaped_schema = dict(parameter_schema)
+        handler_parameter = handler_parameters.get(parameter_name)
+        if "default" not in shaped_schema and handler_parameter is not None:
+            default = handler_parameter.default
+            if default is not inspect.Parameter.empty and default is not None:
+                shaped_schema["default"] = default
+        shaped_properties[parameter_name] = shaped_schema
+
+    schema["properties"] = shaped_properties
+    required_values = schema.get("required")
+    if isinstance(required_values, list):
+        required = [value for value in required_values if isinstance(value, str) and value in shaped_properties]
+        if required:
+            schema["required"] = required
+        else:
+            schema.pop("required", None)
+    return schema
+
+
 def _register_via_register_tool(
     server: Any,
     *,
@@ -97,7 +133,7 @@ def register_tools(server: Any, policy: CapabilityPolicy, runtime: RuntimeBundle
 
     for spec in specs:
         handler = concrete_handlers.get(spec.tool_name, _build_unimplemented_handler(spec.tool_name))
-        schema = build_tool_schema(spec, policy)
+        schema = _shape_live_input_schema(spec.tool_name, build_tool_schema(spec, policy), handler)
         annotations = build_annotations(spec)
         registered = _register_via_register_tool(
             server,

@@ -17,7 +17,7 @@ from hf_mcp.dispatcher import RuntimeBundle, register_tools
 from hf_mcp.registry import get_core_read_specs, get_tool_spec
 from hf_mcp.schemas import build_tool_schema
 from hf_mcp.token_store import TokenBundle
-from hf_mcp.tools.read_core import build_core_read_handlers, list_posts, list_threads
+from hf_mcp.tools.read_core import build_core_read_handlers, get_profile, list_posts, list_threads
 from hf_mcp.transport import HFTransport
 
 
@@ -167,7 +167,7 @@ def test_list_posts_delegates_to_transport_helper_and_returns_normalized_output(
     assert result["posts"] == [{"pid": "7", "subject": "Hello", "message": "Body"}]
 
 
-def test_me_handler_drops_advanced_fields_when_parameter_family_is_disabled(
+def test_me_handler_reads_authenticated_profile_without_uid_selector(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     captured: dict[str, Any] = {}
@@ -192,11 +192,11 @@ def test_me_handler_drops_advanced_fields_when_parameter_family_is_disabled(
     transport = HFTransport(token_store=_StubTokenStore(), base_url="https://example.test")
     handlers = build_core_read_handlers(policy, transport)
 
-    result = handlers["me.read"](uid=5, include_basic_fields=True, include_advanced_fields=True)
+    result = handlers["me.read"](include_basic_fields=None, include_advanced_fields=True)
 
     assert captured["route"] == "/read/me"
     me_asks = captured["payload"]["asks"]["me"]
-    assert me_asks["_uid"] == 5
+    assert "_uid" not in me_asks
     assert me_asks["uid"] is True
     assert me_asks["username"] is True
     assert "unreadpms" not in me_asks
@@ -204,7 +204,34 @@ def test_me_handler_drops_advanced_fields_when_parameter_family_is_disabled(
     assert result["me"] == [{"uid": "5", "username": "forge", "unreadpms": "99"}]
 
 
-def test_list_threads_omits_optional_tid_when_absent(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_get_profile_omits_uid_selector_when_called_directly(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, Any] = {}
+
+    def _fake_post_json(
+        self: HFTransport,
+        route: str,
+        payload: dict[str, Any],
+        headers: dict[str, str],
+    ) -> dict[str, Any]:
+        captured["route"] = route
+        captured["payload"] = payload
+        captured["headers"] = headers
+        return {"me": {"uid": 5, "username": "forge"}}
+
+    monkeypatch.setattr(HFTransport, "_post_json", _fake_post_json)
+
+    transport = HFTransport(token_store=_StubTokenStore(), base_url="https://example.test")
+    result = get_profile(transport=transport)
+
+    assert captured["route"] == "/read/me"
+    assert captured["payload"]["asks"]["me"] == {"uid": True, "username": True}
+    assert captured["headers"]["Authorization"] == "Bearer token"
+    assert result["me"] == [{"uid": "5", "username": "forge"}]
+
+
+def test_list_threads_defaults_optional_values_and_requests_record_fields(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     captured: dict[str, Any] = {}
 
     def _fake_post_json(
@@ -221,19 +248,25 @@ def test_list_threads_omits_optional_tid_when_absent(monkeypatch: pytest.MonkeyP
     monkeypatch.setattr(HFTransport, "_post_json", _fake_post_json)
 
     transport = HFTransport(token_store=_StubTokenStore(), base_url="https://example.test")
-    result = list_threads(transport=transport, fid=375, page=3, per_page=100)
+    result = list_threads(transport=transport, fid=375, page=None, per_page=None)
 
     thread_asks = captured["payload"]["asks"]["threads"]
     assert captured["route"] == "/read/threads"
     assert thread_asks["_fid"] == 375
     assert "_tid" not in thread_asks
-    assert thread_asks["_page"] == 3
+    assert thread_asks["_page"] == 1
     assert thread_asks["_perpage"] == 30
+    assert thread_asks["tid"] is True
+    assert thread_asks["subject"] is True
+    assert thread_asks["uid"] is True
+    assert thread_asks["username"] is True
     assert captured["headers"]["Authorization"] == "Bearer token"
     assert result["threads"] == [{"tid": "123", "subject": "Topic"}]
 
 
-def test_list_posts_omits_optional_pid_when_absent(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_list_posts_defaults_optional_values_and_requests_record_fields(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     captured: dict[str, Any] = {}
 
     def _fake_post_json(
@@ -253,17 +286,20 @@ def test_list_posts_omits_optional_pid_when_absent(monkeypatch: pytest.MonkeyPat
     result = list_posts(
         transport=transport,
         tid=123,
-        page=4,
-        per_page=200,
-        include_post_body=False,
+        page=None,
+        per_page=None,
+        include_post_body=None,
     )
 
     post_asks = captured["payload"]["asks"]["posts"]
     assert captured["route"] == "/read/posts"
     assert post_asks["_tid"] == 123
     assert "_pid" not in post_asks
-    assert post_asks["_page"] == 4
+    assert post_asks["_page"] == 1
     assert post_asks["_perpage"] == 30
-    assert "message" not in post_asks
+    assert post_asks["pid"] is True
+    assert post_asks["uid"] is True
+    assert post_asks["subject"] is True
+    assert post_asks["message"] is True
     assert captured["headers"]["Authorization"] == "Bearer token"
     assert result["posts"] == [{"pid": "88", "subject": "No PID filter", "message": "Text"}]

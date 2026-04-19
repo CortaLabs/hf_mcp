@@ -190,6 +190,48 @@ def test_core_and_extended_read_rows_register_concrete_handlers_when_transport_i
     assert bytes_handler.__name__ != "_handler"
 
 
+def test_create_server_publishes_truthful_core_read_input_schemas(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = HFMCPSettings(
+        profile="test",
+        enabled_capabilities=frozenset({"me.read", "threads.read", "posts.read"}),
+        enabled_parameter_families=frozenset(
+            {
+                "selectors.user",
+                "selectors.forum",
+                "selectors.thread",
+                "selectors.post",
+                "filters.pagination",
+                "fields.me.basic",
+                "fields.me.advanced",
+                "fields.posts.body",
+            }
+        ),
+    )
+
+    monkeypatch.setattr("hf_mcp.server.resolve_runtime_bundle", lambda _: _runtime_bundle())
+    server = create_server(settings)
+
+    me_schema = server.tools["me.read"].input_schema
+    threads_schema = server.tools["threads.read"].input_schema
+    posts_schema = server.tools["posts.read"].input_schema
+
+    assert "uid" not in me_schema["properties"]
+    assert "uid" not in me_schema.get("required", [])
+    assert me_schema["properties"]["include_basic_fields"]["default"] is True
+    assert me_schema["properties"]["include_advanced_fields"]["default"] is False
+
+    assert threads_schema["properties"]["page"]["default"] == 1
+    assert threads_schema["properties"]["per_page"]["default"] == 30
+    assert set(threads_schema.get("required", [])) == {"fid"}
+
+    assert posts_schema["properties"]["page"]["default"] == 1
+    assert posts_schema["properties"]["per_page"]["default"] == 30
+    assert posts_schema["properties"]["include_post_body"]["default"] is True
+    assert set(posts_schema.get("required", [])) == {"tid"}
+
+
 def test_core_write_rows_register_concrete_handlers_while_later_rows_remain_placeholders() -> None:
     policy = _policy(
         enabled_capabilities={
@@ -304,11 +346,17 @@ def test_serve_stdio_publishes_dispatcher_contract_for_live_runtime(
 ) -> None:
     settings = HFMCPSettings(
         profile="test",
-        enabled_capabilities=frozenset({"me.read", "bytes.transfer", "contracts.write"}),
+        enabled_capabilities=frozenset({"me.read", "threads.read", "posts.read", "bytes.transfer", "contracts.write"}),
         enabled_parameter_families=frozenset(
             {
                 "selectors.user",
+                "selectors.forum",
+                "selectors.thread",
+                "selectors.post",
+                "filters.pagination",
                 "fields.me.basic",
+                "fields.me.advanced",
+                "fields.posts.body",
                 "selectors.bytes",
                 "selectors.contract",
                 "writes.bytes",
@@ -357,7 +405,7 @@ def test_serve_stdio_publishes_dispatcher_contract_for_live_runtime(
     app = _FakeFastMCP.instances[0]
     assert app.run_calls == ["stdio"]
 
-    for tool_name in ("me.read", "bytes.transfer", "contracts.write"):
+    for tool_name in ("me.read", "threads.read", "posts.read", "bytes.transfer", "contracts.write"):
         expected_tool = expected_server.tools[tool_name]
         published = app.registered_tools[tool_name]
         published_signature = inspect.signature(published["handler"])
@@ -372,6 +420,24 @@ def test_serve_stdio_publishes_dispatcher_contract_for_live_runtime(
         if hasattr(published_annotations, "model_dump"):
             published_annotations = published_annotations.model_dump(exclude_none=True)
         assert published_annotations == expected_tool.annotations
+
+    me_signature = inspect.signature(app.registered_tools["me.read"]["handler"])
+    assert "uid" not in me_signature.parameters
+    assert me_signature.parameters["include_basic_fields"].default is True
+    assert me_signature.parameters["include_advanced_fields"].default is False
+
+    threads_signature = inspect.signature(app.registered_tools["threads.read"]["handler"])
+    assert threads_signature.parameters["fid"].default is inspect.Parameter.empty
+    assert threads_signature.parameters["tid"].default is None
+    assert threads_signature.parameters["page"].default == 1
+    assert threads_signature.parameters["per_page"].default == 30
+
+    posts_signature = inspect.signature(app.registered_tools["posts.read"]["handler"])
+    assert posts_signature.parameters["tid"].default is inspect.Parameter.empty
+    assert posts_signature.parameters["pid"].default is None
+    assert posts_signature.parameters["page"].default == 1
+    assert posts_signature.parameters["per_page"].default == 30
+    assert posts_signature.parameters["include_post_body"].default is True
 
 
 def test_serve_stdio_runs_stdio_runtime_once_without_restart_loop(
