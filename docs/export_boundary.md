@@ -24,6 +24,9 @@ Allowed entries are scoped to `products/hf_mcp/` only.
 - Placeholder rows are only rows without concrete handlers today and currently
   map to later-lane write placeholders (`contracts.write`, `sigmarket.write`,
   `admin.high_risk.write`) tracked for documented API coverage.
+- Tool inventory source of truth is `src/hf_mcp/registry.py` (`_MATRIX_ROWS`).
+- Concrete vs placeholder status is documented in `docs/coverage_matrix.md` and
+  summarized for operators in `docs/tool_overview.md`.
 - Browse semantics are anchored: `threads.read` is forum-anchored (`fid`
   required, optional `tid`), and `posts.read` is thread-anchored (`tid`
   required, optional `pid`).

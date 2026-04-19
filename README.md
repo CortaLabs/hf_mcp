@@ -44,6 +44,27 @@ that row still remains in the documented product coverage matrix.
 - `hf-mcp serve` runs one stdio server instance and exits when the stdio client disconnects
 - `hf-mcp serve` fails closed on invalid bootstrap state (config/secrets/token/runtime dependency)
 
+## Config locations
+
+Default local paths:
+
+- config file: `~/.config/hf_mcp/config.yaml`
+- token store: `~/.config/hf_mcp/token.json`
+
+Environment loading behavior:
+
+- default `.env` discovery is adjacent to the selected config file path
+- set `HF_MCP_ENV_FILE` to use an explicit `.env` file path instead
+
+Overrides:
+
+- `HF_MCP_CONFIG` overrides the config file location
+- `HF_MCP_ENV_FILE` overrides `.env` discovery path
+- `HF_MCP_TOKEN_PATH` overrides token path unless YAML `token_path` is set
+
+See [`docs/configuration.md`](docs/configuration.md) for authoritative resolution details.
+See [`docs/tool_overview.md`](docs/tool_overview.md) for the grouped shipped tool surface.
+
 ## First run
 
 ```bash
@@ -89,6 +110,7 @@ runtime source from this product subtree only.
 ## Documentation
 
 - `docs/configuration.md`
+- `docs/tool_overview.md`
 - `docs/coverage_matrix.md`
 - `docs/security_model.md`
 - `docs/export_boundary.md`

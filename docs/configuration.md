@@ -2,6 +2,35 @@
 
 `hf-mcp` uses a presets-first configuration model with fail-closed overlays.
 
+## Config paths and overrides
+
+Authoritative default paths:
+
+- default config path: `~/.config/hf_mcp/config.yaml`
+- default token path: `~/.config/hf_mcp/token.json`
+
+Path resolution order:
+
+1. Config path:
+   - CLI `--config` (when provided)
+   - `HF_MCP_CONFIG`
+   - default `~/.config/hf_mcp/config.yaml`
+2. `.env` file path:
+   - `HF_MCP_ENV_FILE` (must point to an existing file)
+   - adjacent `.env` next to the selected config path
+   - no `.env` loaded if neither exists
+3. Token path:
+   - YAML `token_path` in selected config file
+   - `HF_MCP_TOKEN_PATH`
+   - default `~/.config/hf_mcp/token.json`
+
+Operational note:
+
+- `hf-mcp setup init` writes `profile` to the selected config path and can persist
+  `token_path` if `--token-path` is provided.
+- `hf-mcp auth bootstrap`, `hf-mcp auth status`, `hf-mcp doctor`, and `hf-mcp serve`
+  all resolve paths through the same config loader behavior above.
+
 ## Scope and exposure control
 
 The product scope is the full documented Hack Forums API surface captured in the
