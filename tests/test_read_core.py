@@ -17,7 +17,7 @@ from hf_mcp.dispatcher import RuntimeBundle, register_tools
 from hf_mcp.registry import get_core_read_specs, get_tool_spec
 from hf_mcp.schemas import build_tool_schema
 from hf_mcp.token_store import TokenBundle
-from hf_mcp.tools.read_core import build_core_read_handlers, list_posts
+from hf_mcp.tools.read_core import build_core_read_handlers, list_posts, list_threads
 from hf_mcp.transport import HFTransport
 
 
@@ -95,6 +95,24 @@ def test_me_schema_prunes_advanced_parameter_when_family_not_allowed() -> None:
 
     assert "include_basic_fields" in schema["properties"]
     assert "include_advanced_fields" not in schema["properties"]
+
+
+def test_threads_and_posts_schema_use_anchored_required_selectors() -> None:
+    policy = _policy(
+        enabled_capabilities={"threads.read", "posts.read"},
+        enabled_parameter_families={"selectors.forum", "selectors.thread", "selectors.post", "filters.pagination", "fields.posts.body"},
+    )
+
+    threads_schema = build_tool_schema(get_tool_spec("threads.read"), policy)
+    posts_schema = build_tool_schema(get_tool_spec("posts.read"), policy)
+
+    assert set(threads_schema.get("required", [])) == {"fid"}
+    assert "tid" in threads_schema["properties"]
+    assert "tid" not in threads_schema["required"]
+
+    assert set(posts_schema.get("required", [])) == {"tid"}
+    assert "pid" in posts_schema["properties"]
+    assert "pid" not in posts_schema["required"]
 
 
 def test_dispatcher_output_excludes_disabled_core_read_capability() -> None:
@@ -185,3 +203,67 @@ def test_me_handler_drops_advanced_fields_when_parameter_family_is_disabled(
     assert "unreadalerts" not in me_asks
     assert result["me"] == [{"uid": "5", "username": "forge", "unreadpms": "99"}]
 
+
+def test_list_threads_omits_optional_tid_when_absent(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, Any] = {}
+
+    def _fake_post_json(
+        self: HFTransport,
+        route: str,
+        payload: dict[str, Any],
+        headers: dict[str, str],
+    ) -> dict[str, Any]:
+        captured["route"] = route
+        captured["payload"] = payload
+        captured["headers"] = headers
+        return {"threads": [{"tid": 123, "subject": "Topic"}]}
+
+    monkeypatch.setattr(HFTransport, "_post_json", _fake_post_json)
+
+    transport = HFTransport(token_store=_StubTokenStore(), base_url="https://example.test")
+    result = list_threads(transport=transport, fid=375, page=3, per_page=100)
+
+    thread_asks = captured["payload"]["asks"]["threads"]
+    assert captured["route"] == "/read/threads"
+    assert thread_asks["_fid"] == 375
+    assert "_tid" not in thread_asks
+    assert thread_asks["_page"] == 3
+    assert thread_asks["_perpage"] == 30
+    assert captured["headers"]["Authorization"] == "Bearer token"
+    assert result["threads"] == [{"tid": "123", "subject": "Topic"}]
+
+
+def test_list_posts_omits_optional_pid_when_absent(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, Any] = {}
+
+    def _fake_post_json(
+        self: HFTransport,
+        route: str,
+        payload: dict[str, Any],
+        headers: dict[str, str],
+    ) -> dict[str, Any]:
+        captured["route"] = route
+        captured["payload"] = payload
+        captured["headers"] = headers
+        return {"posts": {"pid": 88, "subject": "No PID filter", "message": "Text"}}
+
+    monkeypatch.setattr(HFTransport, "_post_json", _fake_post_json)
+
+    transport = HFTransport(token_store=_StubTokenStore(), base_url="https://example.test")
+    result = list_posts(
+        transport=transport,
+        tid=123,
+        page=4,
+        per_page=200,
+        include_post_body=False,
+    )
+
+    post_asks = captured["payload"]["asks"]["posts"]
+    assert captured["route"] == "/read/posts"
+    assert post_asks["_tid"] == 123
+    assert "_pid" not in post_asks
+    assert post_asks["_page"] == 4
+    assert post_asks["_perpage"] == 30
+    assert "message" not in post_asks
+    assert captured["headers"]["Authorization"] == "Bearer token"
+    assert result["posts"] == [{"pid": "88", "subject": "No PID filter", "message": "Text"}]

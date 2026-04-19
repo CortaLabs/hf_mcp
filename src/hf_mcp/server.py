@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 from dataclasses import dataclass
 from importlib import import_module
 from typing import Any
@@ -56,13 +57,105 @@ class _FastMCPToolAdapter:
         annotations: dict[str, object],
         handler: Any,
     ) -> None:
-        del input_schema
-        del annotations
+        wrapped_handler = _with_schema_signature(handler, input_schema)
+        fastmcp_annotations = _build_fastmcp_annotations(annotations)
         self._app.add_tool(
-            handler,
+            wrapped_handler,
             name=name,
             description=description,
+            annotations=fastmcp_annotations,
         )
+
+
+def _schema_annotation(parameter_schema: object) -> object:
+    if not isinstance(parameter_schema, dict):
+        return object
+
+    schema_type = parameter_schema.get("type")
+    if isinstance(schema_type, list):
+        non_null_types = [value for value in schema_type if value != "null"]
+        schema_type = non_null_types[0] if non_null_types else None
+
+    if schema_type is None:
+        any_of = parameter_schema.get("anyOf")
+        if isinstance(any_of, list):
+            for candidate in any_of:
+                if not isinstance(candidate, dict):
+                    continue
+                candidate_type = candidate.get("type")
+                if candidate_type == "null":
+                    continue
+                schema_type = candidate_type
+                break
+
+    if schema_type == "string":
+        return str
+    if schema_type == "integer":
+        return int
+    if schema_type == "number":
+        return float
+    if schema_type == "boolean":
+        return bool
+    if schema_type == "array":
+        return list[object]
+    if schema_type == "object":
+        return dict[str, object]
+    return object
+
+
+def _signature_from_schema(input_schema: dict[str, object]) -> inspect.Signature:
+    properties = input_schema.get("properties")
+    if not isinstance(properties, dict):
+        return inspect.Signature()
+
+    required_values = input_schema.get("required")
+    required = (
+        {value for value in required_values if isinstance(value, str)}
+        if isinstance(required_values, list)
+        else set()
+    )
+
+    parameters: list[inspect.Parameter] = []
+    for parameter_name, parameter_schema in properties.items():
+        if not isinstance(parameter_name, str) or not parameter_name.isidentifier():
+            raise ValueError(f"Unsupported parameter name in tool schema: {parameter_name!r}")
+
+        default = inspect.Parameter.empty if parameter_name in required else None
+        parameters.append(
+            inspect.Parameter(
+                name=parameter_name,
+                kind=inspect.Parameter.KEYWORD_ONLY,
+                default=default,
+                annotation=_schema_annotation(parameter_schema),
+            )
+        )
+
+    return inspect.Signature(parameters=parameters)
+
+
+def _with_schema_signature(handler: Any, input_schema: dict[str, object]) -> Any:
+    signature = _signature_from_schema(input_schema)
+
+    def _wrapped_handler(**kwargs: Any) -> Any:
+        return handler(**kwargs)
+
+    _wrapped_handler.__name__ = getattr(handler, "__name__", "tool_handler")
+    _wrapped_handler.__doc__ = getattr(handler, "__doc__", "")
+    _wrapped_handler.__module__ = getattr(handler, "__module__", __name__)
+    _wrapped_handler.__signature__ = signature
+    _wrapped_handler.__annotations__ = {
+        parameter.name: parameter.annotation
+        for parameter in signature.parameters.values()
+        if parameter.annotation is not inspect.Parameter.empty
+    }
+    _wrapped_handler.__annotations__["return"] = object
+    return _wrapped_handler
+
+
+def _build_fastmcp_annotations(annotations: dict[str, object]) -> Any:
+    module = import_module("mcp.types")
+    tool_annotations_class = getattr(module, "ToolAnnotations")
+    return tool_annotations_class(**annotations)
 
 
 def _load_fastmcp_class() -> Any:

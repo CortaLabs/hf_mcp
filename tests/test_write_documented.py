@@ -148,7 +148,7 @@ def test_reply_and_bytes_write_helpers_shape_payloads_truthfully() -> None:
 
     assert transport.calls == [
         {"asks": {"posts": {"_tid": 44, "_message": "Hi"}}, "helper": "posts"},
-        {"asks": {"bytes": {"_uid": 55, "_amount": 100}}, "helper": "bytes"},
+        {"asks": {"bytes": {"_to_uid": 55, "_amount": 100}}, "helper": "bytes"},
         {"asks": {"bytes": {"_amount": 60}}, "helper": "bytes/deposit"},
         {"asks": {"bytes": {"_amount": 20}}, "helper": "bytes/withdraw"},
         {"asks": {"bytes": {"_tid": 77}}, "helper": "bytes/bump"},
@@ -201,7 +201,7 @@ def test_schema_surface_kwargs_invoke_core_write_handlers_truthfully() -> None:
     assert transport.calls == [
         {"asks": {"threads": {"_fid": 101, "_subject": "Title", "_message": "Body"}}, "helper": "threads"},
         {"asks": {"posts": {"_tid": 202, "_message": "Reply"}}, "helper": "posts"},
-        {"asks": {"bytes": {"_uid": 303, "_amount": 4}}, "helper": "bytes"},
+        {"asks": {"bytes": {"_to_uid": 303, "_amount": 4}}, "helper": "bytes"},
         {"asks": {"bytes": {"_amount": 5}}, "helper": "bytes/deposit"},
         {"asks": {"bytes": {"_amount": 6}}, "helper": "bytes/withdraw"},
         {"asks": {"bytes": {"_tid": 707}}, "helper": "bytes/bump"},

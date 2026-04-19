@@ -4,15 +4,28 @@
 
 ## Product target
 
-The product target is full documented Hack Forums API coverage. The registry and
-coverage matrix include:
+The product target is full documented Hack Forums API coverage, tracked in
+`docs/coverage_matrix.md`. Operator-facing truth today is split into two groups:
 
-- core read helpers (`me`, `users`, `forums`, `threads`, `posts`)
-- extended read helpers (`bytes`, `contracts`, `disputes`, `bratings`)
-- later-lane documented read/write rows for `sigmarket`, `contract`, and
-  documented `admin/high-risk` helpers
-- documented write helpers (`threads.create`, `posts.reply`, `bytes.transfer`,
-  `bytes.deposit`, `bytes.withdraw`, `bytes.bump`)
+- concrete shipped helpers: `me.read`, `users.read`, `forums.read`,
+  `threads.read`, `posts.read`, `bytes.read`, `contracts.read`,
+  `disputes.read`, `bratings.read`, `sigmarket.market.read`,
+  `sigmarket.order.read`, `admin.high_risk.read`, `threads.create`,
+  `posts.reply`, `bytes.transfer`, `bytes.deposit`, `bytes.withdraw`,
+  `bytes.bump`
+- registry-shipped placeholder rows (documented coverage tracking, not live-write
+  promises): `contracts.write`, `sigmarket.write`, `admin.high_risk.write`
+
+Anchored browse contract after `HFMCP-INT-03`:
+
+- `threads.read` is forum-anchored (`fid` required, optional `tid` narrowing)
+- `posts.read` is thread-anchored (`tid` required, optional `pid` narrowing)
+
+MCP tool outputs are JSON-first (dict payloads) today. Any future readable output
+must be additive and must not break existing JSON consumers.
+
+Live testing boundary: no automated live writes. Manual live checks only on
+`TID 6083735` or `FID 375`, ideally using one testing thread total.
 
 ## Exposure model
 

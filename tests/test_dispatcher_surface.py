@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import sys
 from pathlib import Path
 from typing import Any
@@ -298,6 +299,81 @@ def test_serve_stdio_fails_closed_when_token_bundle_is_missing(tmp_path: Path) -
         serve_stdio(settings)
 
 
+def test_serve_stdio_publishes_dispatcher_contract_for_live_runtime(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = HFMCPSettings(
+        profile="test",
+        enabled_capabilities=frozenset({"me.read", "bytes.transfer", "contracts.write"}),
+        enabled_parameter_families=frozenset(
+            {
+                "selectors.user",
+                "fields.me.basic",
+                "selectors.bytes",
+                "selectors.contract",
+                "writes.bytes",
+                "writes.content",
+                "confirm.live",
+            }
+        ),
+    )
+
+    class _FakeFastMCP:
+        instances: list["_FakeFastMCP"] = []
+
+        def __init__(self, name: str) -> None:
+            self.name = name
+            self.registered_tools: dict[str, dict[str, Any]] = {}
+            self.run_calls: list[str] = []
+            _FakeFastMCP.instances.append(self)
+
+        def add_tool(
+            self,
+            handler: Any,
+            *,
+            name: str,
+            description: str,
+            annotations: object | None = None,
+            meta: dict[str, object] | None = None,
+            **_: object,
+        ) -> None:
+            self.registered_tools[name] = {
+                "handler": handler,
+                "description": description,
+                "annotations": annotations,
+                "meta": meta,
+            }
+
+        def run(self, *, transport: str) -> None:
+            self.run_calls.append(transport)
+
+    monkeypatch.setattr("hf_mcp.server.resolve_runtime_bundle", lambda _: _runtime_bundle())
+    monkeypatch.setattr("hf_mcp.server._load_fastmcp_class", lambda: _FakeFastMCP)
+
+    expected_server = create_server(settings)
+    serve_stdio(settings)
+
+    assert len(_FakeFastMCP.instances) == 1
+    app = _FakeFastMCP.instances[0]
+    assert app.run_calls == ["stdio"]
+
+    for tool_name in ("me.read", "bytes.transfer", "contracts.write"):
+        expected_tool = expected_server.tools[tool_name]
+        published = app.registered_tools[tool_name]
+        published_signature = inspect.signature(published["handler"])
+        published_parameters = tuple(published_signature.parameters.values())
+        expected_parameter_names = tuple(expected_tool.input_schema.get("properties", {}).keys())
+
+        assert tuple(parameter.name for parameter in published_parameters) == expected_parameter_names
+        assert all(parameter.kind is inspect.Parameter.KEYWORD_ONLY for parameter in published_parameters)
+        assert "kwargs" not in published_signature.parameters
+
+        published_annotations = published["annotations"]
+        if hasattr(published_annotations, "model_dump"):
+            published_annotations = published_annotations.model_dump(exclude_none=True)
+        assert published_annotations == expected_tool.annotations
+
+
 def test_serve_stdio_runs_stdio_runtime_once_without_restart_loop(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -313,10 +389,20 @@ def test_serve_stdio_runs_stdio_runtime_once_without_restart_loop(
         def __init__(self, name: str) -> None:
             self.name = name
 
-        def add_tool(self, handler: Any, *, name: str, description: str) -> None:
+        def add_tool(
+            self,
+            handler: Any,
+            *,
+            name: str,
+            description: str,
+            annotations: object | None = None,
+            meta: dict[str, object] | None = None,
+        ) -> None:
             del handler
             del name
             del description
+            del annotations
+            del meta
 
         def run(self, *, transport: str) -> None:
             run_calls.append(transport)
@@ -344,10 +430,20 @@ def test_serve_stdio_does_not_retry_when_stdio_is_closed(
         def __init__(self, name: str) -> None:
             self.name = name
 
-        def add_tool(self, handler: Any, *, name: str, description: str) -> None:
+        def add_tool(
+            self,
+            handler: Any,
+            *,
+            name: str,
+            description: str,
+            annotations: object | None = None,
+            meta: dict[str, object] | None = None,
+        ) -> None:
             del handler
             del name
             del description
+            del annotations
+            del meta
 
         def run(self, *, transport: str) -> None:
             run_calls.append(transport)

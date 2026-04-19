@@ -61,11 +61,13 @@ def list_threads(
     *,
     transport: HFTransport,
     fid: int,
-    tid: int,
+    tid: int | None = None,
     page: int = 1,
     per_page: int = 30,
 ) -> dict[str, Any]:
-    asks = {"threads": {"_fid": fid, "_tid": tid, "_page": page, "_perpage": per_page}}
+    asks: dict[str, dict[str, Any]] = {"threads": {"_fid": fid, "_page": page, "_perpage": per_page}}
+    if tid is not None:
+        asks["threads"]["_tid"] = tid
     return transport.read(asks=asks, helper="threads")
 
 
@@ -73,14 +75,16 @@ def list_posts(
     *,
     transport: HFTransport,
     tid: int,
-    pid: int,
+    pid: int | None = None,
     page: int = 1,
     per_page: int = 30,
     include_post_body: bool = True,
 ) -> dict[str, Any]:
     asks: dict[str, dict[str, Any]] = {
-        "posts": {"_tid": tid, "_pid": pid, "_page": page, "_perpage": per_page},
+        "posts": {"_tid": tid, "_page": page, "_perpage": per_page},
     }
+    if pid is not None:
+        asks["posts"]["_pid"] = pid
     if include_post_body:
         asks["posts"]["message"] = True
     return transport.read(asks=asks, helper="posts")

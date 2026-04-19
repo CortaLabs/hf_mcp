@@ -58,7 +58,7 @@ def send_live(
     confirm_live: bool,
 ) -> dict[str, Any]:
     _require_confirm_live("bytes.transfer", confirm_live)
-    asks = {"bytes": {"_uid": target_uid, "_amount": amount}}
+    asks = {"bytes": {"_to_uid": target_uid, "_amount": amount}}
     return transport.write(asks=asks, helper="bytes")
 
 

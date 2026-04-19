@@ -8,9 +8,13 @@
 #
 # IMPORTANT:
 # Presets are exposure control for a user/deployment. They do not reduce product
-# scope. The product target remains full documented HF API coverage, including
-# later-lane contract, sigmarket, and admin/high-risk rows tracked in
-# docs/coverage_matrix.md.
+# scope. docs/coverage_matrix.md contains both:
+# - concrete shipped helpers (usable now), including core reads plus
+#   `bytes.read`, `contracts.read`, `disputes.read`, `bratings.read`,
+#   `sigmarket.market.read`, `sigmarket.order.read`, and `admin.high_risk.read`
+# - registry placeholder rows retained for documented API coverage tracking:
+#   `contracts.write`, `sigmarket.write`, `admin.high_risk.write`
+#   (not promises of live-ready helper behavior)
 
 profile: reader
 
@@ -37,6 +41,19 @@ profile: reader
 # sigmarket.order.read, threads.create, posts.reply, bytes.transfer,
 # bytes.deposit, bytes.withdraw, bytes.bump, contracts.write,
 # sigmarket.write, admin.high_risk.read, admin.high_risk.write
+#
+# Browse anchor expectations:
+# - threads.read => fid required; tid optional narrowing selector
+# - posts.read => tid required; pid optional narrowing selector
+#
+# Output contract:
+# - MCP tools return JSON-first dict payloads today
+# - readable output (if introduced later) must be additive only
+#
+# Live test boundary:
+# - no automated live writes
+# - manual live checks only on TID 6083735 or FID 375
+# - ideally one testing thread total
 
 # Parameter families currently exposed by profile = "full_api":
 # selectors.user, selectors.forum, selectors.thread, selectors.post,

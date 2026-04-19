@@ -34,6 +34,11 @@ _FAMILY_PROPERTY_SPECS: dict[str, tuple[tuple[str, dict[str, Any], bool], ...]] 
     "confirm.live": (("confirm_live", {"type": "boolean", "const": True}, True),),
 }
 
+_TOOL_REQUIRED_OVERRIDES: dict[str, tuple[str, ...]] = {
+    "threads.read": ("fid",),
+    "posts.read": ("tid",),
+}
+
 
 def _tag_with_family(schema: dict[str, Any], family: str) -> dict[str, Any]:
     tagged = dict(schema)
@@ -69,7 +74,11 @@ def _base_schema(spec: ToolSpec) -> dict[str, Any]:
 
 
 def build_tool_schema(spec: ToolSpec, policy: CapabilityPolicy) -> dict[str, Any]:
-    return policy.prune_schema(spec.tool_name, _base_schema(spec))
+    schema = policy.prune_schema(spec.tool_name, _base_schema(spec))
+    required_override = _TOOL_REQUIRED_OVERRIDES.get(spec.tool_name)
+    if required_override is not None:
+        schema["required"] = [field for field in required_override if field in schema.get("properties", {})]
+    return schema
 
 
 __all__ = ["build_tool_schema"]
