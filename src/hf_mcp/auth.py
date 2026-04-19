@@ -8,6 +8,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import webbrowser
+from collections.abc import Callable
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import Mapping
 
@@ -19,9 +20,18 @@ from .config import (
 from .token_store import TokenBundle
 
 DEFAULT_AUTHORIZE_ENDPOINT = "https://hackforums.net/api/v2/authorize"
+HF_BROWSER_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/135.0.0.0 Safari/537.36"
+)
 
 
-def authorize_via_loopback(settings: HFMCPSettings, open_browser: bool = True) -> TokenBundle:
+def authorize_via_loopback(
+    settings: HFMCPSettings,
+    open_browser: bool = True,
+    announce_authorize_url: Callable[[str], None] | None = None,
+) -> TokenBundle:
     client_id = _required_setting(settings, "HF_MCP_CLIENT_ID")
     client_secret = _required_setting(settings, "HF_MCP_CLIENT_SECRET")
 
@@ -50,6 +60,9 @@ def authorize_via_loopback(settings: HFMCPSettings, open_browser: bool = True) -
         state=state,
     )
 
+    if announce_authorize_url is not None:
+        announce_authorize_url(browser_url)
+
     if open_browser:
         webbrowser.open(browser_url)
 
@@ -70,7 +83,6 @@ def authorize_via_loopback(settings: HFMCPSettings, open_browser: bool = True) -
         client_id=client_id,
         client_secret=client_secret,
         code=code,
-        redirect_uri=redirect_uri,
     )
     return TokenBundle.from_payload(token_payload)
 
@@ -150,7 +162,6 @@ def _exchange_code_for_token(
     client_id: str,
     client_secret: str,
     code: str,
-    redirect_uri: str,
 ) -> dict[str, object]:
     encoded_payload = urllib.parse.urlencode(
         {
@@ -158,7 +169,6 @@ def _exchange_code_for_token(
             "client_secret": client_secret,
             "code": code,
             "grant_type": "authorization_code",
-            "redirect_uri": redirect_uri,
         }
     ).encode("utf-8")
 
@@ -166,7 +176,10 @@ def _exchange_code_for_token(
         token_url,
         data=encoded_payload,
         method="POST",
-        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        headers={
+            "Content-Type": "application/x-www-form-urlencoded",
+            "User-Agent": HF_BROWSER_USER_AGENT,
+        },
     )
 
     try:

@@ -10,6 +10,11 @@ from .normalizers import normalize_asks, normalize_response
 from .token_store import TokenStore
 
 DEFAULT_API_BASE = "https://hackforums.net/api/v2"
+HF_BROWSER_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/135.0.0.0 Safari/537.36"
+)
 
 
 class HFTransport:
@@ -38,6 +43,7 @@ class HFTransport:
         headers = {
             "Authorization": f"Bearer {token}",
             "Content-Type": "application/json",
+            "User-Agent": HF_BROWSER_USER_AGENT,
         }
 
         response_payload = self._post_json(route=route, payload=payload, headers=headers)

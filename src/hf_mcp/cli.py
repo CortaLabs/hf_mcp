@@ -59,7 +59,20 @@ def build_cli() -> Any:
     )
     bootstrap_parser.add_argument("--config", type=Path, default=None, help="Path to config YAML")
     bootstrap_parser.add_argument("--token-path", type=Path, default=None, help="Absolute path for token JSON")
-    bootstrap_parser.add_argument("--no-browser", action="store_true", help="Do not open the browser automatically")
+    browser_group = bootstrap_parser.add_mutually_exclusive_group()
+    browser_group.add_argument(
+        "--open-browser",
+        dest="open_browser",
+        action="store_true",
+        help="Open the browser automatically",
+    )
+    browser_group.add_argument(
+        "--no-browser",
+        dest="open_browser",
+        action="store_false",
+        help="Do not open the browser automatically",
+    )
+    bootstrap_parser.set_defaults(open_browser=None)
 
     status_parser = auth_subparsers.add_parser("status", help="Show local token/config status")
     status_parser.add_argument("--config", type=Path, default=None, help="Path to config YAML")
@@ -112,7 +125,11 @@ def _resolve_settings_and_store(config_path: Path | None, token_path: Path | Non
 def _run_auth_bootstrap(args: Namespace) -> int:
     try:
         settings, store = _resolve_settings_and_store(config_path=args.config, token_path=args.token_path)
-        bundle = authorize_via_loopback(settings=settings, open_browser=not args.no_browser)
+        bundle = authorize_via_loopback(
+            settings=settings,
+            open_browser=_resolve_auth_bootstrap_browser_setting(args.open_browser),
+            announce_authorize_url=_announce_authorize_url,
+        )
         store.save_bundle(bundle)
     except (OSError, RuntimeError, TimeoutError, ValueError, PermissionError) as exc:
         print(f"Auth bootstrap failed: {exc}", file=sys.stderr)
@@ -123,6 +140,26 @@ def _run_auth_bootstrap(args: Namespace) -> int:
     print("Token saved: yes")
     print(f"Granted scopes: {_format_scopes(bundle)}")
     return 0
+
+
+def _resolve_auth_bootstrap_browser_setting(cli_open_browser: bool | None) -> bool:
+    if cli_open_browser is not None:
+        return cli_open_browser
+    return not _is_wsl_environment()
+
+
+def _is_wsl_environment() -> bool:
+    if sys.platform != "linux":
+        return False
+    if os.environ.get("WSL_DISTRO_NAME") or os.environ.get("WSL_INTEROP"):
+        return True
+    if hasattr(os, "uname"):
+        return "microsoft" in os.uname().release.lower()
+    return False
+
+
+def _announce_authorize_url(authorize_url: str) -> None:
+    print(f"Authorization URL: {authorize_url}")
 
 
 def _run_auth_status(args: Namespace) -> int:

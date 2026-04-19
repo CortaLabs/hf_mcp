@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import urllib.parse
 from pathlib import Path
 from typing import Any
 
@@ -11,6 +12,7 @@ SRC_PATH = PRODUCT_ROOT / "src"
 if str(SRC_PATH) not in sys.path:
     sys.path.insert(0, str(SRC_PATH))
 
+import hf_mcp.auth as auth_module
 from hf_mcp.auth import authorize_via_loopback
 from hf_mcp.cli import main
 from hf_mcp.config import HFMCPSettings
@@ -129,7 +131,82 @@ def test_authorize_via_loopback_successful_exchange(monkeypatch: pytest.MonkeyPa
     assert exchange_inputs["client_id"] == "client"
     assert exchange_inputs["client_secret"] == "secret"
     assert exchange_inputs["code"] == "abc"
-    assert exchange_inputs["redirect_uri"] == "http://127.0.0.1:8765/callback"
+    assert "redirect_uri" not in exchange_inputs
+
+
+def test_exchange_code_for_token_uses_documented_form_fields(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    class _FakeResponse:
+        def __enter__(self) -> _FakeResponse:
+            return self
+
+        def __exit__(self, exc_type: object, exc: object, tb: object) -> bool:
+            return False
+
+        def read(self) -> bytes:
+            return b'{\"access_token\":\"token\",\"token_type\":\"Bearer\",\"scope\":\"Basic Info\"}'
+
+    def _fake_urlopen(request: object, timeout: int) -> _FakeResponse:
+        captured["request"] = request
+        captured["timeout"] = timeout
+        return _FakeResponse()
+
+    monkeypatch.setattr("hf_mcp.auth.urllib.request.urlopen", _fake_urlopen)
+
+    token_payload = auth_module._exchange_code_for_token(
+        token_url="https://hackforums.net/api/v2/authorize",
+        client_id="client",
+        client_secret="secret",
+        code="auth-code",
+    )
+
+    assert token_payload["access_token"] == "token"
+    request = captured["request"]
+    assert isinstance(request, auth_module.urllib.request.Request)
+    body_bytes = request.data
+    assert isinstance(body_bytes, bytes)
+    form_fields = urllib.parse.parse_qs(body_bytes.decode("utf-8"), keep_blank_values=True)
+    assert form_fields == {
+        "grant_type": ["authorization_code"],
+        "client_id": ["client"],
+        "client_secret": ["secret"],
+        "code": ["auth-code"],
+    }
+    assert "redirect_uri" not in form_fields
+    assert request.headers["User-agent"] == (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/135.0.0.0 Safari/537.36"
+    )
+
+
+def test_authorize_via_loopback_announces_authorization_url(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("hf_mcp.auth.secrets.token_urlsafe", lambda _: "expected-state")
+    monkeypatch.setattr("hf_mcp.auth._build_authorize_url", lambda **_: "https://example.test/authorize")
+    monkeypatch.setattr(
+        "hf_mcp.auth._await_loopback_callback",
+        lambda redirect_uri, timeout_seconds: {"code": "abc", "state": "expected-state"},
+    )
+    monkeypatch.setattr(
+        "hf_mcp.auth._exchange_code_for_token",
+        lambda **_: {"access_token": "token", "token_type": "Bearer", "scope": "Basic Info"},
+    )
+
+    announced: list[str] = []
+    authorize_via_loopback(
+        _settings(
+            runtime_env={
+                "HF_MCP_CLIENT_ID": "client",
+                "HF_MCP_CLIENT_SECRET": "secret",
+                "HF_MCP_REDIRECT_URI": "http://127.0.0.1:8765/callback",
+            }
+        ),
+        open_browser=False,
+        announce_authorize_url=announced.append,
+    )
+
+    assert announced == ["https://example.test/authorize"]
 
 
 def test_authorize_via_loopback_hosted_mode_uses_external_redirect_and_fixed_local_listener(
@@ -173,7 +250,7 @@ def test_authorize_via_loopback_hosted_mode_uses_external_redirect_and_fixed_loc
     assert bundle.access_token == "token"
     assert authorize_inputs["redirect_uri"] == "https://example.github.io/hf-callback/"
     assert callback_inputs["redirect_uri"] == "http://127.0.0.1:8765/callback"
-    assert exchange_inputs["redirect_uri"] == "https://example.github.io/hf-callback/"
+    assert "redirect_uri" not in exchange_inputs
 
 
 def test_authorize_via_loopback_hosted_mode_rejects_state_mismatch_before_token_exchange(
@@ -287,8 +364,15 @@ def test_auth_bootstrap_saves_bundle_through_token_store(
     monkeypatch.setattr("hf_mcp.cli.load_settings", _fake_load_settings)
     monkeypatch.setattr("hf_mcp.cli.load_token_store", lambda _: stub_store)
 
-    def _fake_authorize(settings: HFMCPSettings, open_browser: bool = True) -> TokenBundle:
+    def _fake_authorize(
+        settings: HFMCPSettings,
+        open_browser: bool = True,
+        announce_authorize_url: Any | None = None,
+    ) -> TokenBundle:
+        del settings
         captured["open_browser"] = open_browser
+        assert callable(announce_authorize_url)
+        announce_authorize_url("https://example.test/authorize")
         return TokenBundle(access_token="token", token_type="Bearer", scope=frozenset({"posts.read"}))
 
     monkeypatch.setattr("hf_mcp.cli.authorize_via_loopback", _fake_authorize)
@@ -311,7 +395,93 @@ def test_auth_bootstrap_saves_bundle_through_token_store(
     assert captured["env"]["HF_MCP_TOKEN_PATH"] == str(token_path)
     assert captured["open_browser"] is False
     assert isinstance(captured["saved"], TokenBundle)
+    assert "Authorization URL: https://example.test/authorize" in out.out
+    assert out.out.index("Authorization URL: https://example.test/authorize") < out.out.index("Token saved: yes")
     assert "Token saved: yes" in out.out
+
+
+def test_auth_bootstrap_defaults_to_no_browser_on_wsl(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    config_path = (tmp_path / "config.yaml").resolve()
+    token_path = (tmp_path / "token.json").resolve()
+    settings = _settings(config_path=config_path, token_path=token_path, runtime_env={})
+    captured: dict[str, object] = {}
+
+    class _StubTokenStore:
+        def __init__(self, path: Path) -> None:
+            self.path = path
+
+        def save_bundle(self, bundle: TokenBundle) -> None:
+            captured["saved"] = bundle
+
+    monkeypatch.setattr("hf_mcp.cli.load_settings", lambda config_path, env=None: settings)
+    monkeypatch.setattr("hf_mcp.cli.load_token_store", lambda _: _StubTokenStore(token_path))
+    monkeypatch.setattr("hf_mcp.cli._is_wsl_environment", lambda: True)
+
+    def _fake_authorize(
+        settings: HFMCPSettings,
+        open_browser: bool = True,
+        announce_authorize_url: Any | None = None,
+    ) -> TokenBundle:
+        del settings, announce_authorize_url
+        captured["open_browser"] = open_browser
+        return TokenBundle(access_token="token", token_type="Bearer", scope=frozenset({"posts.read"}))
+
+    monkeypatch.setattr("hf_mcp.cli.authorize_via_loopback", _fake_authorize)
+
+    exit_code = main(["auth", "bootstrap", "--config", str(config_path), "--token-path", str(token_path)])
+    assert exit_code == 0
+    assert captured["open_browser"] is False
+    assert isinstance(captured["saved"], TokenBundle)
+
+
+def test_auth_bootstrap_open_browser_overrides_wsl_default(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    config_path = (tmp_path / "config.yaml").resolve()
+    token_path = (tmp_path / "token.json").resolve()
+    settings = _settings(config_path=config_path, token_path=token_path, runtime_env={})
+    captured: dict[str, object] = {}
+
+    class _StubTokenStore:
+        def __init__(self, path: Path) -> None:
+            self.path = path
+
+        def save_bundle(self, bundle: TokenBundle) -> None:
+            captured["saved"] = bundle
+
+    monkeypatch.setattr("hf_mcp.cli.load_settings", lambda config_path, env=None: settings)
+    monkeypatch.setattr("hf_mcp.cli.load_token_store", lambda _: _StubTokenStore(token_path))
+    monkeypatch.setattr("hf_mcp.cli._is_wsl_environment", lambda: True)
+
+    def _fake_authorize(
+        settings: HFMCPSettings,
+        open_browser: bool = True,
+        announce_authorize_url: Any | None = None,
+    ) -> TokenBundle:
+        del settings, announce_authorize_url
+        captured["open_browser"] = open_browser
+        return TokenBundle(access_token="token", token_type="Bearer", scope=frozenset({"posts.read"}))
+
+    monkeypatch.setattr("hf_mcp.cli.authorize_via_loopback", _fake_authorize)
+
+    exit_code = main(
+        [
+            "auth",
+            "bootstrap",
+            "--config",
+            str(config_path),
+            "--token-path",
+            str(token_path),
+            "--open-browser",
+        ]
+    )
+    assert exit_code == 0
+    assert captured["open_browser"] is True
+    assert isinstance(captured["saved"], TokenBundle)
 
 
 def test_auth_bootstrap_missing_secrets_returns_clear_nonzero_exit(
@@ -332,7 +502,7 @@ def test_auth_bootstrap_missing_secrets_returns_clear_nonzero_exit(
     monkeypatch.setattr("hf_mcp.cli.load_token_store", lambda _: _StubTokenStore(settings.token_path))
     monkeypatch.setattr(
         "hf_mcp.cli.authorize_via_loopback",
-        lambda settings, open_browser=True: (_ for _ in ()).throw(
+        lambda settings, open_browser=True, announce_authorize_url=None: (_ for _ in ()).throw(
             ValueError("Missing required environment variable: HF_MCP_CLIENT_ID")
         ),
     )
@@ -440,6 +610,11 @@ def test_transport_read_builds_helper_route_and_caps_perpage(monkeypatch: pytest
     assert captured["route"] == "/read/posts"
     assert captured["payload"]["asks"]["posts"]["_perpage"] == 30
     assert captured["headers"]["Authorization"] == "Bearer abc123"
+    assert captured["headers"]["User-Agent"] == (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/135.0.0.0 Safari/537.36"
+    )
     assert result["posts"] == [{"pid": "42", "subject": "Hello"}]
 
 
@@ -467,6 +642,11 @@ def test_transport_write_builds_helper_route_and_payload(monkeypatch: pytest.Mon
     assert captured["route"] == "/write/posts/create"
     assert captured["payload"] == {"asks": {"posts": {"_tid": 123, "_message": "Hello"}}}
     assert captured["headers"]["Authorization"] == "Bearer abc123"
+    assert captured["headers"]["User-Agent"] == (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/135.0.0.0 Safari/537.36"
+    )
     assert result["posts"] == [{"pid": "9001", "subject": "Created"}]
 
 
