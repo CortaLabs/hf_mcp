@@ -15,7 +15,7 @@ Status labels:
 |---|---|---|
 | `me.read` | concrete today | Read profile/account details for the authenticated account |
 | `users.read` | concrete today | Read public user details by target uid |
-| `bratings.read` | concrete today | Read b-ratings data for a target uid |
+| `bratings.read` | concrete today | Browse-first optional-filter read; no required selector (`uid` optional) |
 
 ## Forum and content reads
 
@@ -30,10 +30,10 @@ Status labels:
 
 | Tool | Status | What it is for |
 |---|---|---|
-| `contracts.read` | concrete today | Read contract thread/details by contract id |
-| `disputes.read` | concrete today | Read dispute thread/details by dispute id |
-| `sigmarket.market.read` | concrete today | Read sigmarket listing/market view by listing id |
-| `sigmarket.order.read` | concrete today | Read sigmarket order view by listing id |
+| `contracts.read` | concrete today | Browse-first optional-filter read (`cid` optional, `uid` optional) |
+| `disputes.read` | concrete today | Browse-first optional-filter read (`did` optional, `uid` optional) |
+| `sigmarket.market.read` | concrete today | Browse-first optional-filter read (`uid` optional) |
+| `sigmarket.order.read` | concrete today | Browse-first optional-filter read (`oid` optional, `uid` optional) |
 | `admin.high_risk.read` | concrete today | Read high-risk admin surface data (privileged scope) |
 
 ## Write tools available today
@@ -66,3 +66,5 @@ placeholder-only today.
 - Use `docs/coverage_matrix.md` for row-by-row contract tracking.
 - Use `docs/configuration.md` for path and override behavior (`HF_MCP_CONFIG`,
   `HF_MCP_ENV_FILE`, `HF_MCP_TOKEN_PATH`).
+- Extended read contract note: these five rows are single browse-first tools,
+  not split browse/detail tooling.

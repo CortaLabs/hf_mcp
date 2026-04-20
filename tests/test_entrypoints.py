@@ -14,6 +14,7 @@ SRC_PATH = PRODUCT_ROOT / "src"
 if str(SRC_PATH) not in sys.path:
     sys.path.insert(0, str(SRC_PATH))
 
+import hf_mcp
 from hf_mcp.cli import build_cli, main
 
 _HOSTED_EXTERNAL_REDIRECT_EXAMPLE_URI = "https://cortalabs.github.io/hf_mcp/oauth_callback.html"
@@ -46,6 +47,21 @@ def test_pyproject_includes_stdio_runtime_dependency() -> None:
     dependencies: list[str] = pyproject["project"]["dependencies"]
 
     assert any(dependency.split(">=", 1)[0].split("==", 1)[0] == "mcp" for dependency in dependencies)
+
+
+def test_version_surfaces_match_declared_project_version(capsys: pytest.CaptureFixture[str]) -> None:
+    pyproject = tomllib.loads(PYPROJECT_PATH.read_text(encoding="utf-8"))
+    expected_version = pyproject["project"]["version"]
+
+    assert hf_mcp.__version__ == expected_version
+
+    parser = build_cli()
+    with pytest.raises(SystemExit) as excinfo:
+        parser.parse_args(["--version"])
+
+    captured = capsys.readouterr()
+    assert excinfo.value.code == 0
+    assert captured.out.strip() == f"hf-mcp {expected_version}"
 
 
 def test_python_module_entrypoint_help_runs_without_council_coupling() -> None:

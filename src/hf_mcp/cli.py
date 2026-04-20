@@ -6,6 +6,7 @@ from argparse import ArgumentParser, Namespace
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
+from . import __version__
 from .auth import authorize_via_loopback
 from .config import HFMCPSettings, PRESET_CAPABILITIES, PRESET_PARAMETER_FAMILIES, load_settings
 from .onboarding import (
@@ -29,7 +30,7 @@ def build_cli() -> Any:
     parser.add_argument(
         "--version",
         action="version",
-        version="hf-mcp 0.1.1",
+        version=f"%(prog)s {__version__}",
     )
     subparsers = parser.add_subparsers(dest="command")
     serve_parser = subparsers.add_parser("serve", help="Start the MCP runtime")

@@ -50,6 +50,12 @@ Output-contract boundary (published in metadata/annotations):
 - `x-hf-output-default=structured` means canonical structured payloads are the default contract.
 - `x-hf-output-readable=additive` means any readable/operator rendering is additive-only and cannot replace structured data.
 - `x-hf-output-field-bundles=separate_from_rendering` means field-bundle controls are independent of rendering mode.
+- Extended read selector contract is browse-first optional-filter:
+  `contracts.read` => `cid` (optional), optional `uid`;
+  `disputes.read` => `did` (optional), optional `uid`;
+  `bratings.read` => optional `uid`;
+  `sigmarket.market.read` => optional `uid`;
+  `sigmarket.order.read` => `oid` (optional), optional `uid`.
 
 ## Profiles
 

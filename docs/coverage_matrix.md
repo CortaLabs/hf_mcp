@@ -36,5 +36,13 @@ coverage.
 - A later-lane row is still part of product scope.
 - `Implementation status` distinguishes concrete tools available today from
   placeholder-only rows tracked for documented coverage continuity.
+- Extended reads (`contracts.read`, `disputes.read`, `bratings.read`,
+  `sigmarket.market.read`, `sigmarket.order.read`) use a browse-first
+  optional-filter contract with canonical selectors:
+  `contracts.read` => `cid` (optional), optional `uid`;
+  `disputes.read` => `did` (optional), optional `uid`;
+  `bratings.read` => optional `uid`;
+  `sigmarket.market.read` => optional `uid`;
+  `sigmarket.order.read` => `oid` (optional), optional `uid`.
 - If documented HF API coverage expands, this matrix must add named rows rather
   than replacing specifics with vague future language.

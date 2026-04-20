@@ -15,8 +15,8 @@ _FAMILY_PROPERTY_SPECS: dict[str, tuple[tuple[str, dict[str, Any], bool], ...]] 
     "selectors.dispute": (("dispute_id", {"type": "integer", "minimum": 1}, True),),
     "selectors.sigmarket": (("listing_id", {"type": "integer", "minimum": 1}, True),),
     "filters.pagination": (
-        ("page", {"type": "integer", "minimum": 1}, False),
-        ("per_page", {"type": "integer", "minimum": 1, "maximum": 30}, False),
+        ("page", {"type": "integer", "minimum": 1, "default": 1}, False),
+        ("per_page", {"type": "integer", "minimum": 1, "maximum": 30, "default": 30}, False),
     ),
     "fields.me.basic": (("include_basic_fields", {"type": "boolean", "default": True}, False),),
     "fields.me.advanced": (("include_advanced_fields", {"type": "boolean", "default": False}, False),),
@@ -37,6 +37,25 @@ _FAMILY_PROPERTY_SPECS: dict[str, tuple[tuple[str, dict[str, Any], bool], ...]] 
 _TOOL_REQUIRED_OVERRIDES: dict[str, tuple[str, ...]] = {
     "threads.read": ("fid",),
     "posts.read": ("tid",),
+    "contracts.read": (),
+    "disputes.read": (),
+    "bratings.read": (),
+    "sigmarket.market.read": (),
+    "sigmarket.order.read": (),
+}
+
+_TOOL_SELECTOR_PROPERTY_OVERRIDES: dict[str, tuple[tuple[str, str], ...]] = {
+    "contracts.read": (("cid", "selectors.contract"), ("uid", "selectors.contract")),
+    "disputes.read": (("cdid", "selectors.dispute"), ("uid", "selectors.dispute")),
+    "sigmarket.market.read": (("uid", "selectors.sigmarket"),),
+    "sigmarket.order.read": (("oid", "selectors.sigmarket"), ("uid", "selectors.sigmarket")),
+}
+
+_TOOL_SELECTOR_PROPERTY_REMOVALS: dict[str, tuple[str, ...]] = {
+    "contracts.read": ("contract_id",),
+    "disputes.read": ("dispute_id", "did"),
+    "sigmarket.market.read": ("listing_id",),
+    "sigmarket.order.read": ("listing_id",),
 }
 
 
@@ -75,9 +94,32 @@ def _base_schema(spec: ToolSpec) -> dict[str, Any]:
 
 def build_tool_schema(spec: ToolSpec, policy: CapabilityPolicy) -> dict[str, Any]:
     schema = policy.prune_schema(spec.tool_name, _base_schema(spec))
+    pruned_required = schema.get("required")
+    properties = schema.get("properties")
+    if isinstance(properties, dict):
+        updated_properties = dict(properties)
+        for legacy_name in _TOOL_SELECTOR_PROPERTY_REMOVALS.get(spec.tool_name, ()):
+            updated_properties.pop(legacy_name, None)
+        for selector_name, selector_family in _TOOL_SELECTOR_PROPERTY_OVERRIDES.get(spec.tool_name, ()):
+            selector_schema = {"type": "integer", "minimum": 1}
+            updated_properties[selector_name] = _tag_with_family(selector_schema, selector_family)
+        schema["properties"] = updated_properties
     required_override = _TOOL_REQUIRED_OVERRIDES.get(spec.tool_name)
     if required_override is not None:
-        schema["required"] = [field for field in required_override if field in schema.get("properties", {})]
+        if not required_override:
+            schema.pop("required", None)
+        else:
+            required = [field for field in required_override if field in schema.get("properties", {})]
+            if required:
+                schema["required"] = required
+            elif isinstance(pruned_required, list):
+                fallback_required = [field for field in pruned_required if field in schema.get("properties", {})]
+                if fallback_required:
+                    schema["required"] = fallback_required
+                else:
+                    schema.pop("required", None)
+            else:
+                schema.pop("required", None)
     return schema
 
 

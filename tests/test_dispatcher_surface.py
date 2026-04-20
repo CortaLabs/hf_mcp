@@ -183,6 +183,33 @@ def test_create_server_full_api_registers_extended_reads_concretely_and_retains_
         assert name in server.tools
         assert server.tools[name].handler.__name__ == "_handler"
 
+    contracts_schema = server.tools["contracts.read"].input_schema
+    disputes_schema = server.tools["disputes.read"].input_schema
+    bratings_schema = server.tools["bratings.read"].input_schema
+    market_schema = server.tools["sigmarket.market.read"].input_schema
+    orders_schema = server.tools["sigmarket.order.read"].input_schema
+
+    for schema in (contracts_schema, disputes_schema, bratings_schema, market_schema, orders_schema):
+        assert schema["properties"]["page"]["default"] == 1
+        assert schema["properties"]["per_page"]["default"] == 30
+        assert "required" not in schema
+
+    assert "cid" in contracts_schema["properties"]
+    assert "uid" in contracts_schema["properties"]
+    assert "contract_id" not in contracts_schema["properties"]
+
+    assert "cdid" in disputes_schema["properties"]
+    assert "uid" in disputes_schema["properties"]
+    assert "did" not in disputes_schema["properties"]
+    assert "dispute_id" not in disputes_schema["properties"]
+
+    assert "uid" in market_schema["properties"]
+    assert "listing_id" not in market_schema["properties"]
+
+    assert "oid" in orders_schema["properties"]
+    assert "uid" in orders_schema["properties"]
+    assert "listing_id" not in orders_schema["properties"]
+
 
 def test_core_and_extended_read_rows_register_concrete_handlers_when_transport_is_available() -> None:
     policy = _policy(
@@ -356,7 +383,20 @@ def test_serve_stdio_publishes_dispatcher_contract_for_live_runtime(
 ) -> None:
     settings = HFMCPSettings(
         profile="test",
-        enabled_capabilities=frozenset({"me.read", "threads.read", "posts.read", "bytes.transfer", "contracts.write"}),
+        enabled_capabilities=frozenset(
+            {
+                "me.read",
+                "threads.read",
+                "posts.read",
+                "bytes.transfer",
+                "contracts.write",
+                "contracts.read",
+                "disputes.read",
+                "bratings.read",
+                "sigmarket.market.read",
+                "sigmarket.order.read",
+            }
+        ),
         enabled_parameter_families=frozenset(
             {
                 "selectors.user",
@@ -369,6 +409,8 @@ def test_serve_stdio_publishes_dispatcher_contract_for_live_runtime(
                 "fields.posts.body",
                 "selectors.bytes",
                 "selectors.contract",
+                "selectors.dispute",
+                "selectors.sigmarket",
                 "writes.bytes",
                 "writes.content",
                 "confirm.live",
@@ -448,6 +490,39 @@ def test_serve_stdio_publishes_dispatcher_contract_for_live_runtime(
     assert posts_signature.parameters["page"].default == 1
     assert posts_signature.parameters["per_page"].default == 30
     assert posts_signature.parameters["include_post_body"].default is True
+
+    contracts_signature = inspect.signature(app.registered_tools["contracts.read"]["handler"])
+    assert contracts_signature.parameters["cid"].default is None
+    assert contracts_signature.parameters["uid"].default is None
+    assert contracts_signature.parameters["page"].default == 1
+    assert contracts_signature.parameters["per_page"].default == 30
+    assert "contract_id" not in contracts_signature.parameters
+
+    disputes_signature = inspect.signature(app.registered_tools["disputes.read"]["handler"])
+    assert disputes_signature.parameters["cdid"].default is None
+    assert disputes_signature.parameters["uid"].default is None
+    assert disputes_signature.parameters["page"].default == 1
+    assert disputes_signature.parameters["per_page"].default == 30
+    assert "did" not in disputes_signature.parameters
+    assert "dispute_id" not in disputes_signature.parameters
+
+    bratings_signature = inspect.signature(app.registered_tools["bratings.read"]["handler"])
+    assert bratings_signature.parameters["uid"].default is None
+    assert bratings_signature.parameters["page"].default == 1
+    assert bratings_signature.parameters["per_page"].default == 30
+
+    market_signature = inspect.signature(app.registered_tools["sigmarket.market.read"]["handler"])
+    assert market_signature.parameters["uid"].default is None
+    assert market_signature.parameters["page"].default == 1
+    assert market_signature.parameters["per_page"].default == 30
+    assert "listing_id" not in market_signature.parameters
+
+    order_signature = inspect.signature(app.registered_tools["sigmarket.order.read"]["handler"])
+    assert order_signature.parameters["oid"].default is None
+    assert order_signature.parameters["uid"].default is None
+    assert order_signature.parameters["page"].default == 1
+    assert order_signature.parameters["per_page"].default == 30
+    assert "listing_id" not in order_signature.parameters
 
 
 def test_serve_stdio_runs_stdio_runtime_once_without_restart_loop(

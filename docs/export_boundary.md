@@ -30,6 +30,12 @@ Allowed entries are scoped to `products/hf_mcp/` only.
 - Browse semantics are anchored: `threads.read` is forum-anchored (`fid`
   required, optional `tid`), and `posts.read` is thread-anchored (`tid`
   required, optional `pid`).
+- Extended helper semantics are browse-first optional-filter:
+  `contracts.read` => `cid` (optional), optional `uid`;
+  `disputes.read` => `did` (optional), optional `uid`;
+  `bratings.read` => optional `uid`;
+  `sigmarket.market.read` => optional `uid`;
+  `sigmarket.order.read` => `oid` (optional), optional `uid`.
 - MCP tool outputs are JSON-first dict payloads today. Any future readable
   formatting must be additive only and cannot replace JSON output.
 - Published tool metadata/annotations make this boundary explicit via
@@ -37,6 +43,10 @@ Allowed entries are scoped to `products/hf_mcp/` only.
   `x-hf-output-field-bundles=separate_from_rendering`.
 - Live-write validation stays manual: no automated live writes. Manual checks
   are limited to `TID 6083735` or `FID 375`, ideally one testing thread total.
+- Sigmarket live validation note: the current account/token remains
+  scope-limited, so sigmarket probes are expected to return
+  `INVALID_KEY_SCOPE_3`; local contract repair was still validated up to HF API
+  scope enforcement.
 
 ## Boundary guarantees
 

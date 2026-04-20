@@ -12,11 +12,73 @@ ReadHandler = Callable[..., dict[str, Any]]
 
 _SELECTOR_ALIASES: dict[str, dict[str, str]] = {
     "bytes.read": {"target_uid": "uid"},
+    # Legacy aliases are accepted for backward compatibility only.
     "contracts.read": {"contract_id": "cid"},
-    "disputes.read": {"dispute_id": "did"},
-    "sigmarket.market.read": {"listing_id": "uid"},
-    "sigmarket.order.read": {"listing_id": "oid"},
+    "disputes.read": {"dispute_id": "cdid", "did": "cdid"},
 }
+
+_CONTRACTS_STARTER_FIELDS: tuple[str, ...] = (
+    "cid",
+    "status",
+    "type",
+    "dateline",
+    "tid",
+    "inituid",
+    "otheruid",
+    "iprice",
+    "icurrency",
+    "iproduct",
+    "oprice",
+    "ocurrency",
+    "oproduct",
+    "idispute",
+    "odispute",
+)
+
+_DISPUTES_STARTER_FIELDS: tuple[str, ...] = (
+    "cdid",
+    "contractid",
+    "claimantuid",
+    "defendantuid",
+    "dateline",
+    "status",
+    "dispute_tid",
+    "claimantnotes",
+    "defendantnotes",
+)
+
+_BRATINGS_STARTER_FIELDS: tuple[str, ...] = (
+    "crid",
+    "contractid",
+    "fromid",
+    "toid",
+    "dateline",
+    "amount",
+    "message",
+    "contract",
+)
+
+_SIGMARKET_MARKET_FIELDS: tuple[str, ...] = (
+    "uid",
+    "user",
+    "price",
+    "duration",
+    "active",
+    "sig",
+    "dateadded",
+    "ppd",
+)
+
+_SIGMARKET_ORDER_FIELDS: tuple[str, ...] = (
+    "smid",
+    "buyer",
+    "seller",
+    "startdate",
+    "enddate",
+    "price",
+    "duration",
+    "active",
+)
 
 
 def _translate_selector_kwargs(tool_name: str, kwargs: dict[str, Any]) -> dict[str, Any]:
@@ -59,7 +121,13 @@ def list_contracts(
     page: int = 1,
     per_page: int = 30,
 ) -> dict[str, Any]:
-    asks: dict[str, dict[str, Any]] = {"contracts": {"_page": page, "_perpage": per_page}}
+    asks: dict[str, dict[str, Any]] = {
+        "contracts": {
+            "_page": page,
+            "_perpage": per_page,
+            **{field: True for field in _CONTRACTS_STARTER_FIELDS},
+        }
+    }
     if cid is not None:
         asks["contracts"]["_cid"] = cid
     if uid is not None:
@@ -70,14 +138,20 @@ def list_contracts(
 def list_disputes(
     *,
     transport: HFTransport,
-    did: int | None = None,
+    cdid: int | None = None,
     uid: int | None = None,
     page: int = 1,
     per_page: int = 30,
 ) -> dict[str, Any]:
-    asks: dict[str, dict[str, Any]] = {"disputes": {"_page": page, "_perpage": per_page}}
-    if did is not None:
-        asks["disputes"]["_did"] = did
+    asks: dict[str, dict[str, Any]] = {
+        "disputes": {
+            "_page": page,
+            "_perpage": per_page,
+            **{field: True for field in _DISPUTES_STARTER_FIELDS},
+        }
+    }
+    if cdid is not None:
+        asks["disputes"]["_cdid"] = cdid
     if uid is not None:
         asks["disputes"]["_uid"] = uid
     return normalize_extended_payload(transport.read(asks=asks, helper="disputes"))
@@ -90,7 +164,13 @@ def list_bratings(
     page: int = 1,
     per_page: int = 30,
 ) -> dict[str, Any]:
-    asks: dict[str, dict[str, Any]] = {"bratings": {"_page": page, "_perpage": per_page}}
+    asks: dict[str, dict[str, Any]] = {
+        "bratings": {
+            "_page": page,
+            "_perpage": per_page,
+            **{field: True for field in _BRATINGS_STARTER_FIELDS},
+        }
+    }
     if uid is not None:
         asks["bratings"]["_uid"] = uid
     return normalize_extended_payload(transport.read(asks=asks, helper="bratings"))
@@ -103,7 +183,13 @@ def list_market(
     page: int = 1,
     per_page: int = 30,
 ) -> dict[str, Any]:
-    asks: dict[str, dict[str, Any]] = {"sigmarket/market": {"_page": page, "_perpage": per_page}}
+    asks: dict[str, dict[str, Any]] = {
+        "sigmarket/market": {
+            "_page": page,
+            "_perpage": per_page,
+            **{field: True for field in _SIGMARKET_MARKET_FIELDS},
+        }
+    }
     if uid is not None:
         asks["sigmarket/market"]["_uid"] = uid
     return normalize_extended_payload(transport.read(asks=asks, helper="sigmarket/market"))
@@ -117,7 +203,13 @@ def list_orders(
     page: int = 1,
     per_page: int = 30,
 ) -> dict[str, Any]:
-    asks: dict[str, dict[str, Any]] = {"sigmarket/order": {"_page": page, "_perpage": per_page}}
+    asks: dict[str, dict[str, Any]] = {
+        "sigmarket/order": {
+            "_page": page,
+            "_perpage": per_page,
+            **{field: True for field in _SIGMARKET_ORDER_FIELDS},
+        }
+    }
     if oid is not None:
         asks["sigmarket/order"]["_oid"] = oid
     if uid is not None:
