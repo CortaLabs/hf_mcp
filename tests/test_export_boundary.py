@@ -67,6 +67,26 @@ def test_docs_define_yaml_env_and_token_path_responsibilities() -> None:
     assert "Token-store location must be an absolute path outside the tracked repository" in export_boundary_doc
 
 
+def test_live_write_boundary_language_is_published_in_docs_and_config() -> None:
+    export_boundary_doc = EXPORT_BOUNDARY_DOC_PATH.read_text(encoding="utf-8")
+    config_yaml = (REPO_ROOT / YAML_EXAMPLE).read_text(encoding="utf-8")
+
+    required_boundary_markers = [
+        "posts.reply",
+        "TID 6083735",
+        "at most one `threads.create` in `FID 375`",
+        "No Bytes live writes are in scope for this wave.",
+        "Placeholder writes remain out of scope in this wave",
+    ]
+    for marker in required_boundary_markers:
+        assert marker in export_boundary_doc
+
+    assert "posts.reply on TID 6083735" in config_yaml
+    assert "at most one threads.create in FID 375" in config_yaml
+    assert "no Bytes live writes in this wave" in config_yaml
+    assert "placeholder writes remain out of scope in this wave" in config_yaml
+
+
 def test_export_manifest_rejects_root_level_assets() -> None:
     bad_allowlist = [
         "products/hf_mcp/README.md",

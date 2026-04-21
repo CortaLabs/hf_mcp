@@ -54,6 +54,15 @@ All write rows below require `confirm_live=true`.
 | `bytes.withdraw` | concrete today | Withdraw Bytes (`amount`) |
 | `bytes.bump` | concrete today | Bump Bytes by thread id (`tid`) |
 
+## Manual live-validation envelope (this wave)
+
+- Manual live checks are operator-controlled and limited to concrete content writes:
+  - `posts.reply` on `TID 6083735`
+  - at most one `threads.create` in `FID 375`
+- No Bytes live writes are in-scope for this wave.
+- Placeholder writes remain out of scope (`contracts.write`, `sigmarket.write`,
+  `admin.high_risk.write`).
+
 ## Placeholder write rows (coverage continuity)
 
 These rows are part of the documented product coverage target, but are

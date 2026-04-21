@@ -52,8 +52,13 @@ profile: reader
 #
 # Live test boundary:
 # - no automated live writes
-# - manual live checks only on TID 6083735 or FID 375
-# - ideally one testing thread total
+# - concrete writes require confirm_live=true
+# - manual live checks in this wave are limited to:
+#   - posts.reply on TID 6083735
+#   - at most one threads.create in FID 375
+# - no Bytes live writes in this wave
+# - placeholder writes remain out of scope in this wave:
+#   contracts.write, sigmarket.write, admin.high_risk.write
 
 # Parameter families currently exposed by profile = "full_api":
 # selectors.user, selectors.forum, selectors.thread, selectors.post,

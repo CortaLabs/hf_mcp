@@ -49,7 +49,9 @@ python -m hf_mcp serve
 ## Safety and release posture
 
 - Read paths and guarded writes are documented publicly, with fail-closed behavior for concrete writes via `confirm_live=true`.
-- `sigmarket.write` remains a placeholder/later-lane row and is not a concrete callable helper today.
+- Concrete write helpers currently exposed are `threads.create`, `posts.reply`, and Bytes write helpers (`bytes.transfer`, `bytes.deposit`, `bytes.withdraw`, `bytes.bump`) with repaired argument contracts.
+- Manual live validation in this wave is intentionally narrower: replies only on `TID 6083735` plus at most one `threads.create` in `FID 375`; no Bytes live writes.
+- Placeholder writes remain out of scope in this wave (`contracts.write`, `sigmarket.write`, `admin.high_risk.write`).
 - Detailed release-boundary and limitation truth is owned by [`docs/export_boundary.md`](docs/export_boundary.md).
 
 ## Docs map

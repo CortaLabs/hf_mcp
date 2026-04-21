@@ -14,6 +14,7 @@ if str(SRC_PATH) not in sys.path:
 from hf_mcp.capabilities import CapabilityPolicy
 from hf_mcp.config import HFMCPSettings
 from hf_mcp.registry import get_documented_write_specs, get_tool_spec
+from hf_mcp.schemas import build_tool_schema
 from hf_mcp.tools.write_documented import (
     PENDING_LATER_LANE_WRITE_ROWS,
     build_write_handlers,
@@ -205,4 +206,50 @@ def test_schema_surface_kwargs_invoke_core_write_handlers_truthfully() -> None:
         {"asks": {"bytes": {"_amount": 5}}, "helper": "bytes/deposit"},
         {"asks": {"bytes": {"_amount": 6}}, "helper": "bytes/withdraw"},
         {"asks": {"bytes": {"_tid": 707}}, "helper": "bytes/bump"},
+    ]
+
+
+def test_handlers_accept_kwargs_generated_from_repaired_write_schemas() -> None:
+    policy = _policy(
+        enabled_capabilities={
+            "threads.create",
+            "posts.reply",
+            "bytes.transfer",
+            "bytes.deposit",
+            "bytes.withdraw",
+            "bytes.bump",
+        },
+        enabled_parameter_families={
+            "selectors.forum",
+            "selectors.thread",
+            "selectors.bytes",
+            "writes.content",
+            "writes.bytes",
+            "confirm.live",
+        },
+    )
+    transport = _CaptureTransport()
+    handlers = build_write_handlers(policy, transport)
+
+    schema_kwargs: dict[str, dict[str, Any]] = {
+        "threads.create": {"fid": 1001, "subject": "T", "message": "M", "confirm_live": True},
+        "posts.reply": {"tid": 1002, "message": "R", "confirm_live": True},
+        "bytes.transfer": {"target_uid": 1003, "amount": 10, "confirm_live": True},
+        "bytes.deposit": {"amount": 11, "confirm_live": True},
+        "bytes.withdraw": {"amount": 12, "confirm_live": True},
+        "bytes.bump": {"tid": 1004, "confirm_live": True},
+    }
+
+    for tool_name, kwargs in schema_kwargs.items():
+        schema = build_tool_schema(get_tool_spec(tool_name), policy)
+        assert set(kwargs) == set(schema["properties"])
+        handlers[tool_name](**kwargs)
+
+    assert transport.calls == [
+        {"asks": {"threads": {"_fid": 1001, "_subject": "T", "_message": "M"}}, "helper": "threads"},
+        {"asks": {"posts": {"_tid": 1002, "_message": "R"}}, "helper": "posts"},
+        {"asks": {"bytes": {"_to_uid": 1003, "_amount": 10}}, "helper": "bytes"},
+        {"asks": {"bytes": {"_amount": 11}}, "helper": "bytes/deposit"},
+        {"asks": {"bytes": {"_amount": 12}}, "helper": "bytes/withdraw"},
+        {"asks": {"bytes": {"_tid": 1004}}, "helper": "bytes/bump"},
     ]

@@ -317,6 +317,44 @@ def test_register_tools_uses_placeholder_handlers_when_runtime_bundle_has_no_tra
     assert server.tools["posts.reply"]["handler"].__name__ == "_handler"
 
 
+def test_dispatcher_publishes_truthful_core_write_input_schemas() -> None:
+    policy = _policy(
+        enabled_capabilities={
+            "threads.create",
+            "posts.reply",
+            "bytes.transfer",
+            "bytes.deposit",
+            "bytes.withdraw",
+            "bytes.bump",
+        },
+        enabled_parameter_families={
+            "selectors.forum",
+            "selectors.thread",
+            "selectors.bytes",
+            "writes.content",
+            "writes.bytes",
+            "confirm.live",
+        },
+    )
+    server = _CaptureServer()
+    transport = HFTransport(token_store=_StubTokenStore(), base_url="https://example.test")
+
+    register_tools(server, policy, RuntimeBundle(transport=transport))
+
+    expected_parameter_names: dict[str, set[str]] = {
+        "threads.create": {"fid", "subject", "message", "confirm_live"},
+        "posts.reply": {"tid", "message", "confirm_live"},
+        "bytes.transfer": {"target_uid", "amount", "confirm_live"},
+        "bytes.deposit": {"amount", "confirm_live"},
+        "bytes.withdraw": {"amount", "confirm_live"},
+        "bytes.bump": {"tid", "confirm_live"},
+    }
+
+    for tool_name, expected_names in expected_parameter_names.items():
+        schema = server.tools[tool_name]["input_schema"]
+        assert set(schema["properties"].keys()) == expected_names
+
+
 def test_register_tools_does_not_perform_implicit_bootstrap(monkeypatch: pytest.MonkeyPatch) -> None:
     policy = _policy(
         enabled_capabilities={"threads.read"},
@@ -388,7 +426,11 @@ def test_serve_stdio_publishes_dispatcher_contract_for_live_runtime(
                 "me.read",
                 "threads.read",
                 "posts.read",
+                "posts.reply",
                 "bytes.transfer",
+                "bytes.deposit",
+                "bytes.withdraw",
+                "bytes.bump",
                 "contracts.write",
                 "contracts.read",
                 "disputes.read",
@@ -457,7 +499,17 @@ def test_serve_stdio_publishes_dispatcher_contract_for_live_runtime(
     app = _FakeFastMCP.instances[0]
     assert app.run_calls == ["stdio"]
 
-    for tool_name in ("me.read", "threads.read", "posts.read", "bytes.transfer", "contracts.write"):
+    for tool_name in (
+        "me.read",
+        "threads.read",
+        "posts.read",
+        "posts.reply",
+        "bytes.transfer",
+        "bytes.deposit",
+        "bytes.withdraw",
+        "bytes.bump",
+        "contracts.write",
+    ):
         expected_tool = expected_server.tools[tool_name]
         published = app.registered_tools[tool_name]
         published_signature = inspect.signature(published["handler"])
@@ -490,6 +542,30 @@ def test_serve_stdio_publishes_dispatcher_contract_for_live_runtime(
     assert posts_signature.parameters["page"].default == 1
     assert posts_signature.parameters["per_page"].default == 30
     assert posts_signature.parameters["include_post_body"].default is True
+
+    reply_signature = inspect.signature(app.registered_tools["posts.reply"]["handler"])
+    assert set(reply_signature.parameters.keys()) == {"tid", "message", "confirm_live"}
+    assert "subject" not in reply_signature.parameters
+
+    transfer_signature = inspect.signature(app.registered_tools["bytes.transfer"]["handler"])
+    assert set(transfer_signature.parameters.keys()) == {"target_uid", "amount", "confirm_live"}
+    assert "note" not in transfer_signature.parameters
+
+    deposit_signature = inspect.signature(app.registered_tools["bytes.deposit"]["handler"])
+    assert set(deposit_signature.parameters.keys()) == {"amount", "confirm_live"}
+    assert "target_uid" not in deposit_signature.parameters
+    assert "note" not in deposit_signature.parameters
+
+    withdraw_signature = inspect.signature(app.registered_tools["bytes.withdraw"]["handler"])
+    assert set(withdraw_signature.parameters.keys()) == {"amount", "confirm_live"}
+    assert "target_uid" not in withdraw_signature.parameters
+    assert "note" not in withdraw_signature.parameters
+
+    bump_signature = inspect.signature(app.registered_tools["bytes.bump"]["handler"])
+    assert tuple(bump_signature.parameters.keys()) == ("confirm_live", "tid")
+    assert "target_uid" not in bump_signature.parameters
+    assert "amount" not in bump_signature.parameters
+    assert "note" not in bump_signature.parameters
 
     contracts_signature = inspect.signature(app.registered_tools["contracts.read"]["handler"])
     assert contracts_signature.parameters["cid"].default is None

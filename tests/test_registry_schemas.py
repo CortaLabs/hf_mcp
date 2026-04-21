@@ -97,3 +97,38 @@ def test_build_registry_rejects_missing_documented_family(monkeypatch: pytest.Mo
 
     with pytest.raises(ValueError, match="Missing documented coverage families: contracts.write"):
         build_registry()
+
+
+def test_build_tool_schema_truthful_core_write_shapes() -> None:
+    policy = _policy(
+        capabilities={
+            "threads.create",
+            "posts.reply",
+            "bytes.transfer",
+            "bytes.deposit",
+            "bytes.withdraw",
+            "bytes.bump",
+        },
+        parameter_families={
+            "selectors.forum",
+            "selectors.thread",
+            "selectors.bytes",
+            "writes.content",
+            "writes.bytes",
+            "confirm.live",
+        },
+    )
+
+    expected_shapes: dict[str, tuple[set[str], set[str]]] = {
+        "threads.create": ({"fid", "subject", "message", "confirm_live"}, {"fid", "message", "confirm_live"}),
+        "posts.reply": ({"tid", "message", "confirm_live"}, {"tid", "message", "confirm_live"}),
+        "bytes.transfer": ({"target_uid", "amount", "confirm_live"}, {"target_uid", "amount", "confirm_live"}),
+        "bytes.deposit": ({"amount", "confirm_live"}, {"amount", "confirm_live"}),
+        "bytes.withdraw": ({"amount", "confirm_live"}, {"amount", "confirm_live"}),
+        "bytes.bump": ({"tid", "confirm_live"}, {"tid", "confirm_live"}),
+    }
+
+    for tool_name, (expected_properties, expected_required) in expected_shapes.items():
+        schema = build_tool_schema(get_tool_spec(tool_name), policy)
+        assert set(schema["properties"]) == expected_properties
+        assert set(schema.get("required", [])) == expected_required

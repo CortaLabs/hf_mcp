@@ -20,12 +20,12 @@ coverage.
 | `sigmarket.market.read` | read | `sigmarket/market` | concrete today | in scope | deployment exposure control may keep disabled |
 | `sigmarket.order.read` | read | `sigmarket/order` | concrete today | in scope | deployment exposure control may keep disabled |
 | `admin.high_risk.read` | read | `admin/high-risk/read` | concrete today | in scope | deployment exposure control may keep disabled |
-| `threads.create` | write | `threads` | concrete today | in scope | `confirm_live` guard required |
-| `posts.reply` | write | `posts` | concrete today | in scope | `confirm_live` guard required |
-| `bytes.transfer` | write | `bytes` | concrete today | in scope | `confirm_live` guard required |
-| `bytes.deposit` | write | `bytes/deposit` | concrete today | in scope | `confirm_live` guard required |
-| `bytes.withdraw` | write | `bytes/withdraw` | concrete today | in scope | `confirm_live` guard required |
-| `bytes.bump` | write | `bytes/bump` | concrete today | in scope | `confirm_live` guard required |
+| `threads.create` | write | `threads` | concrete today | in scope | `confirm_live=true` required; manual live validation wave allows at most one create in `FID 375` |
+| `posts.reply` | write | `posts` | concrete today | in scope | `confirm_live=true` required; manual live validation wave allows replies on `TID 6083735` |
+| `bytes.transfer` | write | `bytes` | concrete today | in scope | `confirm_live=true` required; no Bytes live writes in this validation wave |
+| `bytes.deposit` | write | `bytes/deposit` | concrete today | in scope | `confirm_live=true` required; no Bytes live writes in this validation wave |
+| `bytes.withdraw` | write | `bytes/withdraw` | concrete today | in scope | `confirm_live=true` required; no Bytes live writes in this validation wave |
+| `bytes.bump` | write | `bytes/bump` | concrete today | in scope | `confirm_live=true` required; no Bytes live writes in this validation wave |
 | `contracts.write` | write | `contracts` | placeholder row only | in scope | deployment exposure control may keep disabled until helper proof is named |
 | `sigmarket.write` | write | `sigmarket` | placeholder row only | in scope | deployment exposure control may keep disabled until helper proof is named |
 | `admin.high_risk.write` | write | `admin/high-risk/write` | placeholder row only | in scope | deployment exposure control may keep disabled until helper proof is named |
@@ -36,6 +36,11 @@ coverage.
 - A later-lane row is still part of product scope.
 - `Implementation status` distinguishes concrete tools available today from
   placeholder-only rows tracked for documented coverage continuity.
+- Manual live validation in this wave is intentionally narrower than concrete
+  write availability: replies on `TID 6083735` plus at most one
+  `threads.create` in `FID 375`.
+- Placeholder writes remain out of scope in this wave:
+  `contracts.write`, `sigmarket.write`, `admin.high_risk.write`.
 - Extended reads (`contracts.read`, `disputes.read`, `bratings.read`,
   `sigmarket.market.read`, `sigmarket.order.read`) use a browse-first
   optional-filter contract with canonical selectors in structured JSON payloads:

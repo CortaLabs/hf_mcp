@@ -44,8 +44,13 @@ Allowed entries are scoped to `products/hf_mcp/` only.
   `x-hf-output-field-bundles=separate_from_rendering`.
 - Readable formatting is additive only and must not replace structured output.
 - Live-write validation stays manual: no automated live writes.
-- Manual checks remain limited to `TID 6083735` or `FID 375`, ideally one
-  testing thread total.
+- Concrete writes require `confirm_live=true`.
+- Manual checks in this wave remain limited to:
+  - `posts.reply` on `TID 6083735`
+  - at most one `threads.create` in `FID 375`
+- No Bytes live writes are in scope for this wave.
+- Placeholder writes remain out of scope in this wave:
+  `contracts.write`, `sigmarket.write`, `admin.high_risk.write`.
 - Sigmarket live validation status is unchanged: current account/token remains
   scope-limited, so sigmarket probes are expected to return
   `INVALID_KEY_SCOPE_3`; this is scope enforcement, not a repaired write path.

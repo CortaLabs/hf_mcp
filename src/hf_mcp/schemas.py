@@ -42,6 +42,9 @@ _TOOL_REQUIRED_OVERRIDES: dict[str, tuple[str, ...]] = {
     "bratings.read": (),
     "sigmarket.market.read": (),
     "sigmarket.order.read": (),
+    "bytes.deposit": ("amount", "confirm_live"),
+    "bytes.withdraw": ("amount", "confirm_live"),
+    "bytes.bump": ("tid", "confirm_live"),
 }
 
 _TOOL_SELECTOR_PROPERTY_OVERRIDES: dict[str, tuple[tuple[str, str], ...]] = {
@@ -49,6 +52,7 @@ _TOOL_SELECTOR_PROPERTY_OVERRIDES: dict[str, tuple[tuple[str, str], ...]] = {
     "disputes.read": (("cdid", "selectors.dispute"), ("uid", "selectors.dispute")),
     "sigmarket.market.read": (("uid", "selectors.sigmarket"),),
     "sigmarket.order.read": (("oid", "selectors.sigmarket"), ("uid", "selectors.sigmarket")),
+    "bytes.bump": (("tid", "selectors.thread"),),
 }
 
 _TOOL_SELECTOR_PROPERTY_REMOVALS: dict[str, tuple[str, ...]] = {
@@ -56,6 +60,11 @@ _TOOL_SELECTOR_PROPERTY_REMOVALS: dict[str, tuple[str, ...]] = {
     "disputes.read": ("dispute_id", "did"),
     "sigmarket.market.read": ("listing_id",),
     "sigmarket.order.read": ("listing_id",),
+    "posts.reply": ("subject",),
+    "bytes.transfer": ("note",),
+    "bytes.deposit": ("target_uid", "note"),
+    "bytes.withdraw": ("target_uid", "note"),
+    "bytes.bump": ("target_uid", "amount", "note"),
 }
 
 

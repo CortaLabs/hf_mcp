@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "hf-mcp"
-version = "0.1.6"
+version = "0.1.7"
 description = "Standalone Hack Forums MCP launch surface"
 keywords = ["hackforums", "mcp", "model-context-protocol"]
 classifiers = [
