@@ -9,6 +9,11 @@ Status labels:
 - `placeholder row only`: documented row retained for coverage continuity; do not
   treat as a concrete helper commitment today
 
+Output stance:
+
+- `JSON-first`: examples and payload discussion assume structured JSON request and
+  response shapes
+
 ## Account and identity reads
 
 | Tool | Status | What it is for |
@@ -31,7 +36,7 @@ Status labels:
 | Tool | Status | What it is for |
 |---|---|---|
 | `contracts.read` | concrete today | Browse-first optional-filter read (`cid` optional, `uid` optional) |
-| `disputes.read` | concrete today | Browse-first optional-filter read (`did` optional, `uid` optional) |
+| `disputes.read` | concrete today | Browse-first optional-filter read (`cdid` optional, `uid` optional; `did` is a legacy alias) |
 | `sigmarket.market.read` | concrete today | Browse-first optional-filter read (`uid` optional) |
 | `sigmarket.order.read` | concrete today | Browse-first optional-filter read (`oid` optional, `uid` optional) |
 | `admin.high_risk.read` | concrete today | Read high-risk admin surface data (privileged scope) |
@@ -64,6 +69,7 @@ placeholder-only today.
 
 - Use this page for grouped operator orientation.
 - Use `docs/coverage_matrix.md` for row-by-row contract tracking.
+- Use `docs/examples.md` for compact JSON-first request/response snippets.
 - Use `docs/configuration.md` for path and override behavior (`HF_MCP_CONFIG`,
   `HF_MCP_ENV_FILE`, `HF_MCP_TOKEN_PATH`).
 - Extended read contract note: these five rows are single browse-first tools,

@@ -17,6 +17,11 @@
         A focused MCP server for read/write-safe Hack Forums workflows.
         Start local, verify auth wiring, then serve with a bounded, inspectable setup.
       </p>
+      <p class="lede">
+        Safety posture is fail-closed for concrete writes (`confirm_live=true`), and
+        `sigmarket.write` remains a placeholder/later-lane row today. See
+        <a href="export_boundary.md">export_boundary.md</a> for canonical release-boundary detail.
+      </p>
       <nav aria-label="Primary">
         <ul class="inline-nav">
           <li><a href="#setup">Setup Flow</a></li>
@@ -68,6 +73,11 @@
             <pre><code>hf-mcp serve</code></pre>
             <button class="copy-btn" type="button" data-copy="hf-mcp serve">Copy</button>
           </li>
+          <li>
+            <h3>Module entrypoint equivalent</h3>
+            <pre><code>python -m hf_mcp serve</code></pre>
+            <button class="copy-btn" type="button" data-copy="python -m hf_mcp serve">Copy</button>
+          </li>
         </ol>
       </div>
     </section>
@@ -96,9 +106,12 @@
         <h2 id="docs-title">Docs Directory</h2>
         <ul class="docs-list">
           <li><a href="configuration.md">configuration.md</a></li>
+          <li><a href="auth_bootstrap.md">auth_bootstrap.md</a></li>
+          <li><a href="tool_overview.md">tool_overview.md</a></li>
           <li><a href="coverage_matrix.md">coverage_matrix.md</a></li>
-          <li><a href="export_boundary.md">export_boundary.md</a></li>
+          <li><a href="examples.md">examples.md</a></li>
           <li><a href="security_model.md">security_model.md</a></li>
+          <li><a href="export_boundary.md">export_boundary.md</a></li>
           <li><a href="oauth_callback.html">oauth_callback.html</a></li>
         </ul>
       </div>

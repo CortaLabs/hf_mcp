@@ -38,9 +38,10 @@ coverage.
   placeholder-only rows tracked for documented coverage continuity.
 - Extended reads (`contracts.read`, `disputes.read`, `bratings.read`,
   `sigmarket.market.read`, `sigmarket.order.read`) use a browse-first
-  optional-filter contract with canonical selectors:
+  optional-filter contract with canonical selectors in structured JSON payloads:
   `contracts.read` => `cid` (optional), optional `uid`;
-  `disputes.read` => `did` (optional), optional `uid`;
+  `disputes.read` => `cdid` (optional), optional `uid` (legacy alias support:
+  `did` / `dispute_id`);
   `bratings.read` => optional `uid`;
   `sigmarket.market.read` => optional `uid`;
   `sigmarket.order.read` => `oid` (optional), optional `uid`.

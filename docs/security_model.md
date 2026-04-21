@@ -1,25 +1,39 @@
 # Security Model
 
-`hf-mcp` is a networked MCP server for live HF API calls, so every enabled tool
-should be treated as open-world input/output.
+`hf-mcp` is a networked MCP server for live HF API calls. Exposure is treated
+as open-world input/output, so controls default to fail-closed behavior.
 
-## Core controls
+## Fail-closed controls
 
-- Capability policy is fail-closed. Unknown capability or parameter-family names
-  fail config load.
+- Capability policy is fail-closed: unknown capability names or parameter-family
+  names fail config load.
 - Parameter-family pruning keeps schema exposure aligned with runtime validation.
-- Documented write helpers require explicit `confirm_live = true`.
-- Capability and parameter families can restrict user exposure for high-risk
-  rows such as `contract`, `sigmarket`, and `admin/high-risk` helpers.
+- Guarded concrete writes require explicit `confirm_live=true`; missing or false
+  confirmation fails closed before transport calls.
+- High-risk families stay operator-gated (`contracts.*`, `sigmarket.*`,
+  `admin.high_risk.*`) and should be enabled deliberately.
 
 ## Secret handling
 
 - Keep OAuth client credentials and access tokens in private runtime storage.
-- Do not commit credentials into config files, docs, or tests.
-- Rotate credentials if they are ever exposed.
+- Keep non-secret runtime policy in YAML config; keep secrets in `.env` or
+  machine-local environment variables.
+- Do not commit credentials into docs, config examples, or tests.
+- Rotate credentials immediately if exposure is suspected.
 
-## Operational guidance
+## Rollout and validation posture
 
-- Start from read-oriented exposure when validating a new deployment.
-- Enable write families deliberately and verify each path with test coverage.
+- Start deployments read-first, then enable write families intentionally.
+- Live-write validation remains manual and operator-controlled.
 - Keep audit logs outside the tracked package tree.
+
+## Ownership and cross-links
+
+- `security_model.md` owns safety posture, guarded-write expectations, and
+  secret-handling guidance.
+- `export_boundary.md` is canonical for package-export truth, JSON-first output
+  framing, and current sigmarket scope limitation status.
+- For configuration policy details, see [configuration.md](configuration.md).
+- For auth bootstrap flow and callback behavior, see
+  [auth_bootstrap.md](auth_bootstrap.md).
+- For concrete request/response examples, see [examples.md](examples.md).
