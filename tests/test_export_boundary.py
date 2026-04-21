@@ -13,6 +13,7 @@ EXPORT_BOUNDARY_DOC_PATH = REPO_ROOT / "products/hf_mcp/docs/export_boundary.md"
 ALLOWED_PREFIX = "products/hf_mcp/"
 YAML_EXAMPLE = "products/hf_mcp/config.example.yaml"
 TOML_EXAMPLE = "products/hf_mcp/config.example.toml"
+SKILLS_SUBTREE = "products/hf_mcp/skills/**"
 FORBIDDEN_EXPORT_REFERENCES = (".council", ".scribe", ".claude", ".codex", "../", "..\\")
 EXPECTED_MANIFEST_LINES = {
     "include README.md",
@@ -21,6 +22,7 @@ EXPECTED_MANIFEST_LINES = {
     "include config.example.yaml",
     "include export_manifest.toml",
     "recursive-include docs *.md",
+    "recursive-include skills *.md",
     "recursive-include tests *.py",
     "recursive-include src/hf_mcp *.py",
     "global-exclude __pycache__ *.py[cod]",
@@ -41,6 +43,7 @@ def test_export_manifest_is_product_subtree_only() -> None:
     assert allowlist, "allowlist must not be empty"
     _validate_allowlist(allowlist)
     assert YAML_EXAMPLE in allowlist
+    assert SKILLS_SUBTREE in allowlist
     assert TOML_EXAMPLE not in allowlist
 
 
