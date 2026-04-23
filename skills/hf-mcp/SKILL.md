@@ -34,16 +34,23 @@ Use this skill as the router for hf-mcp tasks so you choose the right specialize
 3. Route to `hf-mcp-reads` for read tooling.
    Use it for tool family selection, required selectors, browse-first optional-filter semantics, and JSON-first read examples.
 
-4. Route to `hf-mcp-writes` for write tooling.
+4. Route to `hf-mycode` for formatting and syntax work.
+   Use it when the user needs MyCode/BBCode authoring, conversion, linting, or syntax troubleshooting.
+
+5. Route to `hf-brotherhood-threads` for Brotherhood-branded thread authoring.
+   Use it when the user needs the required Brotherhood layout pattern and quality-controlled thread drafting.
+
+6. Route to `hf-mcp-writes` for write tooling.
    Use it for concrete write helpers, `confirm_live=true` requirements, and placeholder-row boundaries.
 
-5. Keep boundaries explicit.
+7. Keep boundaries explicit.
    If a task would change runtime behavior, package manifests, or product docs, escalate to implementation planning instead of improvising in usage guidance.
 
 ## Verification
 
 - Confirm the task is routed to exactly one primary sibling skill.
 - Confirm `hf-api-v2` is used when OAuth/API internals are requested.
+- Confirm Brotherhood-branded thread drafting is routed to `hf-brotherhood-threads`.
 - Confirm write-capable tasks are routed through write guardrail guidance, not treated as routine reads.
 
 ## Output / Handoff

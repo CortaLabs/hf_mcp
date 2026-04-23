@@ -1,0 +1,87 @@
+[size=xx-large][align=center][css=68]HF MCP Is Live:
+Hack Forums Tools For Agents[/css][/align][/size]
+
+[align=center][img=850x550]https://opengraph.githubassets.com/hf-mcp/CortaLabs/hf_mcp[/img][/align]
+
+I have been working on a small but pretty useful project for anyone who wants to connect AI agents to Hack Forums without duct-taping browser automation together.
+
+It is called [b]hf-mcp[/b], and the repo is here:
+
+[align=center][url=https://github.com/CortaLabs/hf_mcp]https://github.com/CortaLabs/hf_mcp[/url][/align]
+
+The short version: it is a standalone MCP server for the Hack Forums API v2. You install it, authenticate your HF account through the OAuth flow, and then an MCP-capable client can browse and work with HF through structured tools instead of scraping pages.
+
+That matters because forum workflows are awkward for agents right now. Reading threads, checking your account, replying, managing Bytes, or building higher-level forum assistants should not require a brittle pile of custom scripts.
+
+[align=center][img]https://i.ibb.co.com/N2NSzmv9/divider.gif[/img][/align]
+[size=x-large][align=center][css=68]What It Can Do Right Now[/css][/align][/size]
+
+The read side is the strongest part of the package today.
+
+It can read your account, users, forums, threads, posts, contracts, b-ratings, Bytes activity, and other API-backed surfaces depending on your token scopes. The core browsing path is already useful: list forums, list threads, read posts, inspect users, and hand an agent enough context to follow a real HF conversation.
+
+The write side is intentionally gated.
+
+Tools like thread creation, replies, and Bytes actions exist, but live writes require explicit confirmation. That is on purpose. Nobody needs an agent casually firing off forum posts because a prompt got weird at 2 AM.
+
+Install path:
+
+[code]pip install hf-mcp
+hf-mcp setup init
+hf-mcp auth bootstrap
+hf-mcp doctor
+hf-mcp serve[/code]
+
+[VERIFY: confirm the newest PyPI version is live after the release workflow finishes.]
+
+[align=center][img]https://i.ibb.co.com/N2NSzmv9/divider.gif[/img][/align]
+[size=x-large][align=center][css=68]Why MCP Fits HF Pretty Well[/css][/align][/size]
+
+MCP is basically a clean way to expose tools to AI clients. Instead of giving an agent a vague browser window and hoping it clicks the right thing, you give it named tools with structured inputs and structured outputs.
+
+For HF, that maps nicely.
+
+Threads have IDs. Posts have IDs. Users have UIDs. Forum sections have FIDs. The API already has a real object model, so the MCP can expose that directly and let the client reason over it.
+
+That opens up some interesting uses:
+
+[list]
+[*]A personal HF assistant that can summarize unread threads.
+[*]A drafting helper that can prepare replies without posting them.
+[*]A marketplace helper that can inspect contracts, Bytes, and reputation context.
+[*]Forum-native agents that stay inside the account and API scopes you give them.
+[/list]
+
+The goal is not to make some fake "autopost everything" bot. The better version is controlled, inspectable, and boring in the right places.
+
+[align=center][img]https://i.ibb.co.com/N2NSzmv9/divider.gif[/img][/align]
+[size=x-large][align=center][css=68]Docs, Skills, And Agent UX[/css][/align][/size]
+
+This release also includes packaged skills for agents that use the repo.
+
+There is an HF MCP skill for routing the tool family, an install/bootstrap skill, read and write usage skills, a MyCode syntax skill, and a Brotherhood thread-format skill for posts like this one.
+
+That last part might sound small, but I think it matters.
+
+If agents are going to help write forum content, the output cannot read like a dead corporate blog post. It needs the right structure, the right syntax, and actual voice. So the skill pack includes formatting guidance plus a natural-writing pass that forces the draft to cut AI filler, keep claims grounded, and mark uncertain facts instead of pretending.
+
+No magic. Just less slop.
+
+[align=center][img]https://i.ibb.co.com/N2NSzmv9/divider.gif[/img][/align]
+[size=x-large][align=center][css=68]Where To Check It Out[/css][/align][/size]
+
+GitHub:
+
+[align=center][url=https://github.com/CortaLabs/hf_mcp]https://github.com/CortaLabs/hf_mcp[/url][/align]
+
+Package name:
+
+[code]hf-mcp[/code]
+
+If you build HF tools, AI assistants, or anything that needs clean API access to forum data, this is the base layer I wanted to exist.
+
+It is still early, but the foundation is there now: OAuth bootstrap, safe read tools, guarded write tools, docs, and packaged agent skills.
+
+If you try it, I would especially like feedback on tool ergonomics. The target is simple: an agent should be able to browse and work with HF without fighting the API shape or guessing what a tool returns.
+
+That is the part I care about most.
