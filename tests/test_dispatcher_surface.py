@@ -490,12 +490,15 @@ def test_create_server_publishes_truthful_core_read_input_schemas(
     assert set(me_schema["properties"]["output_mode"]["enum"]) == {"readable", "structured", "raw"}
     assert me_schema["properties"]["output_mode"]["default"] == "readable"
     assert me_schema["properties"]["include_raw_payload"]["default"] is False
+    assert me_schema["properties"]["body_format"]["default"] == "markdown"
+    assert set(me_schema["properties"]["body_format"]["enum"]) == {"raw", "clean", "markdown"}
 
     assert threads_schema["properties"]["page"]["default"] == 1
     assert threads_schema["properties"]["per_page"]["default"] == 30
     assert set(threads_schema["properties"]["output_mode"]["enum"]) == {"readable", "structured", "raw"}
     assert threads_schema["properties"]["output_mode"]["default"] == "readable"
     assert threads_schema["properties"]["include_raw_payload"]["default"] is False
+    assert threads_schema["properties"]["body_format"]["default"] == "markdown"
     assert set(threads_schema.get("required", [])) == {"fid"}
 
     assert posts_schema["properties"]["page"]["default"] == 1
@@ -503,6 +506,7 @@ def test_create_server_publishes_truthful_core_read_input_schemas(
     assert posts_schema["properties"]["include_post_body"]["default"] is True
     assert set(posts_schema["properties"]["output_mode"]["enum"]) == {"readable", "structured", "raw"}
     assert posts_schema["properties"]["include_raw_payload"]["type"] == "boolean"
+    assert set(posts_schema["properties"]["body_format"]["enum"]) == {"raw", "clean", "markdown"}
     assert set(posts_schema.get("required", [])) == {"tid"}
 
     assert server.tools[mcp_tool_name("me.read")].output_schema is not None
@@ -583,8 +587,8 @@ def test_dispatcher_publishes_truthful_core_write_input_schemas() -> None:
     register_tools(server, policy, RuntimeBundle(transport=transport))
 
     expected_parameter_names: dict[str, set[str]] = {
-        "threads.create": {"fid", "subject", "message", "confirm_live"},
-        "posts.reply": {"tid", "message", "confirm_live"},
+        "threads.create": {"fid", "subject", "message", "message_format", "confirm_live"},
+        "posts.reply": {"tid", "message", "message_format", "confirm_live"},
         "bytes.transfer": {"target_uid", "amount", "confirm_live"},
         "bytes.deposit": {"amount", "confirm_live"},
         "bytes.withdraw": {"amount", "confirm_live"},
@@ -776,6 +780,7 @@ def test_serve_stdio_publishes_dispatcher_contract_for_live_runtime(
     assert me_signature.parameters["include_advanced_fields"].default is False
     assert me_signature.parameters["output_mode"].default is None
     assert me_signature.parameters["include_raw_payload"].default is None
+    assert me_signature.parameters["body_format"].default is None
 
     threads_signature = inspect.signature(app.registered_tools[mcp_tool_name("threads.read")]["handler"])
     assert threads_signature.parameters["fid"].default is inspect.Parameter.empty
@@ -784,6 +789,7 @@ def test_serve_stdio_publishes_dispatcher_contract_for_live_runtime(
     assert threads_signature.parameters["per_page"].default == 30
     assert threads_signature.parameters["output_mode"].default is None
     assert threads_signature.parameters["include_raw_payload"].default is None
+    assert threads_signature.parameters["body_format"].default is None
 
     posts_signature = inspect.signature(app.registered_tools[mcp_tool_name("posts.read")]["handler"])
     assert posts_signature.parameters["tid"].default is inspect.Parameter.empty
@@ -793,9 +799,11 @@ def test_serve_stdio_publishes_dispatcher_contract_for_live_runtime(
     assert posts_signature.parameters["include_post_body"].default is True
     assert posts_signature.parameters["output_mode"].default is None
     assert posts_signature.parameters["include_raw_payload"].default is None
+    assert posts_signature.parameters["body_format"].default is None
 
     reply_signature = inspect.signature(app.registered_tools[mcp_tool_name("posts.reply")]["handler"])
-    assert set(reply_signature.parameters.keys()) == {"tid", "message", "confirm_live"}
+    assert set(reply_signature.parameters.keys()) == {"tid", "message", "message_format", "confirm_live"}
+    assert reply_signature.parameters["message_format"].default == "mycode"
     assert "subject" not in reply_signature.parameters
 
     transfer_signature = inspect.signature(app.registered_tools[mcp_tool_name("bytes.transfer")]["handler"])

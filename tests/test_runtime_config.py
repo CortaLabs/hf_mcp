@@ -152,7 +152,11 @@ def test_read_output_defaults_allow_yaml_overrides_with_per_call_precedence(tmp_
         config_path,
         {
             "profile": "reader",
-            "read_output_defaults": {"mode": "structured", "include_raw_payload": True},
+            "read_output_defaults": {
+                "mode": "structured",
+                "include_raw_payload": True,
+                "body_format": "clean",
+            },
         },
     )
 
@@ -161,22 +165,29 @@ def test_read_output_defaults_allow_yaml_overrides_with_per_call_precedence(tmp_
     assert settings.read_output_defaults == ReadOutputDefaults(
         mode="structured",
         include_raw_payload=True,
+        body_format="clean",
     )
     assert resolve_read_output_defaults(
         settings=settings,
         output_mode=None,
         include_raw_payload=None,
-    ) == ReadOutputDefaults(mode="structured", include_raw_payload=True)
+    ) == ReadOutputDefaults(mode="structured", include_raw_payload=True, body_format="clean")
     assert resolve_read_output_defaults(
         settings=settings,
         output_mode="raw",
         include_raw_payload=None,
-    ) == ReadOutputDefaults(mode="raw", include_raw_payload=True)
+    ) == ReadOutputDefaults(mode="raw", include_raw_payload=True, body_format="raw")
     assert resolve_read_output_defaults(
         settings=settings,
         output_mode=None,
         include_raw_payload=False,
-    ) == ReadOutputDefaults(mode="structured", include_raw_payload=False)
+    ) == ReadOutputDefaults(mode="structured", include_raw_payload=False, body_format="clean")
+    assert resolve_read_output_defaults(
+        settings=settings,
+        output_mode="raw",
+        include_raw_payload=False,
+        body_format="markdown",
+    ) == ReadOutputDefaults(mode="raw", include_raw_payload=False, body_format="markdown")
 
 
 def test_read_output_defaults_reject_unknown_mode_in_yaml(tmp_path: Path) -> None:
@@ -204,6 +215,20 @@ def test_read_output_defaults_reject_non_boolean_include_raw_payload(tmp_path: P
     )
 
     with pytest.raises(ValueError, match="`read_output_defaults.include_raw_payload` must be a boolean"):
+        load_settings(config_path=config_path, env={})
+
+
+def test_read_output_defaults_reject_unknown_body_format(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    _write_yaml(
+        config_path,
+        {
+            "profile": "reader",
+            "read_output_defaults": {"body_format": "bbcode-ish"},
+        },
+    )
+
+    with pytest.raises(ValueError, match="Unknown body format"):
         load_settings(config_path=config_path, env={})
 
 

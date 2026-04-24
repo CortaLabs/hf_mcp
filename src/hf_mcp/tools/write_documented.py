@@ -5,6 +5,7 @@ import html
 from typing import Any
 
 from hf_mcp.capabilities import CapabilityPolicy
+from hf_mcp.mycode import coerce_message_format, format_write_text
 from hf_mcp.registry import get_documented_write_specs
 from hf_mcp.transport import HFTransport
 
@@ -26,8 +27,12 @@ def _require_confirm_live(tool_name: str, confirm_live: bool) -> None:
     )
 
 
-def _normalize_write_text(value: str) -> str:
-    return html.unescape(value)
+def _normalize_write_text(value: str, message_format: str = "mycode") -> str:
+    normalized = html.unescape(value)
+    return format_write_text(
+        normalized,
+        coerce_message_format(message_format, field_name="message_format"),
+    )
 
 
 def create_thread_live(
@@ -37,13 +42,14 @@ def create_thread_live(
     subject: str,
     message: str,
     confirm_live: bool,
+    message_format: str = "mycode",
 ) -> dict[str, Any]:
     _require_confirm_live("threads.create", confirm_live)
     asks = {
         "threads": {
             "_fid": fid,
             "_subject": _normalize_write_text(subject),
-            "_message": _normalize_write_text(message),
+            "_message": _normalize_write_text(message, message_format),
         }
     }
     return transport.write(asks=asks, helper="threads")
@@ -55,9 +61,10 @@ def reply_to_thread_live(
     tid: int,
     message: str,
     confirm_live: bool,
+    message_format: str = "mycode",
 ) -> dict[str, Any]:
     _require_confirm_live("posts.reply", confirm_live)
-    asks = {"posts": {"_tid": tid, "_message": _normalize_write_text(message)}}
+    asks = {"posts": {"_tid": tid, "_message": _normalize_write_text(message, message_format)}}
     return transport.write(asks=asks, helper="posts")
 
 

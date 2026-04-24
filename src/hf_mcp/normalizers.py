@@ -3,8 +3,11 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+from .mycode import BodyFormat, format_body_text
+
 MAX_PERPAGE = 30
 AVATAR_BASE_URL = "https://hackforums.net"
+BODY_TEXT_KEYS: frozenset[str] = frozenset({"message"})
 
 _ORDERING_KEYS: dict[str, tuple[str, ...]] = {
     "contracts": ("cid", "id"),
@@ -48,6 +51,12 @@ def normalize_response(payload: dict[str, Any]) -> dict[str, Any]:
     return normalized
 
 
+def format_body_fields(payload: dict[str, Any], body_format: BodyFormat) -> dict[str, Any]:
+    if body_format == "raw":
+        return payload
+    return _format_body_value(payload, body_format)
+
+
 def _normalize_row(row: Mapping[str, Any]) -> dict[str, Any]:
     normalized: dict[str, Any] = {}
     for key, value in row.items():
@@ -64,6 +73,21 @@ def _normalize_value(value: Any) -> Any:
         return "1" if value else "0"
     if isinstance(value, (int, float)):
         return str(value)
+    return value
+
+
+def _format_body_value(value: Any, body_format: BodyFormat) -> Any:
+    if isinstance(value, Mapping):
+        formatted: dict[str, Any] = {}
+        for key, nested_value in value.items():
+            key_name = str(key)
+            if key_name in BODY_TEXT_KEYS and isinstance(nested_value, str):
+                formatted[key_name] = format_body_text(nested_value, body_format)
+            else:
+                formatted[key_name] = _format_body_value(nested_value, body_format)
+        return formatted
+    if isinstance(value, list):
+        return [_format_body_value(item, body_format) for item in value]
     return value
 
 
@@ -174,4 +198,4 @@ def _cap_perpage(value: Any) -> int:
     return min(numeric, MAX_PERPAGE)
 
 
-__all__ = ["normalize_asks", "normalize_response", "normalize_extended_payload"]
+__all__ = ["format_body_fields", "normalize_asks", "normalize_response", "normalize_extended_payload"]

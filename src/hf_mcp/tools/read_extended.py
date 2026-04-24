@@ -6,7 +6,7 @@ from typing import Any, cast
 
 from hf_mcp.capabilities import CapabilityPolicy
 from hf_mcp.config import HFMCPSettings
-from hf_mcp.normalizers import normalize_extended_payload
+from hf_mcp.normalizers import format_body_fields, normalize_extended_payload
 from hf_mcp.output_modes import ReadOutputMode, resolve_read_output_defaults
 from hf_mcp.registry import get_extended_read_specs
 from hf_mcp.transport import HFTransport
@@ -400,8 +400,9 @@ def build_extended_read_handlers(policy: CapabilityPolicy, transport: HFTranspor
         helper: str,
         output_mode: str | None,
         include_raw_payload: bool | None,
+        body_format: str | None,
     ) -> dict[str, Any]:
-        defaults = resolve_read_output_defaults(settings, output_mode, include_raw_payload)
+        defaults = resolve_read_output_defaults(settings, output_mode, include_raw_payload, body_format)
         need_raw = defaults.mode == "raw" or defaults.include_raw_payload
         raw_payload: dict[str, Any] | None = None
         if need_raw:
@@ -409,6 +410,7 @@ def build_extended_read_handlers(policy: CapabilityPolicy, transport: HFTranspor
             normalized_payload = normalize_extended_payload(raw_payload)
         else:
             normalized_payload = normalize_extended_payload(transport.read(asks=asks, helper=helper))
+        normalized_payload = format_body_fields(normalized_payload, defaults.body_format)
         return _build_read_tool_result(
             tool_name=tool_name,
             normalized_payload=normalized_payload,
@@ -422,6 +424,7 @@ def build_extended_read_handlers(policy: CapabilityPolicy, transport: HFTranspor
             *,
             output_mode: str | None = None,
             include_raw_payload: bool | None = None,
+            body_format: str | None = None,
             **kwargs: Any,
         ) -> dict[str, Any]:
             normalized_kwargs = _translate_selector_kwargs(tool_name, kwargs)
@@ -432,6 +435,7 @@ def build_extended_read_handlers(policy: CapabilityPolicy, transport: HFTranspor
                 helper=helper,
                 output_mode=output_mode,
                 include_raw_payload=include_raw_payload,
+                body_format=body_format,
             )
 
         return _call

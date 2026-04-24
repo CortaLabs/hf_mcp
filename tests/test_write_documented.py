@@ -194,6 +194,55 @@ def test_write_helpers_decode_html_entities_in_mycode_text() -> None:
     }
 
 
+def test_write_helpers_can_convert_markdown_messages_to_mycode() -> None:
+    transport = _CaptureTransport()
+
+    create_thread_live(
+        transport=transport,
+        fid=12,
+        subject="Markdown",
+        message="**Bold**\n\n- one\n- two\n\n[site](https://example.test)",
+        message_format="markdown",
+        confirm_live=True,
+    )
+    reply_to_thread_live(
+        transport=transport,
+        tid=44,
+        message="> quoted\n\n```json\n{\"ok\":true}\n```",
+        message_format="markdown",
+        confirm_live=True,
+    )
+
+    assert transport.calls == [
+        {
+            "asks": {
+                "threads": {
+                    "_fid": 12,
+                    "_subject": "Markdown",
+                    "_message": (
+                        "[b]Bold[/b]\n\n"
+                        "[list]\n"
+                        "[*] one\n"
+                        "[*] two\n"
+                        "[/list]\n\n"
+                        "[url=https://example.test]site[/url]"
+                    ),
+                }
+            },
+            "helper": "threads",
+        },
+        {
+            "asks": {
+                "posts": {
+                    "_tid": 44,
+                    "_message": "[quote]quoted[/quote]\n\n[code]{\"ok\":true}\n[/code]",
+                }
+            },
+            "helper": "posts",
+        },
+    ]
+
+
 def test_later_lane_write_rows_remain_explicitly_blocked_without_invented_calls() -> None:
     assert set(PENDING_LATER_LANE_WRITE_ROWS) == {
         "contracts.write",
@@ -230,8 +279,8 @@ def test_schema_surface_kwargs_invoke_core_write_handlers_truthfully() -> None:
     transport = _CaptureTransport()
     handlers = build_write_handlers(policy, transport)
 
-    handlers["threads.create"](fid=101, subject="Title", message="Body", confirm_live=True)
-    handlers["posts.reply"](tid=202, message="Reply", confirm_live=True)
+    handlers["threads.create"](fid=101, subject="Title", message="Body", message_format="mycode", confirm_live=True)
+    handlers["posts.reply"](tid=202, message="Reply", message_format="mycode", confirm_live=True)
     handlers["bytes.transfer"](target_uid=303, amount=4, confirm_live=True)
     handlers["bytes.deposit"](amount=5, confirm_live=True)
     handlers["bytes.withdraw"](amount=6, confirm_live=True)
@@ -270,8 +319,8 @@ def test_handlers_accept_kwargs_generated_from_repaired_write_schemas() -> None:
     handlers = build_write_handlers(policy, transport)
 
     schema_kwargs: dict[str, dict[str, Any]] = {
-        "threads.create": {"fid": 1001, "subject": "T", "message": "M", "confirm_live": True},
-        "posts.reply": {"tid": 1002, "message": "R", "confirm_live": True},
+        "threads.create": {"fid": 1001, "subject": "T", "message": "M", "message_format": "mycode", "confirm_live": True},
+        "posts.reply": {"tid": 1002, "message": "R", "message_format": "mycode", "confirm_live": True},
         "bytes.transfer": {"target_uid": 1003, "amount": 10, "confirm_live": True},
         "bytes.deposit": {"amount": 11, "confirm_live": True},
         "bytes.withdraw": {"amount": 12, "confirm_live": True},

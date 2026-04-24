@@ -9,6 +9,7 @@ Read tools accept per-call output overrides:
 
 - `output_mode`: `readable` (default), `structured`, or `raw`
 - `include_raw_payload`: optional additive raw JSON payload toggle
+- `body_format`: `markdown` (default), `clean`, or `raw` for MyCode/BBCode body fields
 
 ### Default readable output
 
@@ -130,6 +131,38 @@ Response (illustrative):
       }
     ]
   }
+}
+```
+
+## Body formatting (`posts.read`)
+
+By default, post body fields are normalized for agents by converting common
+MyCode/BBCode into simple Markdown. Use `body_format="clean"` to strip noisy
+formatting or `body_format="raw"` to preserve upstream MyCode.
+
+Request:
+
+```json
+{
+  "tool": "posts.read",
+  "arguments": {
+    "tid": 123,
+    "pid": 88,
+    "body_format": "markdown"
+  }
+}
+```
+
+StructuredContent excerpt:
+
+```json
+{
+  "posts": [
+    {
+      "pid": "88",
+      "message": "**Bold** [link](https://example.test)"
+    }
+  ]
 }
 ```
 
@@ -306,6 +339,9 @@ StructuredContent excerpt (illustrative):
 ## Guarded write: `threads.create`
 
 Concrete writes require `confirm_live=true`.
+Content writes accept `message_format`. Omit it or use `mycode` when `message`
+already contains HF MyCode; use `markdown` to convert common Markdown into HF
+MyCode before sending.
 
 Request:
 
@@ -315,7 +351,8 @@ Request:
   "arguments": {
     "fid": 101,
     "subject": "Launch thread",
-    "message": "Initial post body",
+    "message": "**Launch notes**\n\n- first item\n- second item",
+    "message_format": "markdown",
     "confirm_live": true
   }
 }

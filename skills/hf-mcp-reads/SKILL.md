@@ -37,17 +37,24 @@ Use this skill for read-only hf-mcp usage so tool selection, selector usage, and
    - Canonical selectors: `fid`, `tid`, `pid`, `cid`, `cdid`, `oid`.
    - Compatibility aliases may exist in runtime for legacy callers, but public guidance should stay canonical-first.
 
-4. Keep output handling JSON-first.
+4. Choose body formatting deliberately.
+   - Read tools expose `body_format` for body fields such as `message`.
+   - `markdown` is the default for normal agent reads and converts common HF MyCode/BBCode into simple Markdown.
+   - `clean` strips noisy formatting while preserving readable text and URLs.
+   - `raw` preserves upstream MyCode; `output_mode=raw` resolves to raw body text unless a caller explicitly overrides `body_format`.
+
+5. Keep output handling JSON-first.
    - Treat request/response payloads as structured JSON.
    - Use lightweight field selection toggles when exposed (for example `include_post_body`), instead of rewriting transport assumptions.
 
-5. Route out-of-scope API fundamentals to `hf-api-v2`.
+6. Route out-of-scope API fundamentals to `hf-api-v2`.
    - Use `hf-api-v2` for raw OAuth mechanics, HF endpoint model details, and generic `/read` payload reasoning.
 
 ## Verification
 
 - Confirm the selected read tool is in the shipped read matrix.
 - Confirm selector naming stays canonical (`fid`, `tid`, `pid`, `cid`, `cdid`, `oid`) when those selectors are used.
+- Confirm body formatting matches the caller's need: `markdown` for agent readability, `clean` for stripped text, or `raw` for exact MyCode.
 - Confirm extended reads are described as browse-first optional-filter tools, not as separate browse/detail tool pairs.
 - Confirm no write helper or live-write workflow is implied in the read procedure.
 
@@ -55,6 +62,7 @@ Use this skill for read-only hf-mcp usage so tool selection, selector usage, and
 
 - A concrete read tool choice and argument shape.
 - Canonical selector and pagination/filter notes for that call.
+- Body-format guidance when post/thread message content is involved.
 - Handoff to `hf-mcp-writes` only if the user explicitly needs a guarded live write.
 
 ## Boundaries

@@ -6,7 +6,7 @@ from typing import Any, cast
 
 from hf_mcp.capabilities import CapabilityPolicy
 from hf_mcp.config import HFMCPSettings
-from hf_mcp.normalizers import normalize_response
+from hf_mcp.normalizers import format_body_fields, normalize_response
 from hf_mcp.output_modes import ReadOutputMode, resolve_read_output_defaults
 from hf_mcp.registry import get_core_read_specs
 from hf_mcp.transport import HFTransport
@@ -383,8 +383,9 @@ def build_core_read_handlers(policy: CapabilityPolicy, transport: HFTransport) -
         helper: str,
         output_mode: str | None,
         include_raw_payload: bool | None,
+        body_format: str | None,
     ) -> dict[str, Any]:
-        defaults = resolve_read_output_defaults(settings, output_mode, include_raw_payload)
+        defaults = resolve_read_output_defaults(settings, output_mode, include_raw_payload, body_format)
         need_raw = defaults.mode == "raw" or defaults.include_raw_payload
         raw_payload: dict[str, Any] | None = None
         if need_raw:
@@ -392,6 +393,7 @@ def build_core_read_handlers(policy: CapabilityPolicy, transport: HFTransport) -
             normalized_payload = normalize_response(raw_payload)
         else:
             normalized_payload = transport.read(asks=asks, helper=helper)
+        normalized_payload = format_body_fields(normalized_payload, defaults.body_format)
         return _build_read_tool_result(
             tool_name=tool_name,
             normalized_payload=normalized_payload,
@@ -412,6 +414,7 @@ def build_core_read_handlers(policy: CapabilityPolicy, transport: HFTransport) -
                 include_advanced_fields: bool | None = False,
                 output_mode: str | None = None,
                 include_raw_payload: bool | None = None,
+                body_format: str | None = None,
             ) -> dict[str, Any]:
                 asks = _build_me_asks(
                     include_basic_fields=include_basic_fields,
@@ -424,6 +427,7 @@ def build_core_read_handlers(policy: CapabilityPolicy, transport: HFTransport) -
                     helper="me",
                     output_mode=output_mode,
                     include_raw_payload=include_raw_payload,
+                    body_format=body_format,
                 )
 
             handlers[spec.tool_name] = _me_handler
@@ -436,6 +440,7 @@ def build_core_read_handlers(policy: CapabilityPolicy, transport: HFTransport) -
                 include_profile_fields: bool | None = True,
                 output_mode: str | None = None,
                 include_raw_payload: bool | None = None,
+                body_format: str | None = None,
             ) -> dict[str, Any]:
                 asks = _build_users_asks(
                     uid=uid,
@@ -449,6 +454,7 @@ def build_core_read_handlers(policy: CapabilityPolicy, transport: HFTransport) -
                     helper="users",
                     output_mode=output_mode,
                     include_raw_payload=include_raw_payload,
+                    body_format=body_format,
                 )
 
             handlers[spec.tool_name] = _users_handler
@@ -460,6 +466,7 @@ def build_core_read_handlers(policy: CapabilityPolicy, transport: HFTransport) -
                 per_page: int | None = DEFAULT_PER_PAGE,
                 output_mode: str | None = None,
                 include_raw_payload: bool | None = None,
+                body_format: str | None = None,
             ) -> dict[str, Any]:
                 asks = _build_forums_asks(fid=fid, page=page, per_page=per_page)
                 return _finalize_result(
@@ -468,6 +475,7 @@ def build_core_read_handlers(policy: CapabilityPolicy, transport: HFTransport) -
                     helper="forums",
                     output_mode=output_mode,
                     include_raw_payload=include_raw_payload,
+                    body_format=body_format,
                 )
 
             handlers[spec.tool_name] = _forums_handler
@@ -480,6 +488,7 @@ def build_core_read_handlers(policy: CapabilityPolicy, transport: HFTransport) -
                 per_page: int | None = DEFAULT_PER_PAGE,
                 output_mode: str | None = None,
                 include_raw_payload: bool | None = None,
+                body_format: str | None = None,
             ) -> dict[str, Any]:
                 asks = _build_threads_asks(fid=fid, tid=tid, page=page, per_page=per_page)
                 return _finalize_result(
@@ -488,6 +497,7 @@ def build_core_read_handlers(policy: CapabilityPolicy, transport: HFTransport) -
                     helper="threads",
                     output_mode=output_mode,
                     include_raw_payload=include_raw_payload,
+                    body_format=body_format,
                 )
 
             handlers[spec.tool_name] = _threads_handler
@@ -501,6 +511,7 @@ def build_core_read_handlers(policy: CapabilityPolicy, transport: HFTransport) -
                 include_post_body: bool | None = True,
                 output_mode: str | None = None,
                 include_raw_payload: bool | None = None,
+                body_format: str | None = None,
             ) -> dict[str, Any]:
                 asks = _build_posts_asks(
                     tid=tid,
@@ -515,6 +526,7 @@ def build_core_read_handlers(policy: CapabilityPolicy, transport: HFTransport) -
                     helper="posts",
                     output_mode=output_mode,
                     include_raw_payload=include_raw_payload,
+                    body_format=body_format,
                 )
 
             handlers[spec.tool_name] = _posts_handler

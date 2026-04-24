@@ -26,6 +26,16 @@ _FAMILY_PROPERTY_SPECS: dict[str, tuple[tuple[str, dict[str, Any], bool], ...]] 
     "writes.content": (
         ("subject", {"type": "string", "minLength": 1}, False),
         ("message", {"type": "string", "minLength": 1}, True),
+        (
+            "message_format",
+            {
+                "type": "string",
+                "enum": ["mycode", "markdown"],
+                "default": "mycode",
+                "description": "Input format for message; markdown is converted to Hack Forums MyCode before writing.",
+            },
+            False,
+        ),
     ),
     "writes.bytes": (
         ("amount", {"type": "integer", "minimum": 1}, True),
@@ -75,6 +85,12 @@ _READ_OUTPUT_MODE_SCHEMA: dict[str, Any] = {
 _READ_INCLUDE_RAW_PAYLOAD_SCHEMA: dict[str, Any] = {
     "type": "boolean",
     "default": False,
+}
+_READ_BODY_FORMAT_SCHEMA: dict[str, Any] = {
+    "type": "string",
+    "enum": ["raw", "clean", "markdown"],
+    "default": "markdown",
+    "description": "How BBCode/MyCode body fields should be exposed in structuredContent.",
 }
 
 
@@ -147,6 +163,7 @@ def build_tool_schema(spec: ToolSpec, policy: CapabilityPolicy) -> dict[str, Any
             updated_properties = {}
         updated_properties.setdefault("output_mode", dict(_READ_OUTPUT_MODE_SCHEMA))
         updated_properties.setdefault("include_raw_payload", dict(_READ_INCLUDE_RAW_PAYLOAD_SCHEMA))
+        updated_properties.setdefault("body_format", dict(_READ_BODY_FORMAT_SCHEMA))
         schema["properties"] = updated_properties
     return schema
 
@@ -159,6 +176,7 @@ def build_tool_output_schema(spec: ToolSpec) -> dict[str, object] | None:
         "additionalProperties": True,
         "x-hf-helper-path": spec.helper_path,
         "x-hf-output-modes": ["readable", "structured", "raw"],
+        "x-hf-body-formats": ["raw", "clean", "markdown"],
     }
 
 

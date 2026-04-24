@@ -45,6 +45,7 @@ Use YAML (`config.yaml`) for non-secret runtime policy:
 - `disabled_parameter_families`
 - `read_output_defaults.mode`
 - `read_output_defaults.include_raw_payload`
+- `read_output_defaults.body_format`
 - optional `token_path`
 
 Use env (`.env` or shell) for secrets and machine-local auth/bootstrap settings:
@@ -92,6 +93,7 @@ Read tools use this YAML block for default output behavior:
 read_output_defaults:
   mode: readable
   include_raw_payload: false
+  body_format: markdown
 ```
 
 Mode options:
@@ -106,6 +108,14 @@ Per-call read-tool overrides:
 - `include_raw_payload` overrides `read_output_defaults.include_raw_payload` for that call
 
 Raw payload remains additive. `structuredContent` stays normalized/canonical for scripts even when raw payload is included.
+
+Body-format options:
+
+- `markdown` (default): convert MyCode/BBCode body fields such as `message` into simple Markdown for agents
+- `clean`: strip formatting tags and keep readable text/URLs
+- `raw`: preserve upstream MyCode body text
+
+When `output_mode: raw` is selected, `body_format` resolves to `raw` unless explicitly overridden for that call.
 
 ## Profiles and overlays
 

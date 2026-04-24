@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal, cast
 
+from .mycode import BodyFormat, coerce_body_format
+
 if TYPE_CHECKING:
     from .config import HFMCPSettings
 
@@ -14,6 +16,7 @@ _VALID_READ_OUTPUT_MODES: frozenset[str] = frozenset({"readable", "structured", 
 class ReadOutputDefaults:
     mode: ReadOutputMode = "readable"
     include_raw_payload: bool = False
+    body_format: BodyFormat = "markdown"
 
 
 def _coerce_output_mode(raw_value: object, *, field_name: str) -> ReadOutputMode:
@@ -41,6 +44,7 @@ def parse_read_output_defaults(raw_value: object) -> ReadOutputDefaults:
 
     mode = defaults.mode
     include_raw_payload = defaults.include_raw_payload
+    body_format = defaults.body_format
 
     if "mode" in raw_value:
         mode = _coerce_output_mode(raw_value["mode"], field_name="read_output_defaults.mode")
@@ -49,13 +53,16 @@ def parse_read_output_defaults(raw_value: object) -> ReadOutputDefaults:
             raw_value["include_raw_payload"],
             field_name="read_output_defaults.include_raw_payload",
         )
-    return ReadOutputDefaults(mode=mode, include_raw_payload=include_raw_payload)
+    if "body_format" in raw_value:
+        body_format = coerce_body_format(raw_value["body_format"], field_name="read_output_defaults.body_format")
+    return ReadOutputDefaults(mode=mode, include_raw_payload=include_raw_payload, body_format=body_format)
 
 
 def resolve_read_output_defaults(
     settings: HFMCPSettings,
     output_mode: str | None,
     include_raw_payload: bool | None,
+    body_format: str | None = None,
 ) -> ReadOutputDefaults:
     base_defaults = getattr(settings, "read_output_defaults", ReadOutputDefaults())
     resolved_mode = (
@@ -68,9 +75,16 @@ def resolve_read_output_defaults(
         if include_raw_payload is None
         else _coerce_bool(include_raw_payload, field_name="include_raw_payload")
     )
+    if body_format is None and resolved_mode == "raw":
+        resolved_body_format: BodyFormat = "raw"
+    elif body_format is None:
+        resolved_body_format = base_defaults.body_format
+    else:
+        resolved_body_format = coerce_body_format(body_format, field_name="body_format")
     return ReadOutputDefaults(
         mode=resolved_mode,
         include_raw_payload=resolved_include_raw_payload,
+        body_format=resolved_body_format,
     )
 
 

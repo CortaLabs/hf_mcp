@@ -22,7 +22,9 @@ All read tools in this overview support the same output controls:
 
 - config defaults via `read_output_defaults.mode` and
   `read_output_defaults.include_raw_payload`
-- per-call overrides via `output_mode` and `include_raw_payload`
+- config defaults via `read_output_defaults.body_format`
+- per-call overrides via `output_mode`, `include_raw_payload`, and
+  `body_format`
 
 Mode behavior:
 
@@ -32,6 +34,16 @@ Mode behavior:
 
 Raw JSON can also be attached additively when `include_raw_payload=true` even if
 `output_mode` is `readable` or `structured`.
+
+Body-format behavior:
+
+- `markdown` (default): converts MyCode/BBCode body fields such as `message`
+  into simple Markdown for agent readability
+- `clean`: strips noisy formatting tags while keeping readable text and URLs
+- `raw`: preserves upstream MyCode/BBCode body fields
+
+When `output_mode=raw`, `body_format` resolves to `raw` unless explicitly
+overridden for that call.
 
 ## Account and identity reads
 
@@ -63,6 +75,9 @@ Raw JSON can also be attached additively when `include_raw_payload=true` even if
 ## Write tools available today
 
 All write rows below require `confirm_live=true`.
+Content writes (`threads.create`, `posts.reply`) also accept
+`message_format`; omit it or use `mycode` for ready-to-post MyCode, or use
+`markdown` to convert common Markdown into HF MyCode before sending.
 
 | Tool | Status | What it is for |
 |---|---|---|

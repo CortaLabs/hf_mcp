@@ -70,7 +70,7 @@ def test_build_tool_schema_prunes_to_allowed_parameter_families() -> None:
 
     schema = build_tool_schema(spec, policy)
 
-    assert set(schema["properties"]) == {"tid", "output_mode", "include_raw_payload"}
+    assert set(schema["properties"]) == {"tid", "output_mode", "include_raw_payload", "body_format"}
     assert schema["required"] == ["tid"]
     assert schema["x-hf-coverage-family"] == "threads.read"
 
@@ -126,13 +126,17 @@ def test_build_tool_schema_adds_read_output_mode_params_only_for_reads() -> None
     assert read_properties["output_mode"]["default"] == "readable"
     assert read_properties["include_raw_payload"]["type"] == "boolean"
     assert read_properties["include_raw_payload"]["default"] is False
+    assert set(read_properties["body_format"]["enum"]) == {"raw", "clean", "markdown"}
+    assert read_properties["body_format"]["default"] == "markdown"
     assert "output_mode" not in set(read_schema.get("required", []))
     assert "include_raw_payload" not in set(read_schema.get("required", []))
+    assert "body_format" not in set(read_schema.get("required", []))
 
     write_schema = build_tool_schema(get_tool_spec("posts.reply"), policy)
     write_properties = write_schema["properties"]
     assert "output_mode" not in write_properties
     assert "include_raw_payload" not in write_properties
+    assert write_properties["message_format"]["default"] == "mycode"
 
 
 def test_build_tool_schema_truthful_core_write_shapes() -> None:
@@ -156,8 +160,14 @@ def test_build_tool_schema_truthful_core_write_shapes() -> None:
     )
 
     expected_shapes: dict[str, tuple[set[str], set[str]]] = {
-        "threads.create": ({"fid", "subject", "message", "confirm_live"}, {"fid", "message", "confirm_live"}),
-        "posts.reply": ({"tid", "message", "confirm_live"}, {"tid", "message", "confirm_live"}),
+        "threads.create": (
+            {"fid", "subject", "message", "message_format", "confirm_live"},
+            {"fid", "message", "confirm_live"},
+        ),
+        "posts.reply": (
+            {"tid", "message", "message_format", "confirm_live"},
+            {"tid", "message", "confirm_live"},
+        ),
         "bytes.transfer": ({"target_uid", "amount", "confirm_live"}, {"target_uid", "amount", "confirm_live"}),
         "bytes.deposit": ({"amount", "confirm_live"}, {"amount", "confirm_live"}),
         "bytes.withdraw": ({"amount", "confirm_live"}, {"amount", "confirm_live"}),
@@ -170,3 +180,5 @@ def test_build_tool_schema_truthful_core_write_shapes() -> None:
         assert set(schema.get("required", [])) == expected_required
         assert "output_mode" not in schema["properties"]
         assert "include_raw_payload" not in schema["properties"]
+        if "message_format" in schema["properties"]:
+            assert schema["properties"]["message_format"]["enum"] == ["mycode", "markdown"]

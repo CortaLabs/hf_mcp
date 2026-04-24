@@ -15,6 +15,7 @@ if str(SRC_PATH) not in sys.path:
 from hf_mcp.capabilities import CAPABILITY_PARAMETER_FAMILIES, CapabilityPolicy
 from hf_mcp.config import HFMCPSettings
 from hf_mcp.dispatcher import RuntimeBundle, register_tools
+from hf_mcp.normalizers import normalize_response
 from hf_mcp.output_modes import ReadOutputDefaults
 from hf_mcp.registry import get_core_read_specs, get_tool_spec, mcp_tool_name
 from hf_mcp.schemas import build_tool_schema
@@ -661,6 +662,41 @@ def test_list_posts_include_post_body_false_removes_only_message(
     assert result["posts"] == [{"pid": "99", "subject": "No Body"}]
 
 
+def test_registered_posts_handler_formats_mycode_body_fields_by_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    payload = {
+        "posts": {
+            "pid": 7,
+            "tid": 123,
+            "fid": 90,
+            "uid": 5,
+            "subject": "Hello",
+            "message": "[b]Bold[/b] [url=https://example.test]link[/url]",
+        }
+    }
+
+    monkeypatch.setattr(HFTransport, "read", lambda self, asks, helper=None: normalize_response(payload))
+
+    settings = HFMCPSettings(
+        profile="test",
+        enabled_capabilities=frozenset({"posts.read"}),
+        enabled_parameter_families=frozenset({"selectors.thread", "fields.posts.body"}),
+    )
+    policy = CapabilityPolicy(settings)
+    transport = HFTransport(token_store=_StubTokenStore(), base_url="https://example.test")
+    handler = build_core_read_handlers(policy, transport)["posts.read"]
+
+    markdown_result = handler(tid=123)
+    assert markdown_result["structuredContent"]["posts"][0]["message"] == "**Bold** [link](https://example.test)"
+
+    clean_result = handler(tid=123, body_format="clean")
+    assert clean_result["structuredContent"]["posts"][0]["message"] == "Bold link (https://example.test)"
+
+    raw_result = handler(tid=123, body_format="raw")
+    assert raw_result["structuredContent"]["posts"][0]["message"] == "[b]Bold[/b] [url=https://example.test]link[/url]"
+
+
 def test_registered_posts_handler_supports_output_modes_and_raw_payload_attachment(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -674,6 +710,18 @@ def test_registered_posts_handler_supports_output_modes_and_raw_payload_attachme
                 "uid": "5",
                 "subject": "Hello",
                 "message": "Line one\\n  Line two  ",
+            }
+        ]
+    }
+    formatted_payload = {
+        "posts": [
+            {
+                "pid": "7",
+                "tid": "123",
+                "fid": "90",
+                "uid": "5",
+                "subject": "Hello",
+                "message": "Line one\n  Line two",
             }
         ]
     }
@@ -710,7 +758,7 @@ def test_registered_posts_handler_supports_output_modes_and_raw_payload_attachme
     handler = build_core_read_handlers(policy, transport)["posts.read"]
 
     readable_result = handler(tid=123, output_mode="readable", include_raw_payload=False)
-    assert readable_result["structuredContent"] == normalized_payload
+    assert readable_result["structuredContent"] == formatted_payload
     assert readable_result["content"][0]["type"] == "text"
     assert "pid=7" in readable_result["content"][0]["text"]
     assert "tid=123" in readable_result["content"][0]["text"]
@@ -718,7 +766,7 @@ def test_registered_posts_handler_supports_output_modes_and_raw_payload_attachme
     assert len(readable_result["content"]) == 1
 
     structured_result = handler(tid=123, output_mode="structured", include_raw_payload=False)
-    assert structured_result["structuredContent"] == normalized_payload
+    assert structured_result["structuredContent"] == formatted_payload
     assert structured_result["content"] == [{"type": "text", "text": "posts.read returned 1 row(s)."}]
 
     raw_result = handler(tid=123, output_mode="raw", include_raw_payload=False)
@@ -730,7 +778,7 @@ def test_registered_posts_handler_supports_output_modes_and_raw_payload_attachme
     assert json.loads(raw_result["content"][1]["resource"]["text"]) == raw_payload
 
     defaults_result = handler(tid=123)
-    assert defaults_result["structuredContent"] == normalized_payload
+    assert defaults_result["structuredContent"] == formatted_payload
     assert defaults_result["content"][0] == {"type": "text", "text": "posts.read returned 1 row(s)."}
     assert defaults_result["content"][1]["type"] == "resource"
     assert json.loads(defaults_result["content"][1]["resource"]["text"]) == raw_payload
