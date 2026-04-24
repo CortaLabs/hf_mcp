@@ -28,6 +28,12 @@ profile: reader
 # Optional runtime path override. Must be absolute and outside this repository.
 # token_path: /home/you/.config/hf_mcp/token.json
 
+# Read output defaults for all read tools.
+# Valid modes: readable, structured, raw
+read_output_defaults:
+  mode: readable
+  include_raw_payload: false
+
 # OAuth redirect variables are machine-local env inputs, not YAML policy keys.
 # Put these in .env or your shell:
 # - HF_MCP_EXTERNAL_REDIRECT_URI=https://cortalabs.github.io/hf_mcp/oauth_callback.html
@@ -46,9 +52,10 @@ profile: reader
 # - threads.read => fid required; tid optional narrowing selector
 # - posts.read => tid required; pid optional narrowing selector
 #
-# Output contract:
-# - MCP tools return JSON-first dict payloads today
-# - readable output (if introduced later) must be additive only
+# Read output contract:
+# - Read tools default to readable text + canonical structuredContent
+# - Structured mode keeps script-friendly structuredContent
+# - Raw payload is additive via output_mode=raw or include_raw_payload=true
 #
 # Live test boundary:
 # - no automated live writes

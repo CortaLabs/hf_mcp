@@ -67,6 +67,16 @@ _TOOL_SELECTOR_PROPERTY_REMOVALS: dict[str, tuple[str, ...]] = {
     "bytes.bump": ("target_uid", "amount", "note"),
 }
 
+_READ_OUTPUT_MODE_SCHEMA: dict[str, Any] = {
+    "type": "string",
+    "enum": ["readable", "structured", "raw"],
+    "default": "readable",
+}
+_READ_INCLUDE_RAW_PAYLOAD_SCHEMA: dict[str, Any] = {
+    "type": "boolean",
+    "default": False,
+}
+
 
 def _tag_with_family(schema: dict[str, Any], family: str) -> dict[str, Any]:
     tagged = dict(schema)
@@ -129,7 +139,27 @@ def build_tool_schema(spec: ToolSpec, policy: CapabilityPolicy) -> dict[str, Any
                     schema.pop("required", None)
             else:
                 schema.pop("required", None)
+    if spec.operation == "read" and policy.can_register(spec.tool_name):
+        properties = schema.get("properties")
+        if isinstance(properties, dict):
+            updated_properties = dict(properties)
+        else:
+            updated_properties = {}
+        updated_properties.setdefault("output_mode", dict(_READ_OUTPUT_MODE_SCHEMA))
+        updated_properties.setdefault("include_raw_payload", dict(_READ_INCLUDE_RAW_PAYLOAD_SCHEMA))
+        schema["properties"] = updated_properties
     return schema
 
 
-__all__ = ["build_tool_schema"]
+def build_tool_output_schema(spec: ToolSpec) -> dict[str, object] | None:
+    if spec.operation != "read":
+        return None
+    return {
+        "type": "object",
+        "additionalProperties": True,
+        "x-hf-helper-path": spec.helper_path,
+        "x-hf-output-modes": ["readable", "structured", "raw"],
+    }
+
+
+__all__ = ["build_tool_output_schema", "build_tool_schema"]

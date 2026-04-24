@@ -1,14 +1,18 @@
 from __future__ import annotations
 
-from collections.abc import Callable
-from typing import Any
+import json
+from collections.abc import Callable, Mapping
+from typing import Any, cast
 
 from hf_mcp.capabilities import CapabilityPolicy
+from hf_mcp.config import HFMCPSettings
 from hf_mcp.normalizers import normalize_extended_payload
+from hf_mcp.output_modes import ReadOutputMode, resolve_read_output_defaults
 from hf_mcp.registry import get_extended_read_specs
 from hf_mcp.transport import HFTransport
 
 ReadHandler = Callable[..., dict[str, Any]]
+AskBuilder = Callable[..., tuple[dict[str, dict[str, Any]], str]]
 
 _SELECTOR_ALIASES: dict[str, dict[str, str]] = {
     "bytes.read": {"target_uid": "uid"},
@@ -97,30 +101,28 @@ def _translate_selector_kwargs(tool_name: str, kwargs: dict[str, Any]) -> dict[s
     return translated
 
 
-def list_entries(
+def _build_entries_asks(
     *,
-    transport: HFTransport,
     uid: int | None = None,
     page: int = 1,
     per_page: int = 30,
     include_amount: bool = True,
-) -> dict[str, Any]:
+) -> dict[str, dict[str, Any]]:
     asks: dict[str, dict[str, Any]] = {"bytes": {"_page": page, "_perpage": per_page}}
     if uid is not None:
         asks["bytes"]["_uid"] = uid
     if include_amount:
         asks["bytes"]["amount"] = True
-    return normalize_extended_payload(transport.read(asks=asks, helper="bytes"))
+    return asks
 
 
-def list_contracts(
+def _build_contracts_asks(
     *,
-    transport: HFTransport,
     cid: int | None = None,
     uid: int | None = None,
     page: int = 1,
     per_page: int = 30,
-) -> dict[str, Any]:
+) -> dict[str, dict[str, Any]]:
     asks: dict[str, dict[str, Any]] = {
         "contracts": {
             "_page": page,
@@ -132,17 +134,16 @@ def list_contracts(
         asks["contracts"]["_cid"] = cid
     if uid is not None:
         asks["contracts"]["_uid"] = uid
-    return normalize_extended_payload(transport.read(asks=asks, helper="contracts"))
+    return asks
 
 
-def list_disputes(
+def _build_disputes_asks(
     *,
-    transport: HFTransport,
     cdid: int | None = None,
     uid: int | None = None,
     page: int = 1,
     per_page: int = 30,
-) -> dict[str, Any]:
+) -> dict[str, dict[str, Any]]:
     asks: dict[str, dict[str, Any]] = {
         "disputes": {
             "_page": page,
@@ -154,16 +155,15 @@ def list_disputes(
         asks["disputes"]["_cdid"] = cdid
     if uid is not None:
         asks["disputes"]["_uid"] = uid
-    return normalize_extended_payload(transport.read(asks=asks, helper="disputes"))
+    return asks
 
 
-def list_bratings(
+def _build_bratings_asks(
     *,
-    transport: HFTransport,
     uid: int | None = None,
     page: int = 1,
     per_page: int = 30,
-) -> dict[str, Any]:
+) -> dict[str, dict[str, Any]]:
     asks: dict[str, dict[str, Any]] = {
         "bratings": {
             "_page": page,
@@ -173,16 +173,15 @@ def list_bratings(
     }
     if uid is not None:
         asks["bratings"]["_uid"] = uid
-    return normalize_extended_payload(transport.read(asks=asks, helper="bratings"))
+    return asks
 
 
-def list_market(
+def _build_market_asks(
     *,
-    transport: HFTransport,
     uid: int | None = None,
     page: int = 1,
     per_page: int = 30,
-) -> dict[str, Any]:
+) -> dict[str, dict[str, Any]]:
     asks: dict[str, dict[str, Any]] = {
         "sigmarket/market": {
             "_page": page,
@@ -192,17 +191,16 @@ def list_market(
     }
     if uid is not None:
         asks["sigmarket/market"]["_uid"] = uid
-    return normalize_extended_payload(transport.read(asks=asks, helper="sigmarket/market"))
+    return asks
 
 
-def list_orders(
+def _build_orders_asks(
     *,
-    transport: HFTransport,
     oid: int | None = None,
     uid: int | None = None,
     page: int = 1,
     per_page: int = 30,
-) -> dict[str, Any]:
+) -> dict[str, dict[str, Any]]:
     asks: dict[str, dict[str, Any]] = {
         "sigmarket/order": {
             "_page": page,
@@ -214,6 +212,161 @@ def list_orders(
         asks["sigmarket/order"]["_oid"] = oid
     if uid is not None:
         asks["sigmarket/order"]["_uid"] = uid
+    return asks
+
+
+def _build_admin_high_risk_asks(*, page: int = 1, per_page: int = 30) -> dict[str, dict[str, Any]]:
+    return {"admin/high-risk/read": {"_page": page, "_perpage": per_page}}
+
+
+def _as_rows(payload: Mapping[str, Any], key: str) -> list[Mapping[str, Any]]:
+    value = payload.get(key)
+    if isinstance(value, list):
+        return [item for item in value if isinstance(item, Mapping)]
+    if isinstance(value, Mapping):
+        return [value]
+    return []
+
+
+def _line_for_entry(entry: Mapping[str, Any]) -> str:
+    summary_keys = (
+        "cid",
+        "cdid",
+        "crid",
+        "smid",
+        "oid",
+        "uid",
+        "status",
+        "dateline",
+        "amount",
+        "price",
+    )
+    parts: list[str] = []
+    for key in summary_keys:
+        value = entry.get(key)
+        if value not in (None, ""):
+            parts.append(f"{key}={value}")
+    return ", ".join(parts) if parts else "entry"
+
+
+def _build_rows_summary(label: str, rows: list[Mapping[str, Any]]) -> str:
+    if not rows:
+        return f"{label} returned 0 row(s)."
+    lines = [f"{label} returned {len(rows)} row(s):"]
+    for row in rows:
+        lines.append(f"- {_line_for_entry(row)}")
+    return "\n".join(lines)
+
+
+def _extended_root_key(tool_name: str) -> str:
+    if tool_name == "sigmarket.market.read":
+        return "sigmarket/market"
+    if tool_name == "sigmarket.order.read":
+        return "sigmarket/order"
+    if tool_name == "admin.high_risk.read":
+        return "admin/high-risk/read"
+    return tool_name.split(".", 1)[0]
+
+
+def _build_content_summary(tool_name: str, payload: Mapping[str, Any], mode: ReadOutputMode) -> str:
+    rows = _as_rows(payload, _extended_root_key(tool_name))
+    if mode != "readable":
+        return f"{tool_name} returned {len(rows)} row(s)."
+    return _build_rows_summary(tool_name, rows)
+
+
+def _build_raw_resource(tool_name: str, raw_payload: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        "type": "resource",
+        "resource": {
+            "uri": f"hf-mcp://raw/{tool_name}",
+            "mimeType": "application/json",
+            "text": json.dumps(raw_payload, ensure_ascii=False),
+        },
+    }
+
+
+def _build_read_tool_result(
+    *,
+    tool_name: str,
+    normalized_payload: dict[str, Any],
+    mode: ReadOutputMode,
+    raw_payload: Mapping[str, Any] | None,
+    include_raw_payload: bool,
+) -> dict[str, Any]:
+    content: list[dict[str, Any]] = [{"type": "text", "text": _build_content_summary(tool_name, normalized_payload, mode)}]
+    if raw_payload is not None and (mode == "raw" or include_raw_payload):
+        content.append(_build_raw_resource(tool_name, raw_payload))
+    return {"content": content, "structuredContent": normalized_payload}
+
+
+def list_entries(
+    *,
+    transport: HFTransport,
+    uid: int | None = None,
+    page: int = 1,
+    per_page: int = 30,
+    include_amount: bool = True,
+) -> dict[str, Any]:
+    asks = _build_entries_asks(uid=uid, page=page, per_page=per_page, include_amount=include_amount)
+    return normalize_extended_payload(transport.read(asks=asks, helper="bytes"))
+
+
+def list_contracts(
+    *,
+    transport: HFTransport,
+    cid: int | None = None,
+    uid: int | None = None,
+    page: int = 1,
+    per_page: int = 30,
+) -> dict[str, Any]:
+    asks = _build_contracts_asks(cid=cid, uid=uid, page=page, per_page=per_page)
+    return normalize_extended_payload(transport.read(asks=asks, helper="contracts"))
+
+
+def list_disputes(
+    *,
+    transport: HFTransport,
+    cdid: int | None = None,
+    uid: int | None = None,
+    page: int = 1,
+    per_page: int = 30,
+) -> dict[str, Any]:
+    asks = _build_disputes_asks(cdid=cdid, uid=uid, page=page, per_page=per_page)
+    return normalize_extended_payload(transport.read(asks=asks, helper="disputes"))
+
+
+def list_bratings(
+    *,
+    transport: HFTransport,
+    uid: int | None = None,
+    page: int = 1,
+    per_page: int = 30,
+) -> dict[str, Any]:
+    asks = _build_bratings_asks(uid=uid, page=page, per_page=per_page)
+    return normalize_extended_payload(transport.read(asks=asks, helper="bratings"))
+
+
+def list_market(
+    *,
+    transport: HFTransport,
+    uid: int | None = None,
+    page: int = 1,
+    per_page: int = 30,
+) -> dict[str, Any]:
+    asks = _build_market_asks(uid=uid, page=page, per_page=per_page)
+    return normalize_extended_payload(transport.read(asks=asks, helper="sigmarket/market"))
+
+
+def list_orders(
+    *,
+    transport: HFTransport,
+    oid: int | None = None,
+    uid: int | None = None,
+    page: int = 1,
+    per_page: int = 30,
+) -> dict[str, Any]:
+    asks = _build_orders_asks(oid=oid, uid=uid, page=page, per_page=per_page)
     return normalize_extended_payload(transport.read(asks=asks, helper="sigmarket/order"))
 
 
@@ -223,25 +376,63 @@ def list_admin_high_risk(
     page: int = 1,
     per_page: int = 30,
 ) -> dict[str, Any]:
-    asks = {"admin/high-risk/read": {"_page": page, "_perpage": per_page}}
+    asks = _build_admin_high_risk_asks(page=page, per_page=per_page)
     return normalize_extended_payload(transport.read(asks=asks, helper="admin/high-risk/read"))
 
 
 def build_extended_read_handlers(policy: CapabilityPolicy, transport: HFTransport) -> dict[str, ReadHandler]:
-    tool_handlers: dict[str, Callable[..., dict[str, Any]]] = {
-        "bytes.read": list_entries,
-        "contracts.read": list_contracts,
-        "disputes.read": list_disputes,
-        "bratings.read": list_bratings,
-        "sigmarket.market.read": list_market,
-        "sigmarket.order.read": list_orders,
-        "admin.high_risk.read": list_admin_high_risk,
+    settings = cast(HFMCPSettings, getattr(policy, "_settings"))
+
+    request_builders: dict[str, AskBuilder] = {
+        "bytes.read": lambda **kwargs: (_build_entries_asks(**kwargs), "bytes"),
+        "contracts.read": lambda **kwargs: (_build_contracts_asks(**kwargs), "contracts"),
+        "disputes.read": lambda **kwargs: (_build_disputes_asks(**kwargs), "disputes"),
+        "bratings.read": lambda **kwargs: (_build_bratings_asks(**kwargs), "bratings"),
+        "sigmarket.market.read": lambda **kwargs: (_build_market_asks(**kwargs), "sigmarket/market"),
+        "sigmarket.order.read": lambda **kwargs: (_build_orders_asks(**kwargs), "sigmarket/order"),
+        "admin.high_risk.read": lambda **kwargs: (_build_admin_high_risk_asks(**kwargs), "admin/high-risk/read"),
     }
 
-    def _build_handler(tool_name: str, handler: Callable[..., dict[str, Any]]) -> ReadHandler:
-        def _call(**kwargs: Any) -> dict[str, Any]:
+    def _finalize_result(
+        *,
+        tool_name: str,
+        asks: Mapping[str, Any],
+        helper: str,
+        output_mode: str | None,
+        include_raw_payload: bool | None,
+    ) -> dict[str, Any]:
+        defaults = resolve_read_output_defaults(settings, output_mode, include_raw_payload)
+        need_raw = defaults.mode == "raw" or defaults.include_raw_payload
+        raw_payload: dict[str, Any] | None = None
+        if need_raw:
+            raw_payload = transport.read_raw(asks=asks, helper=helper)
+            normalized_payload = normalize_extended_payload(raw_payload)
+        else:
+            normalized_payload = normalize_extended_payload(transport.read(asks=asks, helper=helper))
+        return _build_read_tool_result(
+            tool_name=tool_name,
+            normalized_payload=normalized_payload,
+            mode=defaults.mode,
+            raw_payload=raw_payload,
+            include_raw_payload=defaults.include_raw_payload,
+        )
+
+    def _build_handler(tool_name: str, builder: AskBuilder) -> ReadHandler:
+        def _call(
+            *,
+            output_mode: str | None = None,
+            include_raw_payload: bool | None = None,
+            **kwargs: Any,
+        ) -> dict[str, Any]:
             normalized_kwargs = _translate_selector_kwargs(tool_name, kwargs)
-            return handler(transport=transport, **normalized_kwargs)
+            asks, helper = builder(**normalized_kwargs)
+            return _finalize_result(
+                tool_name=tool_name,
+                asks=asks,
+                helper=helper,
+                output_mode=output_mode,
+                include_raw_payload=include_raw_payload,
+            )
 
         return _call
 
@@ -249,10 +440,10 @@ def build_extended_read_handlers(policy: CapabilityPolicy, transport: HFTranspor
     for spec in get_extended_read_specs():
         if not policy.can_register(spec.tool_name):
             continue
-        handler = tool_handlers.get(spec.tool_name)
-        if handler is None:
+        builder = request_builders.get(spec.tool_name)
+        if builder is None:
             continue
-        handlers[spec.tool_name] = _build_handler(spec.tool_name, handler)
+        handlers[spec.tool_name] = _build_handler(spec.tool_name, builder)
     return handlers
 
 

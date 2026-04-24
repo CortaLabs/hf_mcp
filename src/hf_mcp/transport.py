@@ -29,12 +29,22 @@ class HFTransport:
         self._timeout_seconds = timeout_seconds
 
     def read(self, asks: Mapping[str, Any], helper: str | None = None) -> dict[str, Any]:
-        return self._request(operation="read", asks=asks, helper=helper)
+        return self._request(operation="read", asks=asks, helper=helper, normalize=True)
+
+    def read_raw(self, asks: Mapping[str, Any], helper: str | None = None) -> dict[str, Any]:
+        return self._request(operation="read", asks=asks, helper=helper, normalize=False)
 
     def write(self, asks: Mapping[str, Any], helper: str | None = None) -> dict[str, Any]:
-        return self._request(operation="write", asks=asks, helper=helper)
+        return self._request(operation="write", asks=asks, helper=helper, normalize=True)
 
-    def _request(self, operation: str, asks: Mapping[str, Any], helper: str | None) -> dict[str, Any]:
+    def _request(
+        self,
+        operation: str,
+        asks: Mapping[str, Any],
+        helper: str | None,
+        *,
+        normalize: bool,
+    ) -> dict[str, Any]:
         normalized_asks = normalize_asks(asks)
         route = self._build_route(operation=operation, helper=helper)
         token = self._token_store.require_bundle().access_token
@@ -49,6 +59,8 @@ class HFTransport:
         response_payload = self._post_json(route=route, payload=payload, headers=headers)
         if not isinstance(response_payload, dict):
             raise ValueError("HF transport expected object JSON response payload.")
+        if not normalize:
+            return response_payload
         return normalize_response(response_payload)
 
     def _build_route(self, operation: str, helper: str | None) -> str:

@@ -13,6 +13,7 @@ if str(SRC_PATH) not in sys.path:
 
 import hf_mcp.config as runtime_config
 from hf_mcp.config import DEFAULT_CONFIG_PATH, DEFAULT_TOKEN_PATH, load_settings
+from hf_mcp.output_modes import ReadOutputDefaults, resolve_read_output_defaults
 from hf_mcp.token_store import load_token_store
 
 
@@ -122,6 +123,88 @@ def test_profile_from_process_env_is_ignored_when_yaml_omits_profile(tmp_path: P
     )
 
     assert settings.profile == "reader"
+
+
+def test_read_output_defaults_fall_back_to_builtin_defaults(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    _write_yaml(config_path, {"profile": "reader"})
+
+    settings = load_settings(config_path=config_path, env={})
+    resolved = resolve_read_output_defaults(
+        settings=settings,
+        output_mode=None,
+        include_raw_payload=None,
+    )
+
+    assert settings.read_output_defaults == ReadOutputDefaults(
+        mode="readable",
+        include_raw_payload=False,
+    )
+    assert resolved == ReadOutputDefaults(
+        mode="readable",
+        include_raw_payload=False,
+    )
+
+
+def test_read_output_defaults_allow_yaml_overrides_with_per_call_precedence(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    _write_yaml(
+        config_path,
+        {
+            "profile": "reader",
+            "read_output_defaults": {"mode": "structured", "include_raw_payload": True},
+        },
+    )
+
+    settings = load_settings(config_path=config_path, env={})
+
+    assert settings.read_output_defaults == ReadOutputDefaults(
+        mode="structured",
+        include_raw_payload=True,
+    )
+    assert resolve_read_output_defaults(
+        settings=settings,
+        output_mode=None,
+        include_raw_payload=None,
+    ) == ReadOutputDefaults(mode="structured", include_raw_payload=True)
+    assert resolve_read_output_defaults(
+        settings=settings,
+        output_mode="raw",
+        include_raw_payload=None,
+    ) == ReadOutputDefaults(mode="raw", include_raw_payload=True)
+    assert resolve_read_output_defaults(
+        settings=settings,
+        output_mode=None,
+        include_raw_payload=False,
+    ) == ReadOutputDefaults(mode="structured", include_raw_payload=False)
+
+
+def test_read_output_defaults_reject_unknown_mode_in_yaml(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    _write_yaml(
+        config_path,
+        {
+            "profile": "reader",
+            "read_output_defaults": {"mode": "unknown", "include_raw_payload": False},
+        },
+    )
+
+    with pytest.raises(ValueError, match="Unknown read output mode"):
+        load_settings(config_path=config_path, env={})
+
+
+def test_read_output_defaults_reject_non_boolean_include_raw_payload(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    _write_yaml(
+        config_path,
+        {
+            "profile": "reader",
+            "read_output_defaults": {"mode": "readable", "include_raw_payload": "false"},
+        },
+    )
+
+    with pytest.raises(ValueError, match="`read_output_defaults.include_raw_payload` must be a boolean"):
+        load_settings(config_path=config_path, env={})
 
 
 def test_explicit_missing_env_file_fails_closed(tmp_path: Path) -> None:

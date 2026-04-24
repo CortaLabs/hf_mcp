@@ -13,6 +13,25 @@ Output stance:
 
 - `JSON-first`: examples and payload discussion assume structured JSON request and
   response shapes
+- Read-tool default mode is `readable`; script compatibility remains in
+  normalized `structuredContent`
+
+## Read output contract
+
+All read tools in this overview support the same output controls:
+
+- config defaults via `read_output_defaults.mode` and
+  `read_output_defaults.include_raw_payload`
+- per-call overrides via `output_mode` and `include_raw_payload`
+
+Mode behavior:
+
+- `readable` (default): human-readable text + canonical `structuredContent`
+- `structured`: terse text + canonical `structuredContent` for scripts
+- `raw`: terse text + canonical `structuredContent` + additive raw JSON resource
+
+Raw JSON can also be attached additively when `include_raw_payload=true` even if
+`output_mode` is `readable` or `structured`.
 
 ## Account and identity reads
 

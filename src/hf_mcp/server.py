@@ -19,6 +19,7 @@ class RegisteredTool:
     input_schema: dict[str, object]
     annotations: dict[str, object]
     handler: Any
+    output_schema: dict[str, object] | None = None
 
 
 class HFServer:
@@ -34,6 +35,7 @@ class HFServer:
         input_schema: dict[str, object],
         annotations: dict[str, object],
         handler: Any,
+        output_schema: dict[str, object] | None = None,
     ) -> None:
         self.tools[name] = RegisteredTool(
             name=name,
@@ -41,12 +43,14 @@ class HFServer:
             input_schema=input_schema,
             annotations=annotations,
             handler=handler,
+            output_schema=output_schema,
         )
 
 
 class _FastMCPToolAdapter:
     def __init__(self, app: Any) -> None:
         self._app = app
+        self._supports_output_schema = _supports_add_tool_keyword(app, "output_schema")
 
     def register_tool(
         self,
@@ -56,15 +60,37 @@ class _FastMCPToolAdapter:
         input_schema: dict[str, object],
         annotations: dict[str, object],
         handler: Any,
+        output_schema: dict[str, object] | None = None,
     ) -> None:
         wrapped_handler = _with_schema_signature(handler, input_schema)
         fastmcp_annotations = _build_fastmcp_annotations(annotations)
+        add_tool_kwargs: dict[str, object] = {
+            "name": name,
+            "description": description,
+            "annotations": fastmcp_annotations,
+        }
+        if self._supports_output_schema:
+            add_tool_kwargs["output_schema"] = output_schema
         self._app.add_tool(
             wrapped_handler,
-            name=name,
-            description=description,
-            annotations=fastmcp_annotations,
+            **add_tool_kwargs,
         )
+
+
+def _supports_add_tool_keyword(app: Any, keyword: str) -> bool:
+    add_tool = getattr(app, "add_tool", None)
+    if not callable(add_tool):
+        return False
+    try:
+        signature = inspect.signature(add_tool)
+    except (TypeError, ValueError):
+        return False
+    if keyword in signature.parameters:
+        return True
+    return any(
+        parameter.kind is inspect.Parameter.VAR_KEYWORD
+        for parameter in signature.parameters.values()
+    )
 
 
 def _schema_annotation(parameter_schema: object) -> object:
@@ -123,14 +149,13 @@ def _signature_from_schema(handler: Any, input_schema: dict[str, object]) -> ins
 
         default = inspect.Parameter.empty
         if parameter_name not in required:
-            if isinstance(parameter_schema, dict) and "default" in parameter_schema:
+            handler_parameter = handler_parameters.get(parameter_name)
+            if handler_parameter is not None and handler_parameter.default is not inspect.Parameter.empty:
+                default = handler_parameter.default
+            elif isinstance(parameter_schema, dict) and "default" in parameter_schema:
                 default = parameter_schema["default"]
             else:
-                handler_parameter = handler_parameters.get(parameter_name)
-                if handler_parameter is not None and handler_parameter.default is not inspect.Parameter.empty:
-                    default = handler_parameter.default
-                else:
-                    default = None
+                default = None
         parameters.append(
             inspect.Parameter(
                 name=parameter_name,
@@ -147,7 +172,7 @@ def _with_schema_signature(handler: Any, input_schema: dict[str, object]) -> Any
     signature = _signature_from_schema(handler, input_schema)
 
     def _wrapped_handler(**kwargs: Any) -> Any:
-        return handler(**kwargs)
+        return _normalize_handler_result(handler(**kwargs))
 
     _wrapped_handler.__name__ = getattr(handler, "__name__", "tool_handler")
     _wrapped_handler.__doc__ = getattr(handler, "__doc__", "")
@@ -160,6 +185,93 @@ def _with_schema_signature(handler: Any, input_schema: dict[str, object]) -> Any
     }
     _wrapped_handler.__annotations__["return"] = object
     return _wrapped_handler
+
+
+def _normalize_handler_result(result: Any) -> Any:
+    if not _is_hf_envelope(result):
+        return result
+    return _build_call_tool_result(result)
+
+
+def _is_hf_envelope(result: Any) -> bool:
+    if not isinstance(result, dict):
+        return False
+    content = result.get("content")
+    structured_content = result.get("structuredContent")
+    if not isinstance(content, list):
+        return False
+    return isinstance(structured_content, dict)
+
+
+def _build_call_tool_result(result: dict[str, Any]) -> Any:
+    module = import_module("mcp.types")
+    call_tool_result_class = getattr(module, "CallToolResult")
+    return call_tool_result_class(
+        content=_normalize_content_parts(module, result.get("content", [])),
+        structuredContent=result.get("structuredContent"),
+        isError=bool(result.get("isError", False)),
+    )
+
+
+def _normalize_content_parts(module: Any, parts: list[Any]) -> list[Any]:
+    text_content_class = getattr(module, "TextContent")
+    embedded_resource_class = getattr(module, "EmbeddedResource")
+    text_resource_class = getattr(module, "TextResourceContents")
+    blob_resource_class = getattr(module, "BlobResourceContents")
+
+    normalized_parts: list[Any] = []
+    for part in parts:
+        if not isinstance(part, dict):
+            normalized_parts.append(part)
+            continue
+
+        part_type = part.get("type")
+        if part_type == "text" and isinstance(part.get("text"), str):
+            normalized_parts.append(text_content_class(type="text", text=part["text"]))
+            continue
+
+        if part_type == "resource":
+            resource = part.get("resource")
+            if not isinstance(resource, dict):
+                normalized_parts.append(part)
+                continue
+            uri = resource.get("uri")
+            if not isinstance(uri, str):
+                normalized_parts.append(part)
+                continue
+            mime_type = resource.get("mimeType")
+            if mime_type is not None and not isinstance(mime_type, str):
+                mime_type = None
+
+            if isinstance(resource.get("text"), str):
+                normalized_parts.append(
+                    embedded_resource_class(
+                        type="resource",
+                        resource=text_resource_class(
+                            uri=uri,
+                            mimeType=mime_type,
+                            text=resource["text"],
+                        ),
+                    )
+                )
+                continue
+
+            if isinstance(resource.get("blob"), str):
+                normalized_parts.append(
+                    embedded_resource_class(
+                        type="resource",
+                        resource=blob_resource_class(
+                            uri=uri,
+                            mimeType=mime_type,
+                            blob=resource["blob"],
+                        ),
+                    )
+                )
+                continue
+
+        normalized_parts.append(part)
+
+    return normalized_parts
 
 
 def _build_fastmcp_annotations(annotations: dict[str, object]) -> Any:

@@ -38,11 +38,12 @@ Allowed entries are scoped to `products/hf_mcp/` only.
   `bratings.read` => optional `uid`;
   `sigmarket.market.read` => optional `uid`;
   `sigmarket.order.read` => `oid` (optional), optional `uid`.
-- MCP tool outputs are JSON-first dict payloads.
+- MCP tool outputs are MCP content plus protocol-level `structuredContent`.
 - Published tool metadata/annotations make this explicit via
-  `x-hf-output-default=structured`, `x-hf-output-readable=additive`, and
+  `x-hf-output-default=readable`, `x-hf-output-readable=additive`, and
   `x-hf-output-field-bundles=separate_from_rendering`.
-- Readable formatting is additive only and must not replace structured output.
+- Readable formatting is additive only and must not replace structured output;
+  raw upstream payloads remain additive MCP resources when requested.
 - Live-write validation stays manual: no automated live writes.
 - Concrete writes require `confirm_live=true`.
 - Manual checks in this wave remain limited to:

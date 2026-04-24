@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 from typing import Any
@@ -14,10 +15,12 @@ if str(SRC_PATH) not in sys.path:
 from hf_mcp.capabilities import CAPABILITY_PARAMETER_FAMILIES, CapabilityPolicy
 from hf_mcp.config import HFMCPSettings
 from hf_mcp.normalizers import normalize_extended_payload
+from hf_mcp.output_modes import ReadOutputDefaults
 from hf_mcp.registry import get_extended_read_specs, get_tool_spec
 from hf_mcp.token_store import TokenBundle
 from hf_mcp.tools.read_extended import (
     build_extended_read_handlers,
+    list_admin_high_risk,
     list_bratings,
     list_contracts,
     list_disputes,
@@ -126,7 +129,9 @@ def test_extended_handlers_accept_schema_surface_selector_names(
 
     handlers = build_extended_read_handlers(policy, transport)
 
-    assert handlers[tool_name](**kwargs) == {response_key: []}
+    result = handlers[tool_name](**kwargs)
+    assert result["structuredContent"] == {response_key: []}
+    assert result["content"] == [{"type": "text", "text": f"{tool_name} returned 0 row(s)."}]
 
 
 @pytest.mark.parametrize(
@@ -171,7 +176,87 @@ def test_extended_handlers_keep_legacy_selector_aliases_for_compatibility(
 
     handlers = build_extended_read_handlers(policy, transport)
 
-    assert handlers[tool_name](**kwargs) == {response_key: []}
+    result = handlers[tool_name](**kwargs)
+    assert result["structuredContent"] == {response_key: []}
+    assert result["content"] == [{"type": "text", "text": f"{tool_name} returned 0 row(s)."}]
+
+
+def test_registered_sigmarket_order_handler_supports_output_modes_and_raw_payload_attachment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, list[dict[str, Any]]] = {"read": [], "read_raw": []}
+    read_payload = {
+        "sigmarket/order": [
+            {"oid": "3", "status": "1", "dateline": "1710000000", "amount": "5"},
+            {"oid": "12", "status": "2", "dateline": "1710001000", "amount": "8"},
+        ]
+    }
+    raw_payload = {
+        "sigmarket/order": [
+            {"oid": "3", "status": "1", "dateline": "1710000000", "amount": "5"},
+            {"oid": "12", "status": "2", "dateline": "1710001000", "amount": "8"},
+        ]
+    }
+
+    def _fake_read(self: HFTransport, asks: dict[str, Any], helper: str | None = None) -> dict[str, Any]:
+        captured["read"].append({"asks": asks, "helper": helper})
+        return read_payload
+
+    def _fake_read_raw(self: HFTransport, asks: dict[str, Any], helper: str | None = None) -> dict[str, Any]:
+        captured["read_raw"].append({"asks": asks, "helper": helper})
+        return raw_payload
+
+    monkeypatch.setattr(HFTransport, "read", _fake_read)
+    monkeypatch.setattr(HFTransport, "read_raw", _fake_read_raw)
+
+    settings = HFMCPSettings(
+        profile="test",
+        enabled_capabilities=frozenset({"sigmarket.order.read"}),
+        enabled_parameter_families=frozenset({"selectors.sigmarket", "filters.pagination"}),
+        read_output_defaults=ReadOutputDefaults(mode="structured", include_raw_payload=True),
+    )
+    policy = CapabilityPolicy(settings)
+    transport = HFTransport(token_store=_StubTokenStore(), base_url="https://example.test")
+    handler = build_extended_read_handlers(policy, transport)["sigmarket.order.read"]
+
+    readable_result = handler(oid=17, output_mode="readable", include_raw_payload=False)
+    assert readable_result["structuredContent"] == normalize_extended_payload(read_payload)
+    assert readable_result["content"][0]["type"] == "text"
+    assert "oid=12" in readable_result["content"][0]["text"]
+    assert "status=2" in readable_result["content"][0]["text"]
+    assert "dateline=1710001000" in readable_result["content"][0]["text"]
+    assert "amount=8" in readable_result["content"][0]["text"]
+    assert len(readable_result["content"]) == 1
+
+    structured_result = handler(oid=17, output_mode="structured", include_raw_payload=False)
+    assert structured_result["structuredContent"] == normalize_extended_payload(read_payload)
+    assert structured_result["content"] == [{"type": "text", "text": "sigmarket.order.read returned 2 row(s)."}]
+
+    raw_result = handler(oid=17, output_mode="raw", include_raw_payload=False)
+    assert raw_result["structuredContent"] == normalize_extended_payload(raw_payload)
+    assert raw_result["content"][0] == {"type": "text", "text": "sigmarket.order.read returned 2 row(s)."}
+    assert raw_result["content"][1]["type"] == "resource"
+    assert raw_result["content"][1]["resource"]["uri"] == "hf-mcp://raw/sigmarket.order.read"
+    assert raw_result["content"][1]["resource"]["mimeType"] == "application/json"
+    assert json.loads(raw_result["content"][1]["resource"]["text"]) == raw_payload
+    assert json.loads(raw_result["content"][1]["resource"]["text"])["sigmarket/order"][0]["oid"] == "3"
+    assert raw_result["structuredContent"]["sigmarket/order"][0]["oid"] == "12"
+
+    readable_with_raw = handler(oid=17, output_mode="readable", include_raw_payload=True)
+    assert readable_with_raw["structuredContent"] == normalize_extended_payload(raw_payload)
+    assert readable_with_raw["content"][1]["type"] == "resource"
+    assert json.loads(readable_with_raw["content"][1]["resource"]["text"]) == raw_payload
+
+    defaults_result = handler(oid=17)
+    assert defaults_result["structuredContent"] == normalize_extended_payload(raw_payload)
+    assert defaults_result["content"][0] == {"type": "text", "text": "sigmarket.order.read returned 2 row(s)."}
+    assert defaults_result["content"][1]["type"] == "resource"
+    assert json.loads(defaults_result["content"][1]["resource"]["text"]) == raw_payload
+
+    assert len(captured["read"]) == 2
+    assert len(captured["read_raw"]) == 3
+    assert all(call["helper"] == "sigmarket/order" for call in captured["read"])
+    assert all(call["helper"] == "sigmarket/order" for call in captured["read_raw"])
 
 
 @pytest.mark.parametrize(
@@ -603,3 +688,32 @@ def test_list_orders_preserves_missing_advanced_fields_without_injecting_values(
 
     assert result["sigmarket/order"] == [{"oid": "5", "subject": "single-row"}]
     assert "message" not in result["sigmarket/order"][0]
+
+
+def test_list_admin_high_risk_uses_expected_helper_route_and_returns_plain_normalized_payload(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    def _fake_post_json(
+        self: HFTransport,
+        route: str,
+        payload: dict[str, Any],
+        headers: dict[str, str],
+    ) -> dict[str, Any]:
+        captured["route"] = route
+        captured["payload"] = payload
+        captured["headers"] = headers
+        return {"admin/high-risk/read": [{"uid": "7", "risk_score": "99"}]}
+
+    monkeypatch.setattr(HFTransport, "_post_json", _fake_post_json)
+
+    transport = HFTransport(token_store=_StubTokenStore(), base_url="https://example.test")
+    result = list_admin_high_risk(transport=transport, page=2, per_page=9)
+
+    assert captured["route"] == "/read/admin/high-risk/read"
+    assert captured["payload"]["asks"] == {"admin/high-risk/read": {"_page": 2, "_perpage": 9}}
+    assert captured["headers"]["Authorization"] == "Bearer token"
+    assert result == {"admin/high-risk/read": [{"uid": "7", "risk_score": "99"}]}
+    assert "content" not in result
+    assert "structuredContent" not in result

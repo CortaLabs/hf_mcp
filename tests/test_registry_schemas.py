@@ -55,7 +55,7 @@ def test_build_tool_schema_prunes_to_allowed_parameter_families() -> None:
 
     schema = build_tool_schema(spec, policy)
 
-    assert set(schema["properties"]) == {"tid"}
+    assert set(schema["properties"]) == {"tid", "output_mode", "include_raw_payload"}
     assert schema["required"] == ["tid"]
     assert schema["x-hf-coverage-family"] == "threads.read"
 
@@ -99,6 +99,27 @@ def test_build_registry_rejects_missing_documented_family(monkeypatch: pytest.Mo
         build_registry()
 
 
+def test_build_tool_schema_adds_read_output_mode_params_only_for_reads() -> None:
+    policy = _policy(
+        capabilities={"threads.read", "posts.reply"},
+        parameter_families={"selectors.thread", "writes.content", "confirm.live"},
+    )
+
+    read_schema = build_tool_schema(get_tool_spec("threads.read"), policy)
+    read_properties = read_schema["properties"]
+    assert set(read_properties["output_mode"]["enum"]) == {"readable", "structured", "raw"}
+    assert read_properties["output_mode"]["default"] == "readable"
+    assert read_properties["include_raw_payload"]["type"] == "boolean"
+    assert read_properties["include_raw_payload"]["default"] is False
+    assert "output_mode" not in set(read_schema.get("required", []))
+    assert "include_raw_payload" not in set(read_schema.get("required", []))
+
+    write_schema = build_tool_schema(get_tool_spec("posts.reply"), policy)
+    write_properties = write_schema["properties"]
+    assert "output_mode" not in write_properties
+    assert "include_raw_payload" not in write_properties
+
+
 def test_build_tool_schema_truthful_core_write_shapes() -> None:
     policy = _policy(
         capabilities={
@@ -132,3 +153,5 @@ def test_build_tool_schema_truthful_core_write_shapes() -> None:
         schema = build_tool_schema(get_tool_spec(tool_name), policy)
         assert set(schema["properties"]) == expected_properties
         assert set(schema.get("required", [])) == expected_required
+        assert "output_mode" not in schema["properties"]
+        assert "include_raw_payload" not in schema["properties"]

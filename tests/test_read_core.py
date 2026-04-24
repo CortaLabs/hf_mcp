@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 from typing import Any
@@ -14,6 +15,7 @@ if str(SRC_PATH) not in sys.path:
 from hf_mcp.capabilities import CAPABILITY_PARAMETER_FAMILIES, CapabilityPolicy
 from hf_mcp.config import HFMCPSettings
 from hf_mcp.dispatcher import RuntimeBundle, register_tools
+from hf_mcp.output_modes import ReadOutputDefaults
 from hf_mcp.registry import get_core_read_specs, get_tool_spec
 from hf_mcp.schemas import build_tool_schema
 from hf_mcp.token_store import TokenBundle
@@ -39,12 +41,14 @@ class _CaptureServer:
         description: str,
         input_schema: dict[str, Any],
         annotations: dict[str, Any],
+        output_schema: dict[str, object] | None = None,
         handler: Any,
     ) -> None:
         self.tools[name] = {
             "description": description,
             "input_schema": input_schema,
             "annotations": annotations,
+            "output_schema": output_schema,
             "handler": handler,
         }
 
@@ -215,7 +219,8 @@ def test_me_handler_reads_authenticated_profile_without_uid_selector(
     assert "lastactive" not in me_asks
     assert "warningpoints" not in me_asks
     assert "regdate" not in me_asks
-    assert result["me"] == [{"uid": "5", "username": "forge", "unreadpms": "99"}]
+    assert result["structuredContent"]["me"] == [{"uid": "5", "username": "forge", "unreadpms": "99"}]
+    assert result["content"][0]["type"] == "text"
 
 
 def test_get_profile_omits_uid_selector_when_called_directly(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -245,6 +250,8 @@ def test_get_profile_omits_uid_selector_when_called_directly(monkeypatch: pytest
         "avatar": True,
     }
     assert captured["headers"]["Authorization"] == "Bearer token"
+    assert "content" not in result
+    assert "structuredContent" not in result
     assert result["me"] == [{"uid": "5", "username": "forge"}]
 
 
@@ -296,6 +303,8 @@ def test_get_profile_includes_advanced_fields_only_when_opted_in_and_allowed(
         "regdate",
     }
     assert captured["headers"]["Authorization"] == "Bearer token"
+    assert "content" not in result
+    assert "structuredContent" not in result
     assert result["me"] == [{"uid": "5", "username": "forge", "unreadpms": "3", "unreadalerts": "2"}]
 
 
@@ -402,6 +411,8 @@ def test_list_threads_defaults_optional_values_and_requests_record_fields(
         "firstpost",
     }
     assert captured["headers"]["Authorization"] == "Bearer token"
+    assert "content" not in result
+    assert "structuredContent" not in result
     assert result["threads"] == [{"tid": "123", "subject": "Topic"}]
 
 
@@ -444,6 +455,8 @@ def test_list_forums_defaults_optional_values_and_requests_forum_card_fields(
     assert forum_asks["type"] is True
     assert set(forum_asks.keys()) == {"_fid", "_page", "_perpage", "fid", "name", "description", "type"}
     assert captured["headers"]["Authorization"] == "Bearer token"
+    assert "content" not in result
+    assert "structuredContent" not in result
     assert result["forums"] == [
         {"fid": "375", "name": "General", "description": "General discussion", "type": "f"}
     ]
@@ -508,6 +521,8 @@ def test_list_posts_defaults_optional_values_and_requests_record_fields(
         "editreason",
     }
     assert captured["headers"]["Authorization"] == "Bearer token"
+    assert "content" not in result
+    assert "structuredContent" not in result
     assert result["posts"] == [{"pid": "88", "subject": "No PID filter", "message": "Text"}]
 
 
@@ -569,4 +584,86 @@ def test_list_posts_include_post_body_false_removes_only_message(
         "editreason",
     }
     assert captured["headers"]["Authorization"] == "Bearer token"
+    assert "content" not in result
+    assert "structuredContent" not in result
     assert result["posts"] == [{"pid": "99", "subject": "No Body"}]
+
+
+def test_registered_posts_handler_supports_output_modes_and_raw_payload_attachment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, list[dict[str, Any]]] = {"read": [], "read_raw": []}
+    normalized_payload = {
+        "posts": [
+            {
+                "pid": "7",
+                "tid": "123",
+                "fid": "90",
+                "uid": "5",
+                "subject": "Hello",
+                "message": "Line one\\n  Line two  ",
+            }
+        ]
+    }
+    raw_payload = {
+        "posts": {
+            "pid": 7,
+            "tid": 123,
+            "fid": 90,
+            "uid": 5,
+            "subject": "Hello",
+            "message": "Line one\\n  Line two  ",
+        }
+    }
+
+    def _fake_read(self: HFTransport, asks: dict[str, Any], helper: str | None = None) -> dict[str, Any]:
+        captured["read"].append({"asks": asks, "helper": helper})
+        return normalized_payload
+
+    def _fake_read_raw(self: HFTransport, asks: dict[str, Any], helper: str | None = None) -> dict[str, Any]:
+        captured["read_raw"].append({"asks": asks, "helper": helper})
+        return raw_payload
+
+    monkeypatch.setattr(HFTransport, "read", _fake_read)
+    monkeypatch.setattr(HFTransport, "read_raw", _fake_read_raw)
+
+    settings = HFMCPSettings(
+        profile="test",
+        enabled_capabilities=frozenset({"posts.read"}),
+        enabled_parameter_families=frozenset({"selectors.thread", "selectors.post", "filters.pagination", "fields.posts.body"}),
+        read_output_defaults=ReadOutputDefaults(mode="structured", include_raw_payload=True),
+    )
+    policy = CapabilityPolicy(settings)
+    transport = HFTransport(token_store=_StubTokenStore(), base_url="https://example.test")
+    handler = build_core_read_handlers(policy, transport)["posts.read"]
+
+    readable_result = handler(tid=123, output_mode="readable", include_raw_payload=False)
+    assert readable_result["structuredContent"] == normalized_payload
+    assert readable_result["content"][0]["type"] == "text"
+    assert "pid=7" in readable_result["content"][0]["text"]
+    assert "tid=123" in readable_result["content"][0]["text"]
+    assert "Line one\nLine two" in readable_result["content"][0]["text"]
+    assert len(readable_result["content"]) == 1
+
+    structured_result = handler(tid=123, output_mode="structured", include_raw_payload=False)
+    assert structured_result["structuredContent"] == normalized_payload
+    assert structured_result["content"] == [{"type": "text", "text": "posts.read returned 1 row(s)."}]
+
+    raw_result = handler(tid=123, output_mode="raw", include_raw_payload=False)
+    assert raw_result["structuredContent"] == normalized_payload
+    assert raw_result["content"][0] == {"type": "text", "text": "posts.read returned 1 row(s)."}
+    assert raw_result["content"][1]["type"] == "resource"
+    assert raw_result["content"][1]["resource"]["uri"] == "hf-mcp://raw/posts.read"
+    assert raw_result["content"][1]["resource"]["mimeType"] == "application/json"
+    assert json.loads(raw_result["content"][1]["resource"]["text"]) == raw_payload
+
+    defaults_result = handler(tid=123)
+    assert defaults_result["structuredContent"] == normalized_payload
+    assert defaults_result["content"][0] == {"type": "text", "text": "posts.read returned 1 row(s)."}
+    assert defaults_result["content"][1]["type"] == "resource"
+    assert json.loads(defaults_result["content"][1]["resource"]["text"]) == raw_payload
+
+    assert len(captured["read"]) == 2
+    assert len(captured["read_raw"]) == 2
+    assert all(call["helper"] == "posts" for call in captured["read"])
+    assert all(call["helper"] == "posts" for call in captured["read_raw"])

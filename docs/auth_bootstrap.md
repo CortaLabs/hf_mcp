@@ -26,6 +26,24 @@ This page documents the shipped behavior of `hf-mcp auth bootstrap`, `hf-mcp aut
 
 Failure path returns exit code `2` with `Auth bootstrap failed: ...`.
 
+Before bootstrap, create your own Hack Forums API developer app from the HF user
+control panel. `hf-mcp` does not ship shared credentials; each operator uses
+their own app client ID and secret.
+
+For the OAuth redirect, you have two supported options:
+
+- use the hosted GitHub Pages callback:
+  `https://cortalabs.github.io/hf_mcp/oauth_callback.html`
+- host the included `docs/oauth_callback.html` yourself and use that HTTPS URL
+
+Example local `.env`:
+
+```bash
+HF_MCP_CLIENT_ID=your_app_client_id
+HF_MCP_CLIENT_SECRET=your_app_client_secret
+HF_MCP_EXTERNAL_REDIRECT_URI=https://cortalabs.github.io/hf_mcp/oauth_callback.html
+```
+
 ## Hosted callback and loopback behavior
 
 Bootstrap redirect selection:

@@ -5,12 +5,14 @@ from .registry import ToolSpec, build_registry
 
 _REMOTE_LOCALITY = "remote"
 _REMOTE_RUNTIME_TIER = 4
-_OUTPUT_DEFAULT = "structured"
+_READ_OUTPUT_DEFAULT = "readable"
+_WRITE_OUTPUT_DEFAULT = "structured"
 _OUTPUT_READABLE = "additive"
 _OUTPUT_FIELD_BUNDLES = "separate_from_rendering"
 
 
 def build_tool_meta(spec: ToolSpec) -> dict[str, object]:
+    output_default = _READ_OUTPUT_DEFAULT if spec.operation == "read" else _WRITE_OUTPUT_DEFAULT
     return {
         "x-hf-locality": _REMOTE_LOCALITY,
         "x-hf-runtime-tier": _REMOTE_RUNTIME_TIER,
@@ -19,7 +21,7 @@ def build_tool_meta(spec: ToolSpec) -> dict[str, object]:
         "x-hf-coverage-family": spec.coverage_family,
         "x-hf-helper-path": spec.helper_path,
         "x-hf-transport-kind": spec.transport_kind,
-        "x-hf-output-default": _OUTPUT_DEFAULT,
+        "x-hf-output-default": output_default,
         "x-hf-output-readable": _OUTPUT_READABLE,
         "x-hf-output-field-bundles": _OUTPUT_FIELD_BUNDLES,
     }

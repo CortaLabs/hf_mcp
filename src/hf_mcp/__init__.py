@@ -26,10 +26,13 @@ def _read_local_pyproject_version() -> str | None:
 
 @lru_cache(maxsize=1)
 def _resolve_version() -> str:
+    local_version = _read_local_pyproject_version()
+    if local_version is not None:
+        return local_version
     try:
         return distribution_version(_DIST_NAME)
     except PackageNotFoundError:
-        return _read_local_pyproject_version() or _UNKNOWN_VERSION
+        return _UNKNOWN_VERSION
 
 
 __version__ = _resolve_version()

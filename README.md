@@ -2,6 +2,8 @@
 
 `hf-mcp` is a standalone MCP server package for the Hack Forums API v2.
 
+Current release line: `0.2`.
+
 ## Install
 
 ```bash
@@ -30,6 +32,60 @@ Path overrides:
 
 Full precedence and policy split are documented in [`docs/configuration.md`](docs/configuration.md).
 
+## Read output defaults
+
+Read tools default to human-readable summaries while keeping canonical JSON for scripts.
+
+- default mode: `readable`
+- per-call override: `output_mode` (`readable`, `structured`, `raw`)
+- additive raw payload toggle: `include_raw_payload`
+
+Compatibility contract for read tools:
+
+- `structuredContent` always carries normalized/canonical JSON for automation.
+- `output_mode="structured"` keeps script-friendly `structuredContent` with terse text.
+- raw payload remains available as an additive JSON resource when `output_mode="raw"` or `include_raw_payload=true`.
+
+See [`docs/configuration.md`](docs/configuration.md) for `read_output_defaults` config and
+[`docs/examples.md`](docs/examples.md) for concrete request/response examples.
+
+## Automation usage
+
+For automated clients, call read tools with `output_mode="structured"` when you only
+need normalized fields, or `output_mode="raw"` / `include_raw_payload=true` when
+you also need the exact upstream HF API payload as an additive MCP resource.
+
+Example:
+
+```json
+{
+  "tool": "posts.read",
+  "arguments": {
+    "tid": 6324346,
+    "per_page": 1,
+    "include_post_body": false,
+    "output_mode": "raw",
+    "include_raw_payload": true
+  }
+}
+```
+
+Expected protocol shape:
+
+```json
+{
+  "content": [
+    {"type": "text", "text": "posts.read returned 1 row(s)."},
+    {"type": "resource", "resource": {"uri": "hf-mcp://raw/posts.read", "mimeType": "application/json"}}
+  ],
+  "structuredContent": {
+    "posts": [
+      {"pid": "62946370", "tid": "6324346", "subject": "The HF API MCP server"}
+    ]
+  }
+}
+```
+
 ## Quick start
 
 ```bash
@@ -39,6 +95,12 @@ hf-mcp auth bootstrap
 hf-mcp doctor
 hf-mcp serve
 ```
+
+Before `auth bootstrap`, create your own Hack Forums API developer app in the HF
+user control panel. You can use the hosted callback
+`https://cortalabs.github.io/hf_mcp/oauth_callback.html` for
+`HF_MCP_EXTERNAL_REDIRECT_URI`, or host `docs/oauth_callback.html` yourself and
+use that HTTPS URL instead.
 
 Module launch equivalent:
 

@@ -7,6 +7,8 @@ from typing import Mapping
 
 import yaml
 
+from .output_modes import ReadOutputDefaults, parse_read_output_defaults
+
 ALL_CAPABILITIES: frozenset[str] = frozenset(
     {
         "me.read",
@@ -177,6 +179,7 @@ class HFMCPSettings:
     env_file_path: Path | None = None
     token_path: Path = DEFAULT_TOKEN_PATH
     runtime_env: Mapping[str, str] = field(default_factory=dict)
+    read_output_defaults: ReadOutputDefaults = field(default_factory=ReadOutputDefaults)
 
 
 def load_settings(
@@ -223,6 +226,7 @@ def load_settings(
 
     _validate_parameter_family_parents(resolved_capabilities, resolved_parameter_families)
     token_path = _resolve_token_path(raw_config.get("token_path", merged_env.get("HF_MCP_TOKEN_PATH")))
+    read_output_defaults = parse_read_output_defaults(raw_config.get("read_output_defaults"))
 
     return HFMCPSettings(
         profile=profile,
@@ -232,6 +236,7 @@ def load_settings(
         env_file_path=env_file_path,
         token_path=token_path,
         runtime_env=dict(merged_env),
+        read_output_defaults=read_output_defaults,
     )
 
 

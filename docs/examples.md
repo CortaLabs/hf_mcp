@@ -3,6 +3,136 @@
 All examples are `JSON-first` and use structured request/response shapes that
 match the current public tool registry.
 
+## Read output modes (`threads.read`)
+
+Read tools accept per-call output overrides:
+
+- `output_mode`: `readable` (default), `structured`, or `raw`
+- `include_raw_payload`: optional additive raw JSON payload toggle
+
+### Default readable output
+
+Request:
+
+```json
+{
+  "tool": "threads.read",
+  "arguments": {
+    "fid": 375,
+    "page": 1,
+    "per_page": 10
+  }
+}
+```
+
+Response (illustrative):
+
+```json
+{
+  "content": [
+    {
+      "type": "text",
+      "text": "threads.read returned 1 row(s):\n- tid=123, fid=375, subject=Topic title, uid=5, username=alice"
+    }
+  ],
+  "structuredContent": {
+    "threads": [
+      {
+        "tid": "123",
+        "fid": "375",
+        "subject": "Topic title",
+        "uid": "5",
+        "username": "alice"
+      }
+    ]
+  }
+}
+```
+
+### Explicit structured compatibility output
+
+Request:
+
+```json
+{
+  "tool": "threads.read",
+  "arguments": {
+    "fid": 375,
+    "output_mode": "structured"
+  }
+}
+```
+
+Response (illustrative):
+
+```json
+{
+  "content": [
+    {
+      "type": "text",
+      "text": "threads.read returned 1 row(s)."
+    }
+  ],
+  "structuredContent": {
+    "threads": [
+      {
+        "tid": "123",
+        "fid": "375",
+        "subject": "Topic title",
+        "uid": "5",
+        "username": "alice"
+      }
+    ]
+  }
+}
+```
+
+### Explicit raw output
+
+Request:
+
+```json
+{
+  "tool": "threads.read",
+  "arguments": {
+    "fid": 375,
+    "output_mode": "raw"
+  }
+}
+```
+
+Response (illustrative):
+
+```json
+{
+  "content": [
+    {
+      "type": "text",
+      "text": "threads.read returned 1 row(s)."
+    },
+    {
+      "type": "resource",
+      "resource": {
+        "uri": "hf-mcp://raw/threads.read",
+        "mimeType": "application/json",
+        "text": "{\"threads\":[{\"tid\":\"123\",\"fid\":\"375\",\"subject\":\"Topic title\",\"uid\":\"5\",\"username\":\"alice\"}]}"
+      }
+    }
+  ],
+  "structuredContent": {
+    "threads": [
+      {
+        "tid": "123",
+        "fid": "375",
+        "subject": "Topic title",
+        "uid": "5",
+        "username": "alice"
+      }
+    ]
+  }
+}
+```
+
 ## `me.read`
 
 Request:
@@ -21,14 +151,22 @@ Response:
 
 ```json
 {
-  "me": [
+  "content": [
     {
-      "uid": "1",
-      "username": "example_user",
-      "usergroup": "4",
-      "avatar": "https://example.test/avatar.png"
+      "type": "text",
+      "text": "me.read profile: uid=1, username=example_user, usergroup=4"
     }
-  ]
+  ],
+  "structuredContent": {
+    "me": [
+      {
+        "uid": "1",
+        "username": "example_user",
+        "usergroup": "4",
+        "avatar": "https://example.test/avatar.png"
+      }
+    ]
+  }
 }
 ```
 
@@ -51,12 +189,23 @@ Response:
 
 ```json
 {
-  "threads": [
+  "content": [
     {
-      "tid": "123",
-      "subject": "Topic title"
+      "type": "text",
+      "text": "threads.read returned 1 row(s):\n- tid=123, fid=375, subject=Topic title, uid=5, username=alice"
     }
-  ]
+  ],
+  "structuredContent": {
+    "threads": [
+      {
+        "tid": "123",
+        "fid": "375",
+        "subject": "Topic title",
+        "uid": "5",
+        "username": "alice"
+      }
+    ]
+  }
 }
 ```
 
@@ -79,13 +228,24 @@ Response:
 
 ```json
 {
-  "posts": [
+  "content": [
     {
-      "pid": "88",
-      "subject": "Post subject",
-      "message": "Post body"
+      "type": "text",
+      "text": "posts.read returned 1 row(s):\n- pid=88, tid=123, fid=375, uid=5, subject=Post subject, message=Post body"
     }
-  ]
+  ],
+  "structuredContent": {
+    "posts": [
+      {
+        "pid": "88",
+        "tid": "123",
+        "fid": "375",
+        "uid": "5",
+        "subject": "Post subject",
+        "message": "Post body"
+      }
+    ]
+  }
 }
 ```
 
@@ -109,7 +269,7 @@ Request:
 }
 ```
 
-Response:
+StructuredContent excerpt (illustrative):
 
 ```json
 {

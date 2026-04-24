@@ -9,7 +9,7 @@ from .capabilities import CapabilityPolicy
 from .config import HFMCPSettings
 from .metadata import get_tool_specs
 from .registry import get_documented_write_specs
-from .schemas import build_tool_schema
+from .schemas import build_tool_output_schema, build_tool_schema
 from .token_store import load_token_store
 from .tools.read_core import build_core_read_handlers
 from .tools.read_extended import build_extended_read_handlers
@@ -94,6 +94,7 @@ def _register_via_register_tool(
     description: str,
     input_schema: dict[str, object],
     annotations: dict[str, object],
+    output_schema: dict[str, object] | None,
     handler: Any,
 ) -> bool:
     register_tool = getattr(server, "register_tool", None)
@@ -105,6 +106,7 @@ def _register_via_register_tool(
         description=description,
         input_schema=input_schema,
         annotations=annotations,
+        output_schema=output_schema,
         handler=handler,
     )
     return True
@@ -134,6 +136,7 @@ def register_tools(server: Any, policy: CapabilityPolicy, runtime: RuntimeBundle
     for spec in specs:
         handler = concrete_handlers.get(spec.tool_name, _build_unimplemented_handler(spec.tool_name))
         schema = _shape_live_input_schema(spec.tool_name, build_tool_schema(spec, policy), handler)
+        output_schema = build_tool_output_schema(spec)
         annotations = build_annotations(spec)
         registered = _register_via_register_tool(
             server,
@@ -141,6 +144,7 @@ def register_tools(server: Any, policy: CapabilityPolicy, runtime: RuntimeBundle
             description=_tool_description(spec.tool_name, spec.operation),
             input_schema=schema,
             annotations=annotations,
+            output_schema=output_schema,
             handler=handler,
         )
         if not registered:

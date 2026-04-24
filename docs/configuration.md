@@ -43,6 +43,8 @@ Use YAML (`config.yaml`) for non-secret runtime policy:
 - `disabled_capabilities`
 - `enabled_parameter_families`
 - `disabled_parameter_families`
+- `read_output_defaults.mode`
+- `read_output_defaults.include_raw_payload`
 - optional `token_path`
 
 Use env (`.env` or shell) for secrets and machine-local auth/bootstrap settings:
@@ -59,10 +61,51 @@ Environment variables must not be used to choose non-secret runtime policy.
 - `HF_MCP_TOKEN_URL`
 - `HF_MCP_AUTH_TIMEOUT_SECONDS`
 
+Before running `hf-mcp auth bootstrap`, create your own Hack Forums API developer
+app in the HF user control panel. The app's client ID and client secret belong in
+local env/config only.
+
+Redirect options:
+
+- use the hosted callback: `https://cortalabs.github.io/hf_mcp/oauth_callback.html`
+- or host `docs/oauth_callback.html` yourself and set `HF_MCP_EXTERNAL_REDIRECT_URI`
+  to your own HTTPS URL
+
+Example `.env`:
+
+```bash
+HF_MCP_CLIENT_ID=your_app_client_id
+HF_MCP_CLIENT_SECRET=your_app_client_secret
+HF_MCP_EXTERNAL_REDIRECT_URI=https://cortalabs.github.io/hf_mcp/oauth_callback.html
+```
+
 Merge behavior:
 
 - `.env` values load first
 - process environment wins on key conflicts
+
+## Read output defaults
+
+Read tools use this YAML block for default output behavior:
+
+```yaml
+read_output_defaults:
+  mode: readable
+  include_raw_payload: false
+```
+
+Mode options:
+
+- `readable` (default): human-readable text plus canonical `structuredContent`
+- `structured`: terse text plus canonical `structuredContent` for script compatibility
+- `raw`: terse text plus canonical `structuredContent`, with the exact upstream payload attached as an additive JSON resource
+
+Per-call read-tool overrides:
+
+- `output_mode` overrides `read_output_defaults.mode` for that call
+- `include_raw_payload` overrides `read_output_defaults.include_raw_payload` for that call
+
+Raw payload remains additive. `structuredContent` stays normalized/canonical for scripts even when raw payload is included.
 
 ## Profiles and overlays
 
@@ -103,6 +146,10 @@ Operational notes:
 
 ```yaml
 profile: reader
+
+read_output_defaults:
+  mode: readable
+  include_raw_payload: false
 
 disabled_capabilities:
   - sigmarket.market.read

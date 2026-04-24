@@ -1,7 +1,7 @@
 [size=xx-large][align=center][css=68]HF MCP Is Live:
 Hack Forums API Tools For Agents[/css][/align][/size]
 
-[align=center][img=850x550]https://raw.githubusercontent.com/CortaLabs/hf_mcp/main/docs/hf_mcp_banner.png[/img][/align]
+[align=center][url=https://cortalabs.github.io/hf_mcp/][img=850x550]https://raw.githubusercontent.com/CortaLabs/hf_mcp/main/docs/hf_mcp_banner.png[/img][/url][/align]
 
 I have been working on a proper MCP server for the Hack Forums API v2.
 
@@ -35,17 +35,166 @@ Current read tools cover the stuff an agent needs to actually understand what is
 
 The core browsing path is the important part: an assistant can move from forum, to thread, to posts, to users without needing you to manually feed it every ID after the first step.
 
+Read output is designed for both humans and scripts. You do not have to choose between pretty text and usable data:
+
+[list]
+[*][b]Readable by default[/b] - tools return a short plain-English summary for the client UI.
+[*][b]Structured for automation[/b] - every read still exposes canonical `structuredContent`, so scripts and agents can parse stable JSON instead of scraping text.
+[*][b]Raw when you need it[/b] - pass `output_mode="raw"` or `include_raw_payload=true` to attach the exact upstream API payload as an MCP resource.
+[/list]
+
+Example read call:
+
+[code]{
+  "tool": "posts.read",
+  "arguments": {
+    "tid": 6324346,
+    "per_page": 1,
+    "output_mode": "raw",
+    "include_raw_payload": true
+  }
+}[/code]
+
+That comes back as normal MCP content: a readable text item, top-level `structuredContent`, and an additive raw JSON resource when requested. The raw payload is not jammed into the summary text.
+
+Readable mode is the default. It is meant for humans watching the agent work:
+
+[code]{
+  "tool": "threads.read",
+  "arguments": {
+    "fid": 375,
+    "tid": 6324346,
+    "output_mode": "readable"
+  }
+}[/code]
+
+Example readable output:
+
+[code]content:
+- type: text
+  text: "threads.read returned 1 row(s):
+  - tid=6324346, fid=375, subject=The HF API MCP server, uid=2047020, username=NoSuchAgency"
+
+structuredContent:
+{
+  "threads": [
+    {
+      "tid": "6324346",
+      "fid": "375",
+      "subject": "The HF API MCP server",
+      "uid": "2047020",
+      "username": "NoSuchAgency"
+    }
+  ]
+}[/code]
+
+Structured mode is better when you are writing scripts or agent workflows that only need stable fields:
+
+[code]{
+  "tool": "posts.read",
+  "arguments": {
+    "tid": 6324346,
+    "per_page": 1,
+    "include_post_body": false,
+    "output_mode": "structured"
+  }
+}[/code]
+
+Example structured output:
+
+[code]content:
+- type: text
+  text: "posts.read returned 1 row(s)."
+
+structuredContent:
+{
+  "posts": [
+    {
+      "pid": "62946370",
+      "tid": "6324346",
+      "fid": "375",
+      "subject": "The HF API MCP server"
+    }
+  ]
+}[/code]
+
+Raw mode is for debugging, auditing, or building tooling that needs the exact upstream HF API payload too:
+
+[code]{
+  "tool": "posts.read",
+  "arguments": {
+    "tid": 6324346,
+    "per_page": 1,
+    "include_post_body": false,
+    "output_mode": "raw",
+    "include_raw_payload": true
+  }
+}[/code]
+
+Example raw output:
+
+[code]content:
+- type: text
+  text: "posts.read returned 1 row(s)."
+- type: resource
+  resource:
+    uri: "hf-mcp://raw/posts.read"
+    mimeType: "application/json"
+    text: "{\"posts\":[{\"pid\":\"62946370\",\"tid\":\"6324346\",\"subject\":\"The HF API MCP server\"}]}"
+
+structuredContent:
+{
+  "posts": [
+    {
+      "pid": "62946370",
+      "tid": "6324346",
+      "subject": "The HF API MCP server"
+    }
+  ]
+}[/code]
+
 The write side exists too, but it is deliberately gated. Thread creation, replies, and Bytes actions require explicit live confirmation before they run.
 
 That is not a limitation I am trying to hide. It is there because this touches a real HF account.
 
-Install path:
+Setup path:
 
 [code]pip install hf-mcp
 hf-mcp setup init
 hf-mcp auth bootstrap
 hf-mcp doctor
 hf-mcp serve[/code]
+
+The setup flow is:
+
+[list]
+[*]Create your own Hack Forums API developer app from the HF user control panel.
+[*]For the OAuth redirect, you can use the hosted GitHub Pages callback at `https://cortalabs.github.io/hf_mcp/oauth_callback.html`, or you can host the included `docs/oauth_callback.html` yourself.
+[*]Put the client ID and client secret in local environment/config only. Do not paste secrets into client prompts or forum posts.
+[*]Run `hf-mcp setup init` to create the local config.
+[*]Run `hf-mcp auth bootstrap` to authorize your account and save the local token.
+[*]Run `hf-mcp doctor` before serving. It checks config path, token path, token presence, and whether the runtime is ready.
+[*]Point your MCP client at `hf-mcp serve`.
+[/list]
+
+Example local `.env` values:
+
+[code]HF_MCP_CLIENT_ID=your_app_client_id
+HF_MCP_CLIENT_SECRET=your_app_client_secret
+HF_MCP_EXTERNAL_REDIRECT_URI=https://cortalabs.github.io/hf_mcp/oauth_callback.html[/code]
+
+If you host your own callback page, set `HF_MCP_EXTERNAL_REDIRECT_URI` to your own HTTPS URL instead.
+
+Minimal client command:
+
+[code]hf-mcp serve[/code]
+
+If your client wants the command as JSON, the shape is basically:
+
+[code]{
+  "command": "hf-mcp",
+  "args": ["serve"]
+}[/code]
 
 [align=center][img]https://i.ibb.co.com/N2NSzmv9/divider.gif[/img][/align]
 [size=x-large][align=center][css=68]Why MCP Works Well For HF[/css][/align][/size]

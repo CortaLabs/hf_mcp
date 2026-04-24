@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import json
 import inspect
+import os
 import sys
 from pathlib import Path
 from typing import Any
 
+import anyio
 import pytest
 
 PRODUCT_ROOT = Path(__file__).resolve().parents[1]
@@ -16,8 +19,11 @@ from hf_mcp.capabilities import CapabilityPolicy
 from hf_mcp.config import HFMCPSettings, PRESET_CAPABILITIES, PRESET_PARAMETER_FAMILIES
 from hf_mcp.dispatcher import RuntimeBundle, register_tools
 from hf_mcp.metadata import get_tool_specs
+from hf_mcp.server import _FastMCPToolAdapter
 from hf_mcp.server import create_server, serve_stdio
 from hf_mcp.token_store import TokenBundle
+from hf_mcp.tools.read_core import build_core_read_handlers
+from hf_mcp.tools.read_extended import build_extended_read_handlers
 from hf_mcp.transport import HFTransport
 
 
@@ -33,11 +39,13 @@ class _CaptureServer:
         input_schema: dict[str, Any],
         annotations: dict[str, Any],
         handler: Any,
+        output_schema: dict[str, object] | None = None,
     ) -> None:
         self.tools[name] = {
             "description": description,
             "input_schema": input_schema,
             "annotations": annotations,
+            "output_schema": output_schema,
             "handler": handler,
         }
 
@@ -45,6 +53,24 @@ class _CaptureServer:
 class _StubTokenStore:
     def require_bundle(self) -> TokenBundle:
         return TokenBundle(access_token="token", token_type="Bearer", scope=frozenset())
+
+
+class _StubReadTransport:
+    def read(self, *, asks: dict[str, Any], helper: str) -> dict[str, Any]:
+        del asks
+        if helper == "me":
+            return {"me": [{"uid": "5", "username": "forge"}]}
+        if helper == "sigmarket/order":
+            return {"sigmarket/order": [{"oid": "17", "uid": "5"}]}
+        raise AssertionError(f"unexpected helper: {helper}")
+
+    def read_raw(self, *, asks: dict[str, Any], helper: str) -> dict[str, Any]:
+        del asks
+        if helper == "me":
+            return {"me": [{"uid": "5", "username": "forge", "raw": True}]}
+        if helper == "sigmarket/order":
+            return {"sigmarket/order": [{"oid": "17", "uid": "5", "raw": True}]}
+        raise AssertionError(f"unexpected helper: {helper}")
 
 
 def _runtime_bundle() -> RuntimeBundle:
@@ -63,6 +89,204 @@ def _policy(*, enabled_capabilities: set[str], enabled_parameter_families: set[s
             enabled_parameter_families=frozenset(enabled_parameter_families),
         )
     )
+
+
+def _assert_rejects_nested_envelope_json_text(result: Any) -> None:
+    for item in result.content:
+        if getattr(item, "type", None) != "text":
+            continue
+        text_value = getattr(item, "text", None)
+        if not isinstance(text_value, str):
+            continue
+        try:
+            parsed = json.loads(text_value)
+        except json.JSONDecodeError:
+            continue
+        if (
+            isinstance(parsed, dict)
+            and isinstance(parsed.get("content"), list)
+            and isinstance(parsed.get("structuredContent"), dict)
+        ):
+            raise AssertionError("Nested envelope JSON detected in text content")
+
+
+def test_nested_envelope_json_in_text_content_is_rejected_by_validator() -> None:
+    import mcp.types as mcp_types
+
+    nested_json = json.dumps({"content": [{"type": "text", "text": "legacy"}], "structuredContent": {"me": []}})
+    result = mcp_types.CallToolResult(
+        content=[mcp_types.TextContent(type="text", text=nested_json)],
+        structuredContent={"me": []},
+    )
+
+    with pytest.raises(AssertionError, match="Nested envelope JSON detected"):
+        _assert_rejects_nested_envelope_json_text(result)
+
+
+def test_fastmcp_adapter_converts_hf_envelope_dict_to_protocol_call_tool_result() -> None:
+    import mcp.types as mcp_types
+
+    class _FakeApp:
+        def __init__(self) -> None:
+            self._handler: Any | None = None
+
+        def add_tool(
+            self,
+            handler: Any,
+            *,
+            name: str,
+            description: str,
+            annotations: object | None = None,
+            structured_output: bool | None = None,
+        ) -> None:
+            del name
+            del description
+            del annotations
+            del structured_output
+            self._handler = handler
+
+    envelope = {
+        "content": [
+            {"type": "text", "text": "me.read returned 1 row(s)."},
+            {
+                "type": "resource",
+                "resource": {
+                    "uri": "hf-mcp://raw/me.read",
+                    "mimeType": "application/json",
+                    "text": "{\"me\":[{\"uid\":\"5\"}]}",
+                },
+            },
+        ],
+        "structuredContent": {"me": [{"uid": "5"}]},
+    }
+
+    fake_app = _FakeApp()
+    adapter = _FastMCPToolAdapter(fake_app)
+    adapter.register_tool(
+        name="me.read",
+        description="Read me",
+        input_schema={"type": "object", "properties": {}},
+        annotations={
+            "title": "me.read",
+            "readOnlyHint": True,
+            "destructiveHint": False,
+            "idempotentHint": True,
+            "openWorldHint": True,
+        },
+        handler=lambda **_: envelope,
+        output_schema={"type": "object"},
+    )
+
+    assert fake_app._handler is not None
+    normalized = fake_app._handler()
+    assert isinstance(normalized, mcp_types.CallToolResult)
+    assert normalized.structuredContent == {"me": [{"uid": "5"}]}
+    assert len(normalized.content) == 2
+    assert isinstance(normalized.content[0], mcp_types.TextContent)
+    assert isinstance(normalized.content[1], mcp_types.EmbeddedResource)
+    assert str(normalized.content[1].resource.uri) == "hf-mcp://raw/me.read"
+
+
+def test_runtime_stdio_client_session_returns_protocol_structured_content_and_raw_resource() -> None:
+    from mcp import ClientSession
+    from mcp.client.stdio import StdioServerParameters, stdio_client
+
+    server_probe = """
+import sys
+from hf_mcp.capabilities import CapabilityPolicy
+from hf_mcp.config import HFMCPSettings
+from hf_mcp.dispatcher import RuntimeBundle, register_tools
+from hf_mcp.server import _FastMCPToolAdapter
+from hf_mcp.token_store import TokenBundle
+from hf_mcp.transport import HFTransport
+from mcp.server.fastmcp import FastMCP
+
+class _ProbeTokenStore:
+    def require_bundle(self):
+        return TokenBundle(access_token="token", token_type="Bearer", scope=frozenset({"read"}))
+
+def _stub_read(*, asks, helper):
+    del asks
+    if helper != "me":
+        raise RuntimeError(f"unexpected helper: {helper}")
+    return {"me": [{"uid": "5", "username": "forge"}]}
+
+def _stub_read_raw(*, asks, helper):
+    del asks
+    if helper != "me":
+        raise RuntimeError(f"unexpected helper: {helper}")
+    return {"me": [{"uid": "5", "username": "forge", "raw": True}]}
+
+transport = HFTransport(token_store=_ProbeTokenStore(), base_url="https://example.test")
+transport.read = _stub_read
+transport.read_raw = _stub_read_raw
+
+settings = HFMCPSettings(
+    profile="test",
+    enabled_capabilities=frozenset({"me.read"}),
+    enabled_parameter_families=frozenset({"fields.me.basic", "selectors.user"}),
+)
+policy = CapabilityPolicy(settings)
+app = FastMCP(name="hf-mcp-probe")
+adapter = _FastMCPToolAdapter(app)
+register_tools(adapter, policy, RuntimeBundle(transport=transport))
+app.run(transport="stdio")
+"""
+
+    async def _run_probe() -> None:
+        env = dict(os.environ)
+        pythonpath = env.get("PYTHONPATH")
+        src_path = str(SRC_PATH)
+        env["PYTHONPATH"] = f"{src_path}:{pythonpath}" if pythonpath else src_path
+        params = StdioServerParameters(
+            command=sys.executable,
+            args=["-c", server_probe],
+            env=env,
+            cwd=str(PRODUCT_ROOT),
+        )
+        async with stdio_client(params) as (read_stream, write_stream):
+            async with ClientSession(read_stream, write_stream) as session:
+                await session.initialize()
+                result = await session.call_tool(
+                    "me.read",
+                    {"output_mode": "raw", "include_raw_payload": True},
+                )
+        assert result.structuredContent is not None
+        assert result.structuredContent["me"][0]["uid"] == "5"
+        assert any(getattr(item, "type", None) == "resource" for item in result.content)
+        _assert_rejects_nested_envelope_json_text(result)
+
+    anyio.run(_run_probe)
+
+
+def test_core_read_handler_contract_stays_internal_envelope_dict() -> None:
+    policy = _policy(
+        enabled_capabilities={"me.read"},
+        enabled_parameter_families={"fields.me.basic", "selectors.user"},
+    )
+    handler = build_core_read_handlers(policy, _StubReadTransport())["me.read"]
+
+    result = handler(output_mode="structured", include_raw_payload=False)
+
+    assert isinstance(result, dict)
+    assert isinstance(result.get("content"), list)
+    assert isinstance(result.get("structuredContent"), dict)
+    assert "me" in result["structuredContent"]
+
+
+def test_extended_read_handler_contract_stays_internal_envelope_dict() -> None:
+    policy = _policy(
+        enabled_capabilities={"sigmarket.order.read"},
+        enabled_parameter_families={"selectors.sigmarket", "filters.pagination"},
+    )
+    handler = build_extended_read_handlers(policy, _StubReadTransport())["sigmarket.order.read"]
+
+    result = handler(oid=17, output_mode="raw", include_raw_payload=True)
+
+    assert isinstance(result, dict)
+    assert isinstance(result.get("content"), list)
+    assert isinstance(result.get("structuredContent"), dict)
+    assert "sigmarket/order" in result["structuredContent"]
 
 
 def test_dispatcher_registers_only_policy_allowed_registry_rows() -> None:
@@ -110,11 +334,12 @@ def test_metadata_and_annotations_are_remote_tier4_and_operation_honest() -> Non
     assert read_annotations["_meta"]["x-hf-locality"] == "remote"
     assert read_annotations["_meta"]["x-hf-runtime-tier"] == 4
     assert read_annotations["_meta"]["x-hf-operation"] == "read"
-    assert read_annotations["_meta"]["x-hf-output-default"] == "structured"
+    assert read_annotations["_meta"]["x-hf-output-default"] == "readable"
     assert read_annotations["_meta"]["x-hf-output-readable"] == "additive"
     assert (
         read_annotations["_meta"]["x-hf-output-field-bundles"] == "separate_from_rendering"
     )
+    assert server.tools["threads.read"]["output_schema"] is not None
 
     write_annotations = server.tools["posts.reply"]["annotations"]
     assert write_annotations["readOnlyHint"] is False
@@ -128,6 +353,7 @@ def test_metadata_and_annotations_are_remote_tier4_and_operation_honest() -> Non
     assert (
         write_annotations["_meta"]["x-hf-output-field-bundles"] == "separate_from_rendering"
     )
+    assert server.tools["posts.reply"]["output_schema"] is None
 
 
 def test_create_server_uses_dispatcher_as_single_registration_authority(
@@ -258,15 +484,27 @@ def test_create_server_publishes_truthful_core_read_input_schemas(
     assert "uid" not in me_schema.get("required", [])
     assert me_schema["properties"]["include_basic_fields"]["default"] is True
     assert me_schema["properties"]["include_advanced_fields"]["default"] is False
+    assert set(me_schema["properties"]["output_mode"]["enum"]) == {"readable", "structured", "raw"}
+    assert me_schema["properties"]["output_mode"]["default"] == "readable"
+    assert me_schema["properties"]["include_raw_payload"]["default"] is False
 
     assert threads_schema["properties"]["page"]["default"] == 1
     assert threads_schema["properties"]["per_page"]["default"] == 30
+    assert set(threads_schema["properties"]["output_mode"]["enum"]) == {"readable", "structured", "raw"}
+    assert threads_schema["properties"]["output_mode"]["default"] == "readable"
+    assert threads_schema["properties"]["include_raw_payload"]["default"] is False
     assert set(threads_schema.get("required", [])) == {"fid"}
 
     assert posts_schema["properties"]["page"]["default"] == 1
     assert posts_schema["properties"]["per_page"]["default"] == 30
     assert posts_schema["properties"]["include_post_body"]["default"] is True
+    assert set(posts_schema["properties"]["output_mode"]["enum"]) == {"readable", "structured", "raw"}
+    assert posts_schema["properties"]["include_raw_payload"]["type"] == "boolean"
     assert set(posts_schema.get("required", [])) == {"tid"}
+
+    assert server.tools["me.read"].output_schema is not None
+    assert server.tools["threads.read"].output_schema is not None
+    assert server.tools["posts.read"].output_schema is not None
 
 
 def test_core_write_rows_register_concrete_handlers_while_later_rows_remain_placeholders() -> None:
@@ -477,6 +715,7 @@ def test_serve_stdio_publishes_dispatcher_contract_for_live_runtime(
             description: str,
             annotations: object | None = None,
             meta: dict[str, object] | None = None,
+            output_schema: dict[str, object] | None = None,
             **_: object,
         ) -> None:
             self.registered_tools[name] = {
@@ -484,6 +723,7 @@ def test_serve_stdio_publishes_dispatcher_contract_for_live_runtime(
                 "description": description,
                 "annotations": annotations,
                 "meta": meta,
+                "output_schema": output_schema,
             }
 
         def run(self, *, transport: str) -> None:
@@ -524,17 +764,22 @@ def test_serve_stdio_publishes_dispatcher_contract_for_live_runtime(
         if hasattr(published_annotations, "model_dump"):
             published_annotations = published_annotations.model_dump(exclude_none=True)
         assert published_annotations == expected_tool.annotations
+        assert published["output_schema"] == expected_tool.output_schema
 
     me_signature = inspect.signature(app.registered_tools["me.read"]["handler"])
     assert "uid" not in me_signature.parameters
     assert me_signature.parameters["include_basic_fields"].default is True
     assert me_signature.parameters["include_advanced_fields"].default is False
+    assert me_signature.parameters["output_mode"].default is None
+    assert me_signature.parameters["include_raw_payload"].default is None
 
     threads_signature = inspect.signature(app.registered_tools["threads.read"]["handler"])
     assert threads_signature.parameters["fid"].default is inspect.Parameter.empty
     assert threads_signature.parameters["tid"].default is None
     assert threads_signature.parameters["page"].default == 1
     assert threads_signature.parameters["per_page"].default == 30
+    assert threads_signature.parameters["output_mode"].default is None
+    assert threads_signature.parameters["include_raw_payload"].default is None
 
     posts_signature = inspect.signature(app.registered_tools["posts.read"]["handler"])
     assert posts_signature.parameters["tid"].default is inspect.Parameter.empty
@@ -542,6 +787,8 @@ def test_serve_stdio_publishes_dispatcher_contract_for_live_runtime(
     assert posts_signature.parameters["page"].default == 1
     assert posts_signature.parameters["per_page"].default == 30
     assert posts_signature.parameters["include_post_body"].default is True
+    assert posts_signature.parameters["output_mode"].default is None
+    assert posts_signature.parameters["include_raw_payload"].default is None
 
     reply_signature = inspect.signature(app.registered_tools["posts.reply"]["handler"])
     assert set(reply_signature.parameters.keys()) == {"tid", "message", "confirm_live"}
@@ -611,6 +858,7 @@ def test_serve_stdio_runs_stdio_runtime_once_without_restart_loop(
     )
 
     run_calls: list[str] = []
+    registered_names: list[str] = []
 
     class _FakeFastMCP:
         def __init__(self, name: str) -> None:
@@ -626,7 +874,7 @@ def test_serve_stdio_runs_stdio_runtime_once_without_restart_loop(
             meta: dict[str, object] | None = None,
         ) -> None:
             del handler
-            del name
+            registered_names.append(name)
             del description
             del annotations
             del meta
@@ -640,6 +888,7 @@ def test_serve_stdio_runs_stdio_runtime_once_without_restart_loop(
     serve_stdio(settings)
 
     assert run_calls == ["stdio"]
+    assert registered_names == ["threads.read"]
 
 
 def test_serve_stdio_does_not_retry_when_stdio_is_closed(
