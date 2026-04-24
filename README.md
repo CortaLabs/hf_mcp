@@ -63,7 +63,7 @@ Example:
   "arguments": {
     "tid": 6324346,
     "per_page": 1,
-    "include_post_body": false,
+    "include_post_body": true,
     "output_mode": "raw",
     "include_raw_payload": true
   }
@@ -80,7 +80,12 @@ Expected protocol shape:
   ],
   "structuredContent": {
     "posts": [
-      {"pid": "62946370", "tid": "6324346", "subject": "The HF API MCP server"}
+      {
+        "pid": "62946370",
+        "tid": "6324346",
+        "subject": "The HF API MCP server",
+        "message": "[size=xx-large][align=center][css=68]HF MCP Is Live..."
+      }
     ]
   }
 }

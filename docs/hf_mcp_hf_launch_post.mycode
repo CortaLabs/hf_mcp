@@ -50,12 +50,13 @@ Example read call:
   "arguments": {
     "tid": 6324346,
     "per_page": 1,
+    "include_post_body": true,
     "output_mode": "raw",
     "include_raw_payload": true
   }
 }[/code]
 
-That comes back as normal MCP content: a readable text item, top-level `structuredContent`, and an additive raw JSON resource when requested. The raw payload is not jammed into the summary text.
+That comes back as normal MCP content: a readable text item, top-level `structuredContent`, and an additive raw JSON resource when requested. Post bodies are included when you ask for them. The raw payload is not jammed into the summary text.
 
 Readable mode is the default. It is meant for humans watching the agent work:
 
@@ -95,7 +96,7 @@ Structured mode is better when you are writing scripts or agent workflows that o
   "arguments": {
     "tid": 6324346,
     "per_page": 1,
-    "include_post_body": false,
+    "include_post_body": true,
     "output_mode": "structured"
   }
 }[/code]
@@ -113,7 +114,8 @@ structuredContent:
       "pid": "62946370",
       "tid": "6324346",
       "fid": "375",
-      "subject": "The HF API MCP server"
+      "subject": "The HF API MCP server",
+      "message": "[size=xx-large][align=center][css=68]HF MCP Is Live..."
     }
   ]
 }[/code]
@@ -125,7 +127,7 @@ Raw mode is for debugging, auditing, or building tooling that needs the exact up
   "arguments": {
     "tid": 6324346,
     "per_page": 1,
-    "include_post_body": false,
+    "include_post_body": true,
     "output_mode": "raw",
     "include_raw_payload": true
   }
@@ -140,7 +142,7 @@ Example raw output:
   resource:
     uri: "hf-mcp://raw/posts.read"
     mimeType: "application/json"
-    text: "{\"posts\":[{\"pid\":\"62946370\",\"tid\":\"6324346\",\"subject\":\"The HF API MCP server\"}]}"
+    text: "{\"posts\":[{\"pid\":\"62946370\",\"tid\":\"6324346\",\"subject\":\"The HF API MCP server\",\"message\":\"[size=xx-large][align=center][css=68]HF MCP Is Live...\"}]}"
 
 structuredContent:
 {
@@ -148,7 +150,8 @@ structuredContent:
     {
       "pid": "62946370",
       "tid": "6324346",
-      "subject": "The HF API MCP server"
+      "subject": "The HF API MCP server",
+      "message": "[size=xx-large][align=center][css=68]HF MCP Is Live..."
     }
   ]
 }[/code]
