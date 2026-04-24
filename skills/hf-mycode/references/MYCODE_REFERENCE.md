@@ -42,9 +42,27 @@ When inputs include tags not covered by HF helpdoc 45 (for example `[table]`, `[
 - HTML `<a href="...">text</a>` -> `[url=...]text[/url]`
 - HTML lists -> `[list]` + `[*]` items
 
+## HF API / MCP Write Quote Boundary
+
+When content is posted through the HF API write path, treat double-quote entity conversion as expected HF security/sanitization behavior.
+
+Observed live behavior from `hf-mcp posts.reply` probes on thread `6324346`:
+
+- Raw double quotes in `[code]` JSON examples read back as `&quot;`.
+- Inline raw double quotes read back as `&quot;`.
+- Decimal numeric quote entities (`&#34;`) were canonicalized to `&quot;`, so pre-encoding quotes is not a proven escape hatch.
+- Single quotes stayed readable in YAML-ish examples, but that is a formatting workaround, not JSON fidelity.
+
+Practical guidance:
+
+- Do not promise that API/MCP-posted JSON snippets will be copy-ready from the public HF page.
+- Prefer quote-light formats, YAML-ish examples, single-quoted formats where valid, screenshots, attachments, paste links, or explicit "illustrative only" labels for quote-heavy examples.
+- MCP clients may decode entities for readable/structured output, but raw payload views should preserve the upstream HF API response.
+
 ## Minimal Validation Checklist
 
 - All tags close correctly.
 - Nested tags are balanced.
 - HF-specific guidance only uses helpdoc 45-supported forms.
 - Conditional/unverified tags are explicitly labeled.
+- API/MCP-posted code examples account for the quote-sanitization boundary.

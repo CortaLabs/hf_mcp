@@ -38,15 +38,21 @@ Use this skill for hf-mcp write tasks so live-write guardrails stay explicit, co
    - `posts.reply`: thread selector plus content (`tid`, `message`, `confirm_live`).
    - Bytes writes: target and amount details where required, plus `confirm_live`.
 
-4. Treat placeholder rows as documented scope continuity only.
+4. Treat HF API quote sanitization as an expected live-write safety boundary.
+   - Do not promise that quote-heavy code examples posted through `posts.reply` or `threads.create` will preserve copy-ready literal double quotes on the forum page.
+   - Live probes on thread `6324346` showed raw double quotes in `[code]` and inline text read back as `&quot;`; decimal numeric quote entities (`&#34;`) were also canonicalized to `&quot;`.
+   - Frame this as natural HF security/sanitization for API-written forum content, not as a surprising MCP transport bug.
+   - For public update posts, prefer quote-light formats, YAML-ish examples, single-quoted examples where valid, screenshots, attachments, paste links, or an explicit note that the snippet is illustrative rather than copy-ready.
+
+5. Treat placeholder rows as documented scope continuity only.
    - They are part of coverage tracking, but not concrete helper commitments today.
    - Do not provide runnable examples that imply these rows are currently executable.
 
-5. Keep autonomous posting out of scope.
+6. Keep autonomous posting out of scope.
    - This skill does not normalize ungated automation or unattended live posting.
    - Escalate any automation request into explicit planning with operator-controlled gates.
 
-6. Route raw HF API internals to `hf-api-v2` when requested.
+7. Route raw HF API internals to `hf-api-v2` when requested.
    - Use `hf-api-v2` for low-level API semantics and scope details, not this write-usage surface.
 
 ## Verification
@@ -55,6 +61,7 @@ Use this skill for hf-mcp write tasks so live-write guardrails stay explicit, co
 - Confirm `confirm_live=true` is explicitly present for concrete writes.
 - Confirm placeholder rows are labeled non-callable in all guidance.
 - Confirm no ungated autonomous posting behavior is implied.
+- Confirm any quote-heavy public post drafted through `hf-mcp` has an explicit strategy for HF API quote sanitization.
 
 ## Output / Handoff
 
@@ -68,3 +75,4 @@ Use this skill for hf-mcp write tasks so live-write guardrails stay explicit, co
 - Do not relax or omit `confirm_live=true` for concrete write helpers.
 - Do not normalize autonomous posting or unattended live-write loops.
 - Do not invent additional write helpers beyond the shipped documented set.
+- Do not treat backend entity pre-encoding as a proven workaround for double quotes; `&#34;` was canonicalized to `&quot;` in live API readback.

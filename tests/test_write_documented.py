@@ -156,6 +156,44 @@ def test_reply_and_bytes_write_helpers_shape_payloads_truthfully() -> None:
     ]
 
 
+def test_write_helpers_decode_html_entities_in_mycode_text() -> None:
+    transport = _CaptureTransport()
+
+    create_thread_live(
+        transport=transport,
+        fid=12,
+        subject="Release &quot;0.2&quot;",
+        message='[code]{&quot;mode&quot;:&quot;raw&quot;}[/code] and `output_mode=&quot;structured&quot;`',
+        confirm_live=True,
+    )
+    reply_to_thread_live(
+        transport=transport,
+        tid=44,
+        message='[code]{&quot;posts&quot;:[{&quot;pid&quot;:&quot;62946370&quot;}]}[/code]',
+        confirm_live=True,
+    )
+
+    assert transport.calls[0] == {
+        "asks": {
+            "threads": {
+                "_fid": 12,
+                "_subject": 'Release "0.2"',
+                "_message": '[code]{"mode":"raw"}[/code] and `output_mode="structured"`',
+            }
+        },
+        "helper": "threads",
+    }
+    assert transport.calls[1] == {
+        "asks": {
+            "posts": {
+                "_tid": 44,
+                "_message": '[code]{"posts":[{"pid":"62946370"}]}[/code]',
+            }
+        },
+        "helper": "posts",
+    }
+
+
 def test_later_lane_write_rows_remain_explicitly_blocked_without_invented_calls() -> None:
     assert set(PENDING_LATER_LANE_WRITE_ROWS) == {
         "contracts.write",

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+import html
 from typing import Any
 
 from hf_mcp.capabilities import CapabilityPolicy
@@ -25,6 +26,10 @@ def _require_confirm_live(tool_name: str, confirm_live: bool) -> None:
     )
 
 
+def _normalize_write_text(value: str) -> str:
+    return html.unescape(value)
+
+
 def create_thread_live(
     *,
     transport: HFTransport,
@@ -34,7 +39,13 @@ def create_thread_live(
     confirm_live: bool,
 ) -> dict[str, Any]:
     _require_confirm_live("threads.create", confirm_live)
-    asks = {"threads": {"_fid": fid, "_subject": subject, "_message": message}}
+    asks = {
+        "threads": {
+            "_fid": fid,
+            "_subject": _normalize_write_text(subject),
+            "_message": _normalize_write_text(message),
+        }
+    }
     return transport.write(asks=asks, helper="threads")
 
 
@@ -46,7 +57,7 @@ def reply_to_thread_live(
     confirm_live: bool,
 ) -> dict[str, Any]:
     _require_confirm_live("posts.reply", confirm_live)
-    asks = {"posts": {"_tid": tid, "_message": message}}
+    asks = {"posts": {"_tid": tid, "_message": _normalize_write_text(message)}}
     return transport.write(asks=asks, helper="posts")
 
 
