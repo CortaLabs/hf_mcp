@@ -8,6 +8,7 @@ from hf_mcp.capabilities import CapabilityPolicy
 from hf_mcp.mycode import coerce_message_format, format_write_text
 from hf_mcp.registry import get_documented_write_specs
 from hf_mcp.transport import HFTransport
+from hf_mcp.write_preflight import validate_write_body
 
 WriteHandler = Callable[..., dict[str, Any]]
 
@@ -28,11 +29,14 @@ def _require_confirm_live(tool_name: str, confirm_live: bool) -> None:
 
 
 def _normalize_write_text(value: str, message_format: str = "mycode") -> str:
+    source_format = coerce_message_format(message_format, field_name="message_format")
     normalized = html.unescape(value)
-    return format_write_text(
+    formatted = format_write_text(
         normalized,
-        coerce_message_format(message_format, field_name="message_format"),
+        source_format,
     )
+    validate_write_body(formatted, source_format=source_format)
+    return formatted
 
 
 def create_thread_live(

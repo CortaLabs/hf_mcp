@@ -25,6 +25,7 @@ from hf_mcp.tools.write_documented import (
     send_live,
     withdraw_live,
 )
+from hf_mcp.write_preflight import WritePreflightError, validate_write_body
 
 
 class _CaptureTransport:
@@ -241,6 +242,43 @@ def test_write_helpers_can_convert_markdown_messages_to_mycode() -> None:
             "helper": "posts",
         },
     ]
+
+
+def test_markdown_write_preflight_blocks_malformed_generated_mycode_before_transport() -> None:
+    transport = _CaptureTransport()
+
+    with pytest.raises(WritePreflightError, match="unclosed list"):
+        reply_to_thread_live(
+            transport=transport,
+            tid=44,
+            message="[list]\n[*] item",
+            message_format="markdown",
+            confirm_live=True,
+        )
+
+    assert transport.calls == []
+
+
+def test_write_preflight_rejects_nested_code_blocks_and_placeholder_leaks() -> None:
+    with pytest.raises(WritePreflightError, match="nested code blocks"):
+        validate_write_body("[code]outer [code]inner[/code][/code]", source_format="markdown")
+
+    with pytest.raises(WritePreflightError, match="internal formatter placeholder"):
+        validate_write_body("before \x00INLCODE0\x00 after", source_format="markdown")
+
+
+def test_write_preflight_allows_balanced_markdown_conversion_output() -> None:
+    validate_write_body(
+        (
+            "[b]Update[/b]\n\n"
+            "[list]\n"
+            "[*] [code]body_format=\"markdown\"[/code]\n"
+            "[*] [url=https://github.com/CortaLabs/hf_mcp]Project[/url]\n"
+            "[/list]\n\n"
+            "[code]{\"tool\":\"posts.reply\"}[/code]"
+        ),
+        source_format="markdown",
+    )
 
 
 def test_later_lane_write_rows_remain_explicitly_blocked_without_invented_calls() -> None:

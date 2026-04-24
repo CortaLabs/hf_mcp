@@ -93,3 +93,19 @@ def test_markdown_to_mycode_protects_inline_code_from_emphasis_rules() -> None:
         'Use [code]body_format="markdown"[/code] and [code]message_format="markdown"[/code].\n'
         "Keep [code]snake_case_value[/code] literal while [b]bold[/b] still converts."
     )
+
+
+def test_markdown_to_mycode_does_not_italicize_snake_case_or_urls() -> None:
+    source = (
+        "body_format and message_format stay literal.\n"
+        "snake_case_value stays literal.\n"
+        "https://github.com/CortaLabs/hf_mcp stays literal.\n"
+        "normal _italic_ and *emphasis* still convert."
+    )
+
+    assert markdown_to_mycode(source) == (
+        "body_format and message_format stay literal.\n"
+        "snake_case_value stays literal.\n"
+        "https://github.com/CortaLabs/hf_mcp stays literal.\n"
+        "normal [i]italic[/i] and [i]emphasis[/i] still convert."
+    )
