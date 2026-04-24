@@ -8,7 +8,7 @@ SRC_PATH = PRODUCT_ROOT / "src"
 if str(SRC_PATH) not in sys.path:
     sys.path.insert(0, str(SRC_PATH))
 
-from hf_mcp.mycode import format_body_text, markdown_to_mycode
+from hf_mcp.mycode import decode_double_quote_entities, format_body_text, markdown_to_mycode
 
 
 def test_format_body_text_converts_common_mycode_to_markdown() -> None:
@@ -38,6 +38,25 @@ def test_format_body_text_can_strip_mycode_noise_without_markdown() -> None:
 
     assert format_body_text(source, "clean") == "Hi site (https://example.test)"
     assert format_body_text(source, "raw") == source
+
+
+def test_format_body_text_decodes_quote_entities_in_all_body_modes() -> None:
+    source = '[code]{&quot;mode&quot;:&#34;raw&#x22;}[/code] output_mode=&quot;structured&quot;'
+
+    assert format_body_text(source, "raw") == '[code]{"mode":"raw"}[/code] output_mode="structured"'
+    assert format_body_text(source, "clean") == '{"mode":"raw"} output_mode="structured"'
+    assert format_body_text(source, "markdown") == (
+        "```\n"
+        '{"mode":"raw"}\n'
+        "```\n"
+        ' output_mode="structured"'
+    )
+
+
+def test_decode_double_quote_entities_does_not_decode_other_html_entities() -> None:
+    source = "&lt;tag attr=&quot;ok&#34;&gt;AT&amp;T&#x22;"
+
+    assert decode_double_quote_entities(source) == '&lt;tag attr="ok"&gt;AT&amp;T"'
 
 
 def test_markdown_to_mycode_converts_common_agent_markdown() -> None:

@@ -21,6 +21,7 @@ _URL_WITH_TARGET_PATTERN = re.compile(r"\[url=(?P<url>[^\]]+)\](?P<body>.*?)\[/u
 _URL_PATTERN = re.compile(r"\[url\](?P<url>.*?)\[/url\]", re.IGNORECASE | re.DOTALL)
 _IMAGE_PATTERN = re.compile(r"\[(?:img|uimg)\](?P<url>.*?)\[/\s*(?:img|uimg)\]", re.IGNORECASE | re.DOTALL)
 _UNKNOWN_TAG_PATTERN = re.compile(r"\[/?[a-zA-Z][a-zA-Z0-9_-]*(?:=[^\]]*)?\](?!\()|\[\*\]", re.DOTALL)
+_DOUBLE_QUOTE_ENTITY_PATTERN = re.compile(r"&(quot|#34|#x22);", re.IGNORECASE)
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,6 +72,7 @@ def coerce_message_format(raw_value: object, *, field_name: str) -> MessageForma
 
 
 def format_body_text(value: str, body_format: BodyFormat) -> str:
+    value = decode_double_quote_entities(value)
     if body_format == "raw":
         return value
 
@@ -128,6 +130,10 @@ def format_write_text(value: str, message_format: MessageFormat) -> str:
     if message_format == "mycode":
         return value
     return markdown_to_mycode(value)
+
+
+def decode_double_quote_entities(value: str) -> str:
+    return _DOUBLE_QUOTE_ENTITY_PATTERN.sub('"', value)
 
 
 def _convert_quotes(text: str, body_format: BodyFormat) -> str:
@@ -278,6 +284,7 @@ __all__ = [
     "TAG_RULES",
     "coerce_body_format",
     "coerce_message_format",
+    "decode_double_quote_entities",
     "format_body_text",
     "format_write_text",
     "markdown_to_mycode",
