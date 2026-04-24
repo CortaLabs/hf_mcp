@@ -2,7 +2,7 @@
 
 `hf-mcp` is a standalone MCP server package for the Hack Forums API v2.
 
-Current release line: `0.2.4`.
+Current release line: `0.2.8`.
 
 ## Install
 
@@ -18,6 +18,17 @@ pip install hf-mcp
 - `hf-mcp auth bootstrap`
 - `hf-mcp doctor`
 - `hf-mcp serve`
+
+## Desktop MCP clients
+
+Desktop client wiring is first-class and documented in
+[`docs/client_integration.md`](docs/client_integration.md), including:
+
+- direct command launch (`hf-mcp serve`)
+- module launch (`python -m hf_mcp serve`)
+- virtualenv/conda launch forms
+- native Windows Python launch
+- Windows desktop client to WSL bridge examples (including Claude Desktop style)
 
 ## Default local paths
 
@@ -117,6 +128,8 @@ python -m hf_mcp serve
 
 - Read paths and guarded writes are documented publicly, with fail-closed behavior for concrete writes via `confirm_live=true`.
 - Concrete write helpers currently exposed are `threads.create`, `posts.reply`, and Bytes write helpers (`bytes.transfer`, `bytes.deposit`, `bytes.withdraw`, `bytes.bump`) with repaired argument contracts.
+- `scheduled_at` on draft artifacts is metadata for operator workflow only; `hf-mcp` does not ship a scheduler/queue that auto-executes future writes.
+- HF API quote/entity canonicalization on live writes is treated as expected security/sanitization behavior, not a bypass target.
 - Manual live validation in this wave is intentionally narrower: replies only on `TID 6083735` plus at most one `threads.create` in `FID 375`; no Bytes live writes.
 - Placeholder writes remain out of scope in this wave (`contracts.write`, `sigmarket.write`, `admin.high_risk.write`).
 - Detailed release-boundary and limitation truth is owned by [`docs/export_boundary.md`](docs/export_boundary.md).
@@ -125,6 +138,7 @@ python -m hf_mcp serve
 
 - [`docs/configuration.md`](docs/configuration.md)
 - [`docs/auth_bootstrap.md`](docs/auth_bootstrap.md)
+- [`docs/client_integration.md`](docs/client_integration.md)
 - [`docs/tool_overview.md`](docs/tool_overview.md)
 - [`docs/coverage_matrix.md`](docs/coverage_matrix.md)
 - [`docs/examples.md`](docs/examples.md)

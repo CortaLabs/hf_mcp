@@ -81,6 +81,16 @@ Default when neither is passed:
 
 Authorization URL is always printed to stdout (`Authorization URL: ...`) before callback wait.
 
+## Windows desktop client + WSL reality check
+
+When a desktop client runs on Windows but launches `hf-mcp` inside WSL:
+
+- Browser behavior depends on where the process is running and client shell behavior.
+- Do not assume universal auto-open support in this mode; copy/paste the printed authorization URL when needed.
+- Hosted callback mode still targets the local loopback listener (`http://127.0.0.1:8765/callback`) in the runtime environment where bootstrap is running.
+
+See `docs/client_integration.md` for concrete Windows-native and Windows-to-WSL launch patterns.
+
 ## Auth/bootstrap env variables
 
 Required secrets:

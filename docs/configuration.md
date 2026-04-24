@@ -26,6 +26,12 @@ Resolution order:
 - `HF_MCP_TOKEN_PATH`
 - default `~/.config/hf_mcp/token.json`
 
+4. Draft artifact directory:
+- explicit tool argument `draft_dir`
+- YAML `draft_dir`
+- `HF_MCP_DRAFT_DIR`
+- default `~/.config/hf_mcp/drafts`
+
 Token-path constraints:
 
 - token paths must be absolute
@@ -56,6 +62,7 @@ Environment variables must not be used to choose non-secret runtime policy.
 - `HF_MCP_CONFIG`
 - `HF_MCP_ENV_FILE`
 - `HF_MCP_TOKEN_PATH`
+- `HF_MCP_DRAFT_DIR`
 - `HF_MCP_EXTERNAL_REDIRECT_URI`
 - `HF_MCP_REDIRECT_URI`
 - `HF_MCP_AUTHORIZE_URL`
@@ -144,6 +151,21 @@ Commands below share the same path-resolution model above for config and token s
 - `hf-mcp auth status`
 - `hf-mcp doctor`
 - `hf-mcp serve`
+
+Write-tool draft notes:
+
+- `scheduled_at` in draft artifacts is metadata only and is never auto-executed by an internal scheduler.
+- Draft publish only happens when a concrete live write call is made with `confirm_live=true`.
+
+## Draft directory default rationale
+
+`hf-mcp` defaults draft artifacts to `~/.config/hf_mcp/drafts` for portable local behavior:
+
+- It keeps generated draft content outside tracked repositories by default.
+- It aligns with the existing config/token defaults under `~/.config/hf_mcp/`.
+- It works across Linux/macOS and WSL-backed workflows without hard-coding project paths.
+
+Use YAML `draft_dir` or `HF_MCP_DRAFT_DIR` when your local workflow needs a different location.
 
 Operational notes:
 

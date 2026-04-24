@@ -23,6 +23,7 @@ ALL_CAPABILITIES: frozenset[str] = frozenset(
         "sigmarket.market.read",
         "sigmarket.order.read",
         "admin.high_risk.read",
+        "formatting.preflight",
         "threads.create",
         "posts.reply",
         "bytes.transfer",
@@ -51,6 +52,7 @@ ALL_PARAMETER_FAMILIES: frozenset[str] = frozenset(
         "fields.users.profile",
         "fields.posts.body",
         "fields.bytes.amount",
+        "formatting.content",
         "writes.content",
         "writes.bytes",
         "confirm.live",
@@ -71,6 +73,7 @@ READ_CAPABILITIES: frozenset[str] = frozenset(
         "sigmarket.market.read",
         "sigmarket.order.read",
         "admin.high_risk.read",
+        "formatting.preflight",
     }
 )
 
@@ -104,6 +107,7 @@ READ_PARAMETER_FAMILIES: frozenset[str] = frozenset(
         "fields.users.profile",
         "fields.posts.body",
         "fields.bytes.amount",
+        "formatting.content",
     }
 )
 
@@ -148,6 +152,7 @@ PARAMETER_FAMILY_CAPABILITY_PARENTS: dict[str, frozenset[str]] = {
     "fields.users.profile": frozenset({"users.read"}),
     "fields.posts.body": frozenset({"posts.read"}),
     "fields.bytes.amount": frozenset({"bytes.read"}),
+    "formatting.content": frozenset({"formatting.preflight"}),
     "writes.content": frozenset(
         {
             "threads.create",
@@ -166,6 +171,7 @@ PARAMETER_FAMILY_CAPABILITY_PARENTS: dict[str, frozenset[str]] = {
 DEFAULT_PROFILE = "reader"
 DEFAULT_CONFIG_PATH = Path.home() / ".config" / "hf_mcp" / "config.yaml"
 DEFAULT_TOKEN_PATH = Path.home() / ".config" / "hf_mcp" / "token.json"
+DEFAULT_DRAFT_DIR = Path.home() / ".config" / "hf_mcp" / "drafts"
 DEFAULT_LOOPBACK_REDIRECT_URI = "http://127.0.0.1:8765/callback"
 HOSTED_MODE_LOOPBACK_CALLBACK_URI = "http://127.0.0.1:8765/callback"
 
@@ -178,6 +184,7 @@ class HFMCPSettings:
     config_path: Path = DEFAULT_CONFIG_PATH
     env_file_path: Path | None = None
     token_path: Path = DEFAULT_TOKEN_PATH
+    draft_dir: Path = DEFAULT_DRAFT_DIR
     runtime_env: Mapping[str, str] = field(default_factory=dict)
     read_output_defaults: ReadOutputDefaults = field(default_factory=ReadOutputDefaults)
 
@@ -226,6 +233,7 @@ def load_settings(
 
     _validate_parameter_family_parents(resolved_capabilities, resolved_parameter_families)
     token_path = _resolve_token_path(raw_config.get("token_path", merged_env.get("HF_MCP_TOKEN_PATH")))
+    draft_dir = _resolve_draft_dir(raw_config.get("draft_dir"), merged_env)
     read_output_defaults = parse_read_output_defaults(raw_config.get("read_output_defaults"))
 
     return HFMCPSettings(
@@ -235,6 +243,7 @@ def load_settings(
         config_path=selected_path,
         env_file_path=env_file_path,
         token_path=token_path,
+        draft_dir=draft_dir,
         runtime_env=dict(merged_env),
         read_output_defaults=read_output_defaults,
     )
@@ -318,6 +327,25 @@ def _resolve_token_path(raw_value: object) -> Path:
     return token_path.resolve(strict=False)
 
 
+def _resolve_draft_dir(raw_value: object, env: Mapping[str, str]) -> Path:
+    candidate_value = raw_value
+    if candidate_value is None:
+        env_value = env.get("HF_MCP_DRAFT_DIR")
+        if env_value is not None and env_value.strip():
+            candidate_value = env_value.strip()
+        else:
+            candidate_value = None
+    if candidate_value is None:
+        return DEFAULT_DRAFT_DIR.expanduser().resolve(strict=False)
+    if not isinstance(candidate_value, str):
+        raise ValueError("`draft_dir` must be a string.")
+
+    draft_dir = Path(candidate_value).expanduser()
+    if not draft_dir.is_absolute():
+        raise ValueError("Draft directory must be absolute.")
+    return draft_dir.resolve(strict=False)
+
+
 def _parse_string_set(raw_value: object, field_name: str) -> frozenset[str]:
     if raw_value is None:
         return frozenset()
@@ -360,6 +388,7 @@ __all__ = [
     "ALL_CAPABILITIES",
     "ALL_PARAMETER_FAMILIES",
     "DEFAULT_CONFIG_PATH",
+    "DEFAULT_DRAFT_DIR",
     "DEFAULT_LOOPBACK_REDIRECT_URI",
     "DEFAULT_PROFILE",
     "DEFAULT_TOKEN_PATH",

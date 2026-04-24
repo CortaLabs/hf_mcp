@@ -357,6 +357,51 @@ def test_metadata_and_annotations_are_remote_tier4_and_operation_honest() -> Non
     assert server.tools[mcp_tool_name("posts.reply")]["output_schema"] is None
 
 
+def test_metadata_and_annotations_mark_local_draft_tools_truthfully() -> None:
+    policy = _policy(
+        enabled_capabilities={"formatting.preflight"},
+        enabled_parameter_families={"formatting.content"},
+    )
+
+    server = _CaptureServer()
+    register_tools(server, policy, RuntimeBundle())
+
+    list_annotations = server.tools[mcp_tool_name("drafts.list")]["annotations"]
+    assert list_annotations["readOnlyHint"] is True
+    assert list_annotations["destructiveHint"] is False
+    assert list_annotations["openWorldHint"] is False
+    assert list_annotations["_meta"]["x-hf-locality"] == "local"
+    assert list_annotations["_meta"]["x-hf-runtime-tier"] == 1
+
+    read_annotations = server.tools[mcp_tool_name("drafts.read")]["annotations"]
+    assert read_annotations["readOnlyHint"] is True
+    assert read_annotations["destructiveHint"] is False
+    assert read_annotations["openWorldHint"] is False
+    assert read_annotations["_meta"]["x-hf-locality"] == "local"
+    assert read_annotations["_meta"]["x-hf-runtime-tier"] == 1
+
+    preflight_annotations = server.tools[mcp_tool_name("formatting.preflight")]["annotations"]
+    assert preflight_annotations["readOnlyHint"] is False
+    assert preflight_annotations["destructiveHint"] is False
+    assert preflight_annotations["openWorldHint"] is False
+    assert preflight_annotations["_meta"]["x-hf-locality"] == "local"
+    assert preflight_annotations["_meta"]["x-hf-runtime-tier"] == 1
+
+    update_annotations = server.tools[mcp_tool_name("drafts.update")]["annotations"]
+    assert update_annotations["readOnlyHint"] is False
+    assert update_annotations["destructiveHint"] is False
+    assert update_annotations["openWorldHint"] is False
+    assert update_annotations["_meta"]["x-hf-locality"] == "local"
+    assert update_annotations["_meta"]["x-hf-runtime-tier"] == 2
+
+    delete_annotations = server.tools[mcp_tool_name("drafts.delete")]["annotations"]
+    assert delete_annotations["readOnlyHint"] is False
+    assert delete_annotations["destructiveHint"] is True
+    assert delete_annotations["openWorldHint"] is False
+    assert delete_annotations["_meta"]["x-hf-locality"] == "local"
+    assert delete_annotations["_meta"]["x-hf-runtime-tier"] == 2
+
+
 def test_create_server_uses_dispatcher_as_single_registration_authority(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -550,6 +595,46 @@ def test_core_write_rows_register_concrete_handlers_while_later_rows_remain_plac
     assert server.tools[mcp_tool_name("admin.high_risk.write")]["handler"].__name__ == "_handler"
 
 
+def test_register_tools_passes_runtime_draft_dir_into_write_handlers(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    policy = _policy(
+        enabled_capabilities={"threads.read"},
+        enabled_parameter_families={"selectors.thread"},
+    )
+    server = _CaptureServer()
+    transport = HFTransport(token_store=_StubTokenStore(), base_url="https://example.test")
+    runtime = RuntimeBundle(
+        transport=transport,
+        settings=HFMCPSettings(
+            profile="test",
+            enabled_capabilities=frozenset({"threads.read"}),
+            enabled_parameter_families=frozenset({"selectors.thread"}),
+            draft_dir=tmp_path,
+        ),
+    )
+    captured: dict[str, object] = {}
+
+    def _fake_build_write_handlers(
+        policy_arg: CapabilityPolicy,
+        transport_arg: HFTransport,
+        *,
+        draft_dir: Path | str | None = None,
+    ) -> dict[str, Any]:
+        captured["policy"] = policy_arg
+        captured["transport"] = transport_arg
+        captured["draft_dir"] = draft_dir
+        return {}
+
+    monkeypatch.setattr("hf_mcp.dispatcher.build_write_handlers", _fake_build_write_handlers)
+    register_tools(server, policy, runtime)
+
+    assert captured["policy"] is policy
+    assert captured["transport"] is transport
+    assert captured["draft_dir"] == tmp_path
+
+
 def test_register_tools_uses_placeholder_handlers_when_runtime_bundle_has_no_transport() -> None:
     policy = _policy(
         enabled_capabilities={"threads.read", "posts.reply"},
@@ -560,6 +645,87 @@ def test_register_tools_uses_placeholder_handlers_when_runtime_bundle_has_no_tra
 
     assert server.tools[mcp_tool_name("threads.read")]["handler"].__name__ == "_handler"
     assert server.tools[mcp_tool_name("posts.reply")]["handler"].__name__ == "_handler"
+
+
+def test_formatting_preflight_registers_local_handler_without_transport(tmp_path: Path) -> None:
+    policy = _policy(
+        enabled_capabilities={"formatting.preflight"},
+        enabled_parameter_families={"formatting.content"},
+    )
+    server = _CaptureServer()
+    runtime = RuntimeBundle(
+        settings=HFMCPSettings(
+            profile="test",
+            enabled_capabilities=frozenset({"formatting.preflight"}),
+            enabled_parameter_families=frozenset({"formatting.content"}),
+            draft_dir=tmp_path,
+        )
+    )
+
+    register_tools(server, policy, runtime)
+
+    tool = server.tools[mcp_tool_name("formatting.preflight")]
+    assert tool["handler"].__name__ == "_preflight_handler"
+    assert tool["annotations"]["readOnlyHint"] is False
+    assert tool["annotations"]["destructiveHint"] is False
+    assert set(tool["input_schema"]["properties"]) == {"message", "source_path", "message_format"}
+    assert tool["input_schema"]["anyOf"] == [{"required": ["message"]}, {"required": ["source_path"]}]
+    result = tool["handler"](message='```json\n{"tool":"posts.reply"}\n```', message_format="markdown")
+    assert result["structuredContent"]["draft_id"]
+    assert result["structuredContent"]["path"].endswith(".json")
+    assert result["structuredContent"]["integrity"] < 1.0
+    assert any(
+        issue["code"] == "json_code_block_lossy_medium"
+        for issue in result["structuredContent"]["issues"]
+    )
+
+
+def test_dispatcher_registers_concrete_local_draft_handlers_without_transport(tmp_path: Path) -> None:
+    policy = _policy(
+        enabled_capabilities={"formatting.preflight"},
+        enabled_parameter_families={"formatting.content"},
+    )
+    runtime = RuntimeBundle(
+        settings=HFMCPSettings(
+            profile="test",
+            enabled_capabilities=frozenset({"formatting.preflight"}),
+            enabled_parameter_families=frozenset({"formatting.content"}),
+            draft_dir=tmp_path,
+        )
+    )
+    server = _CaptureServer()
+
+    register_tools(server, policy, runtime)
+
+    for tool_name in ("drafts.list", "drafts.read", "drafts.update", "drafts.delete"):
+        assert server.tools[mcp_tool_name(tool_name)]["handler"].__name__ != "_handler"
+
+    preflight = server.tools[mcp_tool_name("formatting.preflight")]["handler"]
+    created = preflight(message="Local draft body", message_format="markdown")
+    draft_id = created["structuredContent"]["draft_id"]
+
+    list_tool = server.tools[mcp_tool_name("drafts.list")]["handler"]
+    listed = list_tool(limit=10, offset=0)
+    assert listed["count"] >= 1
+    assert any(item["draft_id"] == draft_id for item in listed["structuredContent"]["drafts"])
+
+    read_tool = server.tools[mcp_tool_name("drafts.read")]["handler"]
+    read_result = read_tool(draft_id=draft_id)
+    assert read_result["structuredContent"]["draft_id"] == draft_id
+
+    update_tool = server.tools[mcp_tool_name("drafts.update")]["handler"]
+    updated = update_tool(draft_id=draft_id, title="Updated title", status="ready")
+    assert updated["structuredContent"]["metadata"]["title"] == "Updated title"
+    assert updated["structuredContent"]["metadata"]["status"] == "ready"
+    assert updated["structuredContent"]["draft_id"] == draft_id
+
+    delete_tool = server.tools[mcp_tool_name("drafts.delete")]["handler"]
+    with pytest.raises(ValueError, match="confirm_delete=True"):
+        delete_tool(draft_id=draft_id)
+
+    deleted = delete_tool(draft_id=draft_id, confirm_delete=True)
+    assert deleted["structuredContent"]["deleted"] is True
+    assert deleted["structuredContent"]["draft_id"] == draft_id
 
 
 def test_dispatcher_publishes_truthful_core_write_input_schemas() -> None:
@@ -587,8 +753,8 @@ def test_dispatcher_publishes_truthful_core_write_input_schemas() -> None:
     register_tools(server, policy, RuntimeBundle(transport=transport))
 
     expected_parameter_names: dict[str, set[str]] = {
-        "threads.create": {"fid", "subject", "message", "message_format", "confirm_live"},
-        "posts.reply": {"tid", "message", "message_format", "confirm_live"},
+        "threads.create": {"fid", "subject", "message", "draft_id", "draft_path", "message_format", "confirm_live"},
+        "posts.reply": {"tid", "message", "draft_id", "draft_path", "message_format", "confirm_live"},
         "bytes.transfer": {"target_uid", "amount", "confirm_live"},
         "bytes.deposit": {"amount", "confirm_live"},
         "bytes.withdraw": {"amount", "confirm_live"},
@@ -802,7 +968,14 @@ def test_serve_stdio_publishes_dispatcher_contract_for_live_runtime(
     assert posts_signature.parameters["body_format"].default is None
 
     reply_signature = inspect.signature(app.registered_tools[mcp_tool_name("posts.reply")]["handler"])
-    assert set(reply_signature.parameters.keys()) == {"tid", "message", "message_format", "confirm_live"}
+    assert set(reply_signature.parameters.keys()) == {
+        "tid",
+        "message",
+        "message_format",
+        "draft_id",
+        "draft_path",
+        "confirm_live",
+    }
     assert reply_signature.parameters["message_format"].default == "mycode"
     assert "subject" not in reply_signature.parameters
 

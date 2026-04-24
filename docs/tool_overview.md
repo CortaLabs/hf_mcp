@@ -79,6 +79,12 @@ Content writes (`threads.create`, `posts.reply`) also accept
 `message_format`; omit it or use `mycode` for ready-to-post MyCode, or use
 `markdown` to convert common Markdown into HF MyCode before sending.
 
+Draft lifecycle note:
+
+- `scheduled_at` on draft artifacts is metadata only for operator planning.
+- `hf-mcp` does not include a scheduler/queue that auto-runs writes at a future time.
+- Publish still requires an explicit concrete write call with `confirm_live=true`.
+
 | Tool | Status | What it is for |
 |---|---|---|
 | `threads.create` | concrete today | Create a new thread in a target forum (`fid`) |
@@ -113,6 +119,7 @@ placeholder-only today.
 - Use this page for grouped operator orientation.
 - Use `docs/coverage_matrix.md` for row-by-row contract tracking.
 - Use `docs/examples.md` for compact JSON-first request/response snippets.
+- Treat HF quote/entity canonicalization on live writes as expected HF sanitization behavior, not as a workaround target.
 - Use `docs/configuration.md` for path and override behavior (`HF_MCP_CONFIG`,
   `HF_MCP_ENV_FILE`, `HF_MCP_TOKEN_PATH`).
 - Extended read contract note: these five rows are single browse-first tools,

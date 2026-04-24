@@ -375,3 +375,18 @@ not a guaranteed contract shape.
 Placeholder write rows (`contracts.write`, `sigmarket.write`,
 `admin.high_risk.write`) are intentionally excluded from concrete examples
 because they are documented coverage rows, not concrete callable behavior today.
+
+## Draft metadata and scheduling truth
+
+Draft artifacts may include metadata fields such as `scheduled_at`, but this is
+metadata only for operator workflow and review. `hf-mcp` does not ship an
+internal scheduler that auto-runs queued writes. A live write still requires an
+explicit concrete call such as `threads.create` or `posts.reply` with
+`confirm_live=true`.
+
+## Quote/entity canonicalization note for live writes
+
+HF can canonicalize quote-heavy content (for example, converting literal quotes
+or numeric quote entities to `&quot;`) when content is published through the API.
+Treat this as expected HF security/sanitization behavior. Do not rely on
+pre-encoding quotes as a guaranteed bypass.

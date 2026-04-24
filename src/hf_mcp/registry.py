@@ -48,6 +48,11 @@ _EXPECTED_COVERAGE_FAMILIES = frozenset(
         "sigmarket.market.read",
         "sigmarket.order.read",
         "admin.high_risk.read",
+        "formatting.preflight",
+        "drafts.list",
+        "drafts.read",
+        "drafts.update",
+        "drafts.delete",
         "threads.create",
         "posts.reply",
         "bytes.transfer",
@@ -157,6 +162,51 @@ _MATRIX_ROWS: tuple[_MatrixRow, ...] = (
         helper_path="admin/high-risk/read",
         transport_kind="helper",
         parameter_families=("filters.pagination",),
+    ),
+    _MatrixRow(
+        tool_name="formatting.preflight",
+        coverage_family="formatting.preflight",
+        capability_family="formatting.preflight",
+        operation="read",
+        helper_path=None,
+        transport_kind="generic",
+        parameter_families=("formatting.content",),
+    ),
+    _MatrixRow(
+        tool_name="drafts.list",
+        coverage_family="drafts.list",
+        capability_family="formatting.preflight",
+        operation="read",
+        helper_path=None,
+        transport_kind="generic",
+        parameter_families=("drafts.filters",),
+    ),
+    _MatrixRow(
+        tool_name="drafts.read",
+        coverage_family="drafts.read",
+        capability_family="formatting.preflight",
+        operation="read",
+        helper_path=None,
+        transport_kind="generic",
+        parameter_families=("drafts.selector",),
+    ),
+    _MatrixRow(
+        tool_name="drafts.update",
+        coverage_family="drafts.update",
+        capability_family="formatting.preflight",
+        operation="write",
+        helper_path=None,
+        transport_kind="generic",
+        parameter_families=("drafts.selector", "drafts.metadata"),
+    ),
+    _MatrixRow(
+        tool_name="drafts.delete",
+        coverage_family="drafts.delete",
+        capability_family="formatting.preflight",
+        operation="write",
+        helper_path=None,
+        transport_kind="generic",
+        parameter_families=("drafts.selector", "drafts.confirm_delete"),
     ),
     _MatrixRow(
         tool_name="threads.create",
@@ -330,6 +380,11 @@ def get_extended_read_specs() -> tuple[ToolSpec, ...]:
     return tuple(spec for spec in build_registry() if spec.coverage_family in extended_families)
 
 
+def get_local_formatting_specs() -> tuple[ToolSpec, ...]:
+    local_families = {"formatting.preflight", "drafts.list", "drafts.read", "drafts.update", "drafts.delete"}
+    return tuple(spec for spec in build_registry() if spec.coverage_family in local_families)
+
+
 def get_documented_write_specs() -> tuple[ToolSpec, ...]:
     write_families = {
         "threads.create",
@@ -352,5 +407,6 @@ __all__ = [
     "get_tool_spec",
     "get_core_read_specs",
     "get_extended_read_specs",
+    "get_local_formatting_specs",
     "mcp_tool_name",
 ]

@@ -28,6 +28,10 @@ profile: reader
 # Optional runtime path override. Must be absolute and outside this repository.
 # token_path: /home/you/.config/hf_mcp/token.json
 
+# Optional draft artifact root. Must be absolute.
+# Defaults to ~/.config/hf_mcp/drafts
+# draft_dir: /home/you/.config/hf_mcp/drafts
+
 # Read output defaults for all read tools.
 # Valid modes: readable, structured, raw
 read_output_defaults:

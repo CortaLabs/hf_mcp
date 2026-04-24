@@ -20,6 +20,7 @@ CAPABILITY_PARAMETER_FAMILIES: dict[str, frozenset[str]] = {
     "sigmarket.market.read": frozenset({"selectors.sigmarket", "filters.pagination"}),
     "sigmarket.order.read": frozenset({"selectors.sigmarket", "filters.pagination"}),
     "admin.high_risk.read": frozenset({"filters.pagination"}),
+    "formatting.preflight": frozenset({"formatting.content"}),
     "threads.create": frozenset({"selectors.forum", "writes.content", "confirm.live"}),
     "posts.reply": frozenset({"selectors.thread", "writes.content", "confirm.live"}),
     "bytes.transfer": frozenset({"selectors.bytes", "writes.bytes", "confirm.live"}),

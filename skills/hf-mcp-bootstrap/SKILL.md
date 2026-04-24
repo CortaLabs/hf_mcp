@@ -58,6 +58,7 @@ Use this skill for local hf-mcp setup and readiness, from first install through 
    Hosted mode: set `HF_MCP_EXTERNAL_REDIRECT_URI` to a non-loopback HTTPS URL; local listener target stays `http://127.0.0.1:8765/callback`.
    Legacy loopback mode: if hosted env is unset, use `HF_MCP_REDIRECT_URI` or default loopback callback.
    Callback host must be `127.0.0.1` or `localhost` with explicit port.
+   In Windows-to-WSL launches, do not assume universal browser auto-open behavior; rely on the printed authorization URL when needed.
 
 6. Validate readiness before serving.
    Run `hf-mcp auth status` for token/config visibility.
@@ -66,6 +67,10 @@ Use this skill for local hf-mcp setup and readiness, from first install through 
 
 7. Hand off API internals to `hf-api-v2`.
    If the user asks for full OAuth/API mechanics or raw `asks` payload design, route to `hf-api-v2` instead of expanding this bootstrap skill into an API tutorial.
+
+8. Keep draft scheduling claims truthful.
+   If draft metadata includes `scheduled_at`, treat it as metadata only.
+   There is no built-in scheduler/queue that executes live writes automatically.
 
 ## Verification
 

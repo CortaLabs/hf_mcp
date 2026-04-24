@@ -38,7 +38,11 @@ def test_registry_covers_documented_matrix_once() -> None:
     assert "transport.read" not in tool_names
     assert "transport.write" not in tool_names
     assert "." not in "".join(mcp_tool_names)
-    assert all(spec.transport_kind == "helper" for spec in specs)
+    local_generic_tools = {"formatting.preflight", "drafts.list", "drafts.read", "drafts.update", "drafts.delete"}
+    assert all(
+        spec.transport_kind == ("generic" if spec.tool_name in local_generic_tools else "helper")
+        for spec in specs
+    )
 
 
 def test_mcp_tool_names_are_desktop_client_safe() -> None:
@@ -46,6 +50,11 @@ def test_mcp_tool_names_are_desktop_client_safe() -> None:
     assert mcp_tool_name("threads.create") == "threads_create"
     assert mcp_tool_name("sigmarket.order.read") == "sigmarket_order_read"
     assert mcp_tool_name("admin.high_risk.write") == "admin_high_risk_write"
+    assert mcp_tool_name("formatting.preflight") == "formatting_preflight"
+    assert mcp_tool_name("drafts.list") == "drafts_list"
+    assert mcp_tool_name("drafts.read") == "drafts_read"
+    assert mcp_tool_name("drafts.update") == "drafts_update"
+    assert mcp_tool_name("drafts.delete") == "drafts_delete"
 
     for spec in build_registry():
         public_name = mcp_tool_name(spec.tool_name)
@@ -161,12 +170,12 @@ def test_build_tool_schema_truthful_core_write_shapes() -> None:
 
     expected_shapes: dict[str, tuple[set[str], set[str]]] = {
         "threads.create": (
-            {"fid", "subject", "message", "message_format", "confirm_live"},
-            {"fid", "message", "confirm_live"},
+            {"fid", "subject", "message", "draft_id", "draft_path", "message_format", "confirm_live"},
+            {"fid", "subject", "confirm_live"},
         ),
         "posts.reply": (
-            {"tid", "message", "message_format", "confirm_live"},
-            {"tid", "message", "confirm_live"},
+            {"tid", "message", "draft_id", "draft_path", "message_format", "confirm_live"},
+            {"tid", "confirm_live"},
         ),
         "bytes.transfer": ({"target_uid", "amount", "confirm_live"}, {"target_uid", "amount", "confirm_live"}),
         "bytes.deposit": ({"amount", "confirm_live"}, {"amount", "confirm_live"}),
@@ -182,3 +191,68 @@ def test_build_tool_schema_truthful_core_write_shapes() -> None:
         assert "include_raw_payload" not in schema["properties"]
         if "message_format" in schema["properties"]:
             assert schema["properties"]["message_format"]["enum"] == ["mycode", "markdown"]
+        if "message" in schema["properties"]:
+            assert schema["anyOf"] == [{"required": ["message"]}, {"required": ["draft_id"]}, {"required": ["draft_path"]}]
+
+
+def test_build_tool_schema_truthful_formatting_preflight_shape() -> None:
+    policy = _policy(
+        capabilities={"formatting.preflight"},
+        parameter_families={"formatting.content"},
+    )
+
+    schema = build_tool_schema(get_tool_spec("formatting.preflight"), policy)
+
+    assert set(schema["properties"]) == {"message", "source_path", "message_format"}
+    assert "required" not in schema
+    assert schema["anyOf"] == [{"required": ["message"]}, {"required": ["source_path"]}]
+    assert schema["properties"]["message_format"]["default"] == "markdown"
+    assert schema["properties"]["message_format"]["enum"] == ["mycode", "markdown"]
+
+
+def test_build_tool_schema_truthful_local_draft_shapes() -> None:
+    policy = _policy(
+        capabilities={"formatting.preflight"},
+        parameter_families={"formatting.content", "drafts.selector", "drafts.filters", "drafts.metadata", "drafts.confirm_delete"},
+    )
+
+    list_schema = build_tool_schema(get_tool_spec("drafts.list"), policy)
+    assert list_schema["type"] == "object"
+    assert list_schema["additionalProperties"] is False
+    assert "anyOf" not in list_schema
+    assert set(list_schema["properties"]) == {
+        "status",
+        "category",
+        "title",
+        "scheduled_before",
+        "scheduled_after",
+        "limit",
+        "offset",
+    }
+
+    read_schema = build_tool_schema(get_tool_spec("drafts.read"), policy)
+    assert read_schema["additionalProperties"] is False
+    assert set(read_schema["properties"]) == {"draft_id", "draft_path"}
+    assert read_schema["anyOf"] == [{"required": ["draft_id"]}, {"required": ["draft_path"]}]
+
+    update_schema = build_tool_schema(get_tool_spec("drafts.update"), policy)
+    assert update_schema["additionalProperties"] is False
+    assert set(update_schema["properties"]) == {
+        "draft_id",
+        "draft_path",
+        "title",
+        "category",
+        "status",
+        "scheduled_at",
+    }
+    assert update_schema["anyOf"] == [{"required": ["draft_id"]}, {"required": ["draft_path"]}]
+    assert "message" not in update_schema["properties"]
+    assert "source_path" not in update_schema["properties"]
+    assert "body" not in update_schema["properties"]
+
+    delete_schema = build_tool_schema(get_tool_spec("drafts.delete"), policy)
+    assert delete_schema["additionalProperties"] is False
+    assert set(delete_schema["properties"]) == {"draft_id", "draft_path", "confirm_delete"}
+    assert delete_schema["required"] == ["confirm_delete"]
+    assert delete_schema["properties"]["confirm_delete"]["const"] is True
+    assert delete_schema["anyOf"] == [{"required": ["draft_id"]}, {"required": ["draft_path"]}]

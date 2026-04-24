@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "hf-mcp"
-version = "0.2.7"
+version = "0.2.8"
 description = "Standalone Hack Forums MCP launch surface"
 keywords = ["hackforums", "mcp", "model-context-protocol"]
 classifiers = [
@@ -30,3 +30,12 @@ package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.data-files]
+"docs" = ["docs/*.md"]
+"skills/hf-api-v2" = ["skills/hf-api-v2/SKILL.md"]
+"skills/hf-mcp" = ["skills/hf-mcp/SKILL.md"]
+"skills/hf-mcp-bootstrap" = ["skills/hf-mcp-bootstrap/SKILL.md"]
+"skills/hf-mcp-reads" = ["skills/hf-mcp-reads/SKILL.md"]
+"skills/hf-mcp-writes" = ["skills/hf-mcp-writes/SKILL.md"]
+"skills/hf-mycode" = ["skills/hf-mycode/SKILL.md"]

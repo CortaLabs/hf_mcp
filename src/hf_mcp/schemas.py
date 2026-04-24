@@ -23,9 +23,49 @@ _FAMILY_PROPERTY_SPECS: dict[str, tuple[tuple[str, dict[str, Any], bool], ...]] 
     "fields.users.profile": (("include_profile_fields", {"type": "boolean", "default": True}, False),),
     "fields.posts.body": (("include_post_body", {"type": "boolean", "default": True}, False),),
     "fields.bytes.amount": (("include_amount", {"type": "boolean", "default": True}, False),),
+    "formatting.content": (
+        ("message", {"type": "string", "minLength": 1}, False),
+        (
+            "source_path",
+            {
+                "type": "string",
+                "minLength": 1,
+                "description": "Optional .md, .mycode, or .txt source file inside the hf_mcp draft cache directory.",
+            },
+            False,
+        ),
+        (
+            "message_format",
+            {
+                "type": "string",
+                "enum": ["mycode", "markdown"],
+                "default": "markdown",
+                "description": "Input format to simulate before any live write.",
+            },
+            False,
+        ),
+    ),
     "writes.content": (
         ("subject", {"type": "string", "minLength": 1}, False),
-        ("message", {"type": "string", "minLength": 1}, True),
+        ("message", {"type": "string", "minLength": 1}, False),
+        (
+            "draft_id",
+            {
+                "type": "string",
+                "pattern": "^[a-f0-9]{32}$",
+                "description": "Optional cached formatting.preflight draft id to publish without resending message text.",
+            },
+            False,
+        ),
+        (
+            "draft_path",
+            {
+                "type": "string",
+                "minLength": 1,
+                "description": "Optional cached formatting.preflight JSON artifact path inside the hf_mcp draft cache directory.",
+            },
+            False,
+        ),
         (
             "message_format",
             {
@@ -42,6 +82,54 @@ _FAMILY_PROPERTY_SPECS: dict[str, tuple[tuple[str, dict[str, Any], bool], ...]] 
         ("note", {"type": "string", "minLength": 1}, False),
     ),
     "confirm.live": (("confirm_live", {"type": "boolean", "const": True}, True),),
+    "drafts.selector": (
+        (
+            "draft_id",
+            {
+                "type": "string",
+                "pattern": "^[a-f0-9]{32}$",
+            },
+            False,
+        ),
+        (
+            "draft_path",
+            {
+                "type": "string",
+                "minLength": 1,
+            },
+            False,
+        ),
+    ),
+    "drafts.filters": (
+        (
+            "status",
+            {
+                "type": "string",
+                "enum": ["draft", "ready", "approved", "archived"],
+            },
+            False,
+        ),
+        ("category", {"type": "string", "minLength": 1}, False),
+        ("title", {"type": "string", "minLength": 1}, False),
+        ("scheduled_before", {"type": "string", "format": "date-time"}, False),
+        ("scheduled_after", {"type": "string", "format": "date-time"}, False),
+        ("limit", {"type": "integer", "minimum": 0, "default": 50}, False),
+        ("offset", {"type": "integer", "minimum": 0, "default": 0}, False),
+    ),
+    "drafts.metadata": (
+        ("title", {"type": "string"}, False),
+        ("category", {"type": "string"}, False),
+        (
+            "status",
+            {
+                "type": "string",
+                "enum": ["draft", "ready", "approved", "archived"],
+            },
+            False,
+        ),
+        ("scheduled_at", {"type": "string", "format": "date-time"}, False),
+    ),
+    "drafts.confirm_delete": (("confirm_delete", {"type": "boolean", "const": True}, True),),
 }
 
 _TOOL_REQUIRED_OVERRIDES: dict[str, tuple[str, ...]] = {
@@ -52,9 +140,15 @@ _TOOL_REQUIRED_OVERRIDES: dict[str, tuple[str, ...]] = {
     "bratings.read": (),
     "sigmarket.market.read": (),
     "sigmarket.order.read": (),
+    "threads.create": ("fid", "subject", "confirm_live"),
+    "posts.reply": ("tid", "confirm_live"),
     "bytes.deposit": ("amount", "confirm_live"),
     "bytes.withdraw": ("amount", "confirm_live"),
     "bytes.bump": ("tid", "confirm_live"),
+    "drafts.list": (),
+    "drafts.read": (),
+    "drafts.update": (),
+    "drafts.delete": ("confirm_delete",),
 }
 
 _TOOL_SELECTOR_PROPERTY_OVERRIDES: dict[str, tuple[tuple[str, str], ...]] = {
@@ -128,7 +222,10 @@ def _base_schema(spec: ToolSpec) -> dict[str, Any]:
 
 
 def build_tool_schema(spec: ToolSpec, policy: CapabilityPolicy) -> dict[str, Any]:
-    schema = policy.prune_schema(spec.tool_name, _base_schema(spec))
+    if spec.tool_name.startswith("drafts."):
+        schema = _base_schema(spec)
+    else:
+        schema = policy.prune_schema(spec.tool_name, _base_schema(spec))
     pruned_required = schema.get("required")
     properties = schema.get("properties")
     if isinstance(properties, dict):
@@ -155,7 +252,11 @@ def build_tool_schema(spec: ToolSpec, policy: CapabilityPolicy) -> dict[str, Any
                     schema.pop("required", None)
             else:
                 schema.pop("required", None)
-    if spec.operation == "read" and policy.can_register(spec.tool_name):
+    if spec.operation == "read" and policy.can_register(spec.tool_name) and spec.tool_name not in {
+        "formatting.preflight",
+        "drafts.list",
+        "drafts.read",
+    }:
         properties = schema.get("properties")
         if isinstance(properties, dict):
             updated_properties = dict(properties)
@@ -165,12 +266,25 @@ def build_tool_schema(spec: ToolSpec, policy: CapabilityPolicy) -> dict[str, Any
         updated_properties.setdefault("include_raw_payload", dict(_READ_INCLUDE_RAW_PAYLOAD_SCHEMA))
         updated_properties.setdefault("body_format", dict(_READ_BODY_FORMAT_SCHEMA))
         schema["properties"] = updated_properties
+    if spec.tool_name == "formatting.preflight":
+        schema["anyOf"] = [{"required": ["message"]}, {"required": ["source_path"]}]
+    elif spec.tool_name in {"drafts.read", "drafts.update", "drafts.delete"}:
+        schema["anyOf"] = [{"required": ["draft_id"]}, {"required": ["draft_path"]}]
+    elif "writes.content" in spec.parameter_families:
+        schema["anyOf"] = [{"required": ["message"]}, {"required": ["draft_id"]}, {"required": ["draft_path"]}]
     return schema
 
 
 def build_tool_output_schema(spec: ToolSpec) -> dict[str, object] | None:
     if spec.operation != "read":
         return None
+    if spec.tool_name == "formatting.preflight":
+        return {
+            "type": "object",
+            "additionalProperties": True,
+            "x-hf-helper-path": spec.helper_path,
+            "x-hf-formatting-engine": True,
+        }
     return {
         "type": "object",
         "additionalProperties": True,

@@ -53,11 +53,16 @@ Use this skill for hf-mcp write tasks so live-write guardrails stay explicit, co
    - They are part of coverage tracking, but not concrete helper commitments today.
    - Do not provide runnable examples that imply these rows are currently executable.
 
-7. Keep autonomous posting out of scope.
+7. Treat draft scheduling fields as metadata only.
+   - `scheduled_at` can exist in draft artifacts for operator workflow context.
+   - There is no built-in scheduler/queue that auto-executes writes from this metadata.
+   - Live execution still requires an explicit concrete helper call with `confirm_live=true`.
+
+8. Keep autonomous posting out of scope.
    - This skill does not normalize ungated automation or unattended live posting.
    - Escalate any automation request into explicit planning with operator-controlled gates.
 
-8. Route raw HF API internals to `hf-api-v2` when requested.
+9. Route raw HF API internals to `hf-api-v2` when requested.
    - Use `hf-api-v2` for low-level API semantics and scope details, not this write-usage surface.
 
 ## Verification
@@ -66,6 +71,7 @@ Use this skill for hf-mcp write tasks so live-write guardrails stay explicit, co
 - Confirm `confirm_live=true` is explicitly present for concrete writes.
 - Confirm `message_format` is set intentionally: omit/use `mycode` for MyCode input, or use `markdown` for Markdown-to-MyCode conversion.
 - Confirm placeholder rows are labeled non-callable in all guidance.
+- Confirm any `scheduled_at` guidance is metadata-only with no implied scheduler.
 - Confirm no ungated autonomous posting behavior is implied.
 - Confirm any quote-heavy public post drafted through `hf-mcp` has an explicit strategy for HF API quote sanitization.
 
@@ -82,4 +88,5 @@ Use this skill for hf-mcp write tasks so live-write guardrails stay explicit, co
 - Do not relax or omit `confirm_live=true` for concrete write helpers.
 - Do not normalize autonomous posting or unattended live-write loops.
 - Do not invent additional write helpers beyond the shipped documented set.
+- Do not imply `scheduled_at` triggers automatic execution.
 - Do not treat backend entity pre-encoding as a proven workaround for double quotes; `&#34;` was canonicalized to `&quot;` in live API readback.

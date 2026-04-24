@@ -15,6 +15,7 @@ from hf_mcp.capabilities import CapabilityPolicy
 from hf_mcp.config import HFMCPSettings
 from hf_mcp.registry import get_documented_write_specs, get_tool_spec
 from hf_mcp.schemas import build_tool_schema
+from hf_mcp.formatting_engine import write_draft_artifact
 from hf_mcp.tools.write_documented import (
     PENDING_LATER_LANE_WRITE_ROWS,
     build_write_handlers,
@@ -244,6 +245,130 @@ def test_write_helpers_can_convert_markdown_messages_to_mycode() -> None:
     ]
 
 
+def test_reply_can_publish_cached_preflight_draft_by_id_without_resending_message(tmp_path: Path) -> None:
+    transport = _CaptureTransport()
+    artifact = write_draft_artifact("**Approved**\n\n- cached draft body", "markdown", draft_dir=tmp_path)
+
+    reply_to_thread_live(
+        transport=transport,
+        tid=44,
+        draft_id=artifact.draft_id,
+        confirm_live=True,
+        draft_dir=tmp_path,
+    )
+
+    assert transport.calls == [
+        {
+            "asks": {
+                "posts": {
+                    "_tid": 44,
+                    "_message": "[b]Approved[/b]\n\n[list]\n[*] cached draft body\n[/list]",
+                }
+            },
+            "helper": "posts",
+        }
+    ]
+
+
+@pytest.mark.parametrize("selector", ["draft_id", "draft_path"])
+def test_thread_create_can_publish_cached_preflight_draft_from_configured_dir(
+    tmp_path: Path,
+    selector: str,
+) -> None:
+    transport = _CaptureTransport()
+    artifact = write_draft_artifact("**Approved**\n\n- thread draft body", "markdown", draft_dir=tmp_path)
+    kwargs: dict[str, Any]
+    if selector == "draft_id":
+        kwargs = {"draft_id": artifact.draft_id}
+    else:
+        kwargs = {"draft_path": str(artifact.path)}
+
+    create_thread_live(
+        transport=transport,
+        fid=12,
+        subject="Draft Thread",
+        confirm_live=True,
+        draft_dir=tmp_path,
+        **kwargs,
+    )
+
+    assert transport.calls == [
+        {
+            "asks": {
+                "threads": {
+                    "_fid": 12,
+                    "_subject": "Draft Thread",
+                    "_message": "[b]Approved[/b]\n\n[list]\n[*] thread draft body\n[/list]",
+                }
+            },
+            "helper": "threads",
+        }
+    ]
+
+
+def test_write_helpers_reject_message_and_draft_together_before_transport() -> None:
+    transport = _CaptureTransport()
+    artifact = write_draft_artifact("approved body", "markdown")
+
+    with pytest.raises(ValueError, match="either message or draft"):
+        reply_to_thread_live(
+            transport=transport,
+            tid=44,
+            message="duplicate",
+            draft_id=artifact.draft_id,
+            confirm_live=True,
+        )
+
+    assert transport.calls == []
+
+
+def test_draft_lookup_failure_never_calls_transport(tmp_path: Path) -> None:
+    transport = _CaptureTransport()
+
+    with pytest.raises(FileNotFoundError, match="Draft artifact not found"):
+        reply_to_thread_live(
+            transport=transport,
+            tid=44,
+            draft_id="a" * 32,
+            confirm_live=True,
+            draft_dir=tmp_path,
+        )
+
+    assert transport.calls == []
+
+
+def test_draft_loaded_preflight_failure_never_calls_transport(tmp_path: Path) -> None:
+    transport = _CaptureTransport()
+    artifact = write_draft_artifact("[list]\n[*] item", "markdown", draft_dir=tmp_path)
+
+    with pytest.raises(WritePreflightError, match="unclosed list"):
+        reply_to_thread_live(
+            transport=transport,
+            tid=44,
+            draft_id=artifact.draft_id,
+            confirm_live=True,
+            draft_dir=tmp_path,
+        )
+
+    assert transport.calls == []
+
+
+def test_draft_backed_publish_requires_confirm_live_before_transport(tmp_path: Path) -> None:
+    transport = _CaptureTransport()
+    artifact = write_draft_artifact("approved body", "markdown", draft_dir=tmp_path)
+
+    with pytest.raises(PermissionError, match="posts.reply"):
+        reply_to_thread_live(
+            transport=transport,
+            tid=44,
+            draft_id=artifact.draft_id,
+            confirm_live=False,
+            draft_dir=tmp_path,
+        )
+
+    assert transport.calls == []
+
+
 def test_markdown_write_preflight_blocks_malformed_generated_mycode_before_transport() -> None:
     transport = _CaptureTransport()
 
@@ -357,8 +482,23 @@ def test_handlers_accept_kwargs_generated_from_repaired_write_schemas() -> None:
     handlers = build_write_handlers(policy, transport)
 
     schema_kwargs: dict[str, dict[str, Any]] = {
-        "threads.create": {"fid": 1001, "subject": "T", "message": "M", "message_format": "mycode", "confirm_live": True},
-        "posts.reply": {"tid": 1002, "message": "R", "message_format": "mycode", "confirm_live": True},
+        "threads.create": {
+            "fid": 1001,
+            "subject": "T",
+            "message": "M",
+            "draft_id": None,
+            "draft_path": None,
+            "message_format": "mycode",
+            "confirm_live": True,
+        },
+        "posts.reply": {
+            "tid": 1002,
+            "message": "R",
+            "draft_id": None,
+            "draft_path": None,
+            "message_format": "mycode",
+            "confirm_live": True,
+        },
         "bytes.transfer": {"target_uid": 1003, "amount": 10, "confirm_live": True},
         "bytes.deposit": {"amount": 11, "confirm_live": True},
         "bytes.withdraw": {"amount": 12, "confirm_live": True},

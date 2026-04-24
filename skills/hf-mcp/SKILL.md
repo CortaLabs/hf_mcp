@@ -39,6 +39,7 @@ Use this skill as the router for hf-mcp tasks so you choose the right specialize
 
 5. Route to `hf-mcp-writes` for write tooling.
    Use it for concrete write helpers, `confirm_live=true` requirements, and placeholder-row boundaries.
+   Keep draft semantics explicit: `scheduled_at` is metadata only and there is no built-in scheduler.
 
 6. Keep boundaries explicit.
    If a task would change runtime behavior, package manifests, or product docs, escalate to implementation planning instead of improvising in usage guidance.

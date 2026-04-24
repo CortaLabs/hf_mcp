@@ -12,7 +12,7 @@ if str(SRC_PATH) not in sys.path:
     sys.path.insert(0, str(SRC_PATH))
 
 import hf_mcp.config as runtime_config
-from hf_mcp.config import DEFAULT_CONFIG_PATH, DEFAULT_TOKEN_PATH, load_settings
+from hf_mcp.config import DEFAULT_CONFIG_PATH, DEFAULT_DRAFT_DIR, DEFAULT_TOKEN_PATH, load_settings
 from hf_mcp.output_modes import ReadOutputDefaults, resolve_read_output_defaults
 from hf_mcp.token_store import load_token_store
 
@@ -249,6 +249,72 @@ def test_token_path_from_yaml_must_be_absolute(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="Token path must be absolute"):
         load_settings(config_path=config_path, env={})
+
+
+def test_draft_dir_resolution_prefers_yaml_over_environment(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    yaml_draft_dir = (tmp_path / "yaml-drafts").resolve(strict=False)
+    env_draft_dir = (tmp_path / "env-drafts").resolve(strict=False)
+    _write_yaml(config_path, {"profile": "reader", "draft_dir": str(yaml_draft_dir)})
+
+    settings = load_settings(
+        config_path=config_path,
+        env={"HF_MCP_DRAFT_DIR": str(env_draft_dir)},
+    )
+
+    assert settings.draft_dir == yaml_draft_dir
+
+
+def test_draft_dir_resolution_uses_environment_when_yaml_absent(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    env_draft_dir = (tmp_path / "env-drafts").resolve(strict=False)
+    _write_yaml(config_path, {"profile": "reader"})
+
+    settings = load_settings(
+        config_path=config_path,
+        env={"HF_MCP_DRAFT_DIR": str(env_draft_dir)},
+    )
+
+    assert settings.draft_dir == env_draft_dir
+
+
+def test_load_settings_does_not_create_draft_dir(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    draft_dir = (tmp_path / "missing-drafts").resolve(strict=False)
+    _write_yaml(config_path, {"profile": "reader", "draft_dir": str(draft_dir)})
+
+    settings = load_settings(config_path=config_path, env={})
+
+    assert settings.draft_dir == draft_dir
+    assert not draft_dir.exists()
+
+
+def test_draft_dir_resolution_falls_back_to_default_when_yaml_and_env_absent(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    _write_yaml(config_path, {"profile": "reader"})
+
+    settings = load_settings(config_path=config_path, env={})
+
+    assert settings.draft_dir == DEFAULT_DRAFT_DIR.resolve(strict=False)
+
+
+def test_relative_draft_dir_from_yaml_is_rejected(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    _write_yaml(config_path, {"profile": "reader", "draft_dir": "relative/drafts"})
+
+    with pytest.raises(ValueError, match="Draft directory must be absolute"):
+        load_settings(config_path=config_path, env={})
+
+
+def test_relative_draft_dir_from_environment_is_rejected(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    _write_yaml(config_path, {"profile": "reader"})
+
+    with pytest.raises(ValueError, match="Draft directory must be absolute"):
+        load_settings(
+            config_path=config_path,
+            env={"HF_MCP_DRAFT_DIR": "relative/drafts"},
+        )
 
 
 def test_load_token_store_accepts_canonical_user_path_independent_of_cwd(

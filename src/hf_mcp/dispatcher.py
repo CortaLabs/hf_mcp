@@ -6,11 +6,13 @@ from typing import Any
 
 from .annotations import build_annotations
 from .capabilities import CapabilityPolicy
-from .config import HFMCPSettings
+from .config import DEFAULT_DRAFT_DIR, HFMCPSettings
 from .metadata import get_tool_specs
 from .registry import get_documented_write_specs, mcp_tool_name
 from .schemas import build_tool_output_schema, build_tool_schema
 from .token_store import load_token_store
+from .tools.drafts import build_draft_handlers
+from .tools.formatting import build_formatting_handlers
 from .tools.read_core import build_core_read_handlers
 from .tools.read_extended import build_extended_read_handlers
 from .tools.write_documented import build_write_handlers
@@ -21,6 +23,7 @@ from .transport import HFTransport
 class RuntimeBundle:
     transport: object | None = None
     auth_context: object | None = None
+    settings: HFMCPSettings | None = None
 
 
 def resolve_runtime_bundle(settings: HFMCPSettings) -> RuntimeBundle:
@@ -28,7 +31,7 @@ def resolve_runtime_bundle(settings: HFMCPSettings) -> RuntimeBundle:
     store = load_token_store(settings)
     bundle = store.require_bundle()
     transport = HFTransport(token_store=store)
-    return RuntimeBundle(transport=transport, auth_context=bundle)
+    return RuntimeBundle(transport=transport, auth_context=bundle, settings=settings)
 
 
 def _require_runtime_secrets(settings: HFMCPSettings) -> None:
@@ -39,7 +42,8 @@ def _require_runtime_secrets(settings: HFMCPSettings) -> None:
 
 
 def _tool_description(tool_name: str, operation: str) -> str:
-    return f"Hack Forums remote {operation} tool for {tool_name}."
+    locality = "local" if tool_name == "formatting.preflight" or tool_name.startswith("drafts.") else "remote"
+    return f"Hack Forums {locality} {operation} tool for {tool_name}."
 
 
 def _build_unimplemented_handler(tool_name: str) -> Any:
@@ -113,13 +117,15 @@ def _register_via_register_tool(
 
 
 def register_tools(server: Any, policy: CapabilityPolicy, runtime: RuntimeBundle) -> None:
-    concrete_handlers: dict[str, Any] = {}
+    draft_dir = runtime.settings.draft_dir if runtime.settings is not None else DEFAULT_DRAFT_DIR
+    concrete_handlers: dict[str, Any] = build_formatting_handlers(draft_dir=draft_dir)
+    concrete_handlers.update(build_draft_handlers(draft_dir=draft_dir))
     transport = runtime.transport
 
     if isinstance(transport, HFTransport):
         concrete_handlers.update(build_core_read_handlers(policy, transport))
         concrete_handlers.update(build_extended_read_handlers(policy, transport))
-        concrete_handlers.update(build_write_handlers(policy, transport))
+        concrete_handlers.update(build_write_handlers(policy, transport, draft_dir=draft_dir))
 
     specs = list(get_tool_specs(policy))
     known_names = {spec.tool_name for spec in specs}
