@@ -154,7 +154,7 @@ Response:
   "content": [
     {
       "type": "text",
-      "text": "me.read profile: uid=1, username=example_user, usergroup=4"
+      "text": "me.read profile: uid=1, username=example_user, usergroup=4, usertitle=Member, postnum=250, threadnum=12, reputation=42, bytes=1000"
     }
   ],
   "structuredContent": {
@@ -163,7 +163,21 @@ Response:
         "uid": "1",
         "username": "example_user",
         "usergroup": "4",
-        "avatar": "https://example.test/avatar.png"
+        "displaygroup": "4",
+        "additionalgroups": "",
+        "postnum": "250",
+        "awards": "0",
+        "bytes": "1000",
+        "threadnum": "12",
+        "avatar": "https://example.test/avatar.png",
+        "avatardimensions": "100|100",
+        "avatartype": "remote",
+        "lastvisit": "1777046400",
+        "usertitle": "Member",
+        "website": "https://example.test",
+        "timeonline": "3600",
+        "reputation": "42",
+        "referrals": "0"
       }
     ]
   }

@@ -46,17 +46,52 @@ _DEFAULT_POST_FIELDS = (
     "editreason",
 )
 _DEFAULT_FORUM_FIELDS = ("fid", "name", "description", "type")
-_DEFAULT_ME_BASIC_FIELDS = ("uid", "username", "usergroup", "avatar")
+_DEFAULT_ME_BASIC_FIELDS = (
+    "uid",
+    "username",
+    "usergroup",
+    "displaygroup",
+    "additionalgroups",
+    "postnum",
+    "awards",
+    "bytes",
+    "threadnum",
+    "avatar",
+    "avatardimensions",
+    "avatartype",
+    "lastvisit",
+    "usertitle",
+    "website",
+    "timeonline",
+    "reputation",
+    "referrals",
+)
 _DEFAULT_ME_ADVANCED_FIELDS = (
     "unreadpms",
-    "unreadalerts",
     "invisible",
     "totalpms",
     "lastactive",
     "warningpoints",
-    "regdate",
 )
-_DEFAULT_USER_PROFILE_FIELDS = ("uid", "username", "avatar", "usergroup", "usertitle", "reputation")
+_DEFAULT_USER_PROFILE_FIELDS = (
+    "uid",
+    "username",
+    "usergroup",
+    "displaygroup",
+    "additionalgroups",
+    "postnum",
+    "awards",
+    "myps",
+    "threadnum",
+    "avatar",
+    "avatardimensions",
+    "avatartype",
+    "usertitle",
+    "website",
+    "timeonline",
+    "reputation",
+    "referrals",
+)
 
 
 def _build_me_asks(
@@ -264,7 +299,20 @@ def _build_content_summary(tool_name: str, payload: Mapping[str, Any], mode: Rea
     if tool_name == "me.read":
         if not rows:
             return "me.read returned 0 row(s)."
-        return f"me.read profile: {_line_for_entry(rows[0], primary_keys=('uid', 'username', 'usergroup'))}"
+        profile_summary_keys = (
+            "uid",
+            "username",
+            "usergroup",
+            "usertitle",
+            "postnum",
+            "threadnum",
+            "reputation",
+            "bytes",
+        )
+        return (
+            "me.read profile: "
+            f"{_line_for_entry(rows[0], primary_keys=profile_summary_keys)}"
+        )
     if tool_name == "users.read":
         return _build_rows_summary("users.read", rows, primary_keys=("uid", "username", "reputation"))
     if tool_name == "forums.read":

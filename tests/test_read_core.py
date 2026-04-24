@@ -211,14 +211,26 @@ def test_me_handler_reads_authenticated_profile_without_uid_selector(
     assert me_asks["uid"] is True
     assert me_asks["username"] is True
     assert me_asks["usergroup"] is True
+    assert me_asks["displaygroup"] is True
+    assert me_asks["additionalgroups"] is True
+    assert me_asks["postnum"] is True
+    assert me_asks["awards"] is True
+    assert me_asks["bytes"] is True
+    assert me_asks["threadnum"] is True
     assert me_asks["avatar"] is True
+    assert me_asks["avatardimensions"] is True
+    assert me_asks["avatartype"] is True
+    assert me_asks["lastvisit"] is True
+    assert me_asks["usertitle"] is True
+    assert me_asks["website"] is True
+    assert me_asks["timeonline"] is True
+    assert me_asks["reputation"] is True
+    assert me_asks["referrals"] is True
     assert "unreadpms" not in me_asks
-    assert "unreadalerts" not in me_asks
     assert "invisible" not in me_asks
     assert "totalpms" not in me_asks
     assert "lastactive" not in me_asks
     assert "warningpoints" not in me_asks
-    assert "regdate" not in me_asks
     assert result["structuredContent"]["me"] == [{"uid": "5", "username": "forge", "unreadpms": "99"}]
     assert result["content"][0]["type"] == "text"
 
@@ -247,7 +259,21 @@ def test_get_profile_omits_uid_selector_when_called_directly(monkeypatch: pytest
         "uid": True,
         "username": True,
         "usergroup": True,
+        "displaygroup": True,
+        "additionalgroups": True,
+        "postnum": True,
+        "awards": True,
+        "bytes": True,
+        "threadnum": True,
         "avatar": True,
+        "avatardimensions": True,
+        "avatartype": True,
+        "lastvisit": True,
+        "usertitle": True,
+        "website": True,
+        "timeonline": True,
+        "reputation": True,
+        "referrals": True,
     }
     assert captured["headers"]["Authorization"] == "Bearer token"
     assert "content" not in result
@@ -281,26 +307,50 @@ def test_get_profile_includes_advanced_fields_only_when_opted_in_and_allowed(
     assert me_asks["uid"] is True
     assert me_asks["username"] is True
     assert me_asks["usergroup"] is True
+    assert me_asks["displaygroup"] is True
+    assert me_asks["additionalgroups"] is True
+    assert me_asks["postnum"] is True
+    assert me_asks["awards"] is True
+    assert me_asks["bytes"] is True
+    assert me_asks["threadnum"] is True
     assert me_asks["avatar"] is True
+    assert me_asks["avatardimensions"] is True
+    assert me_asks["avatartype"] is True
+    assert me_asks["lastvisit"] is True
+    assert me_asks["usertitle"] is True
+    assert me_asks["website"] is True
+    assert me_asks["timeonline"] is True
+    assert me_asks["reputation"] is True
+    assert me_asks["referrals"] is True
     assert me_asks["unreadpms"] is True
-    assert me_asks["unreadalerts"] is True
     assert me_asks["invisible"] is True
     assert me_asks["totalpms"] is True
     assert me_asks["lastactive"] is True
     assert me_asks["warningpoints"] is True
-    assert me_asks["regdate"] is True
     assert set(me_asks.keys()) == {
         "uid",
         "username",
         "usergroup",
+        "displaygroup",
+        "additionalgroups",
+        "postnum",
+        "awards",
+        "bytes",
+        "threadnum",
         "avatar",
+        "avatardimensions",
+        "avatartype",
+        "lastvisit",
+        "usertitle",
+        "website",
+        "timeonline",
+        "reputation",
+        "referrals",
         "unreadpms",
-        "unreadalerts",
         "invisible",
         "totalpms",
         "lastactive",
         "warningpoints",
-        "regdate",
     }
     assert captured["headers"]["Authorization"] == "Bearer token"
     assert "content" not in result
@@ -336,20 +386,42 @@ def test_get_user_defaults_optional_values_and_requests_profile_bundle(
     assert user_asks["_perpage"] == 30
     assert user_asks["uid"] is True
     assert user_asks["username"] is True
-    assert user_asks["avatar"] is True
     assert user_asks["usergroup"] is True
+    assert user_asks["displaygroup"] is True
+    assert user_asks["additionalgroups"] is True
+    assert user_asks["postnum"] is True
+    assert user_asks["awards"] is True
+    assert user_asks["myps"] is True
+    assert user_asks["threadnum"] is True
+    assert user_asks["avatar"] is True
+    assert user_asks["avatardimensions"] is True
+    assert user_asks["avatartype"] is True
     assert user_asks["usertitle"] is True
+    assert user_asks["website"] is True
+    assert user_asks["timeonline"] is True
     assert user_asks["reputation"] is True
+    assert user_asks["referrals"] is True
     assert set(user_asks.keys()) == {
         "_uid",
         "_page",
         "_perpage",
         "uid",
         "username",
-        "avatar",
         "usergroup",
+        "displaygroup",
+        "additionalgroups",
+        "postnum",
+        "awards",
+        "myps",
+        "threadnum",
+        "avatar",
+        "avatardimensions",
+        "avatartype",
         "usertitle",
+        "website",
+        "timeonline",
         "reputation",
+        "referrals",
     }
     assert captured["headers"]["Authorization"] == "Bearer token"
     assert result["users"] == [{"uid": "5", "username": "forge", "reputation": "42"}]
