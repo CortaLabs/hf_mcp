@@ -2,7 +2,7 @@
 
 `hf-mcp` is a standalone MCP server package for the Hack Forums API v2.
 
-Current release line: `0.2.1`.
+Current release line: `0.2.2`.
 
 ## Install
 

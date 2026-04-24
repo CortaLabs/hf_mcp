@@ -16,7 +16,7 @@ from hf_mcp.capabilities import CAPABILITY_PARAMETER_FAMILIES, CapabilityPolicy
 from hf_mcp.config import HFMCPSettings
 from hf_mcp.dispatcher import RuntimeBundle, register_tools
 from hf_mcp.output_modes import ReadOutputDefaults
-from hf_mcp.registry import get_core_read_specs, get_tool_spec
+from hf_mcp.registry import get_core_read_specs, get_tool_spec, mcp_tool_name
 from hf_mcp.schemas import build_tool_schema
 from hf_mcp.token_store import TokenBundle
 from hf_mcp.tools.read_core import (
@@ -135,9 +135,9 @@ def test_dispatcher_output_excludes_disabled_core_read_capability() -> None:
 
     register_tools(server, policy, RuntimeBundle())
 
-    assert "users.read" in server.tools
-    assert "me.read" not in server.tools
-    assert "forums.read" not in server.tools
+    assert mcp_tool_name("users.read") in server.tools
+    assert mcp_tool_name("me.read") not in server.tools
+    assert mcp_tool_name("forums.read") not in server.tools
 
 
 def test_list_posts_delegates_to_transport_helper_and_returns_normalized_output(

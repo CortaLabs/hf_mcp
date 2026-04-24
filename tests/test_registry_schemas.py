@@ -12,7 +12,7 @@ if str(SRC_PATH) not in sys.path:
 
 from hf_mcp.capabilities import CapabilityPolicy
 from hf_mcp.config import HFMCPSettings
-from hf_mcp.registry import build_registry, get_tool_spec
+from hf_mcp.registry import build_registry, get_tool_spec, mcp_tool_name
 from hf_mcp.schemas import build_tool_schema
 import hf_mcp.registry as registry_module
 
@@ -29,13 +29,28 @@ def _policy(capabilities: set[str], parameter_families: set[str]) -> CapabilityP
 def test_registry_covers_documented_matrix_once() -> None:
     specs = build_registry()
     tool_names = {spec.tool_name for spec in specs}
+    mcp_tool_names = {mcp_tool_name(spec.tool_name) for spec in specs}
 
     assert len(specs) == len(registry_module._EXPECTED_COVERAGE_FAMILIES)
     assert {spec.coverage_family for spec in specs} == registry_module._EXPECTED_COVERAGE_FAMILIES
     assert len(tool_names) == len(specs)
+    assert len(mcp_tool_names) == len(specs)
     assert "transport.read" not in tool_names
     assert "transport.write" not in tool_names
+    assert "." not in "".join(mcp_tool_names)
     assert all(spec.transport_kind == "helper" for spec in specs)
+
+
+def test_mcp_tool_names_are_desktop_client_safe() -> None:
+    assert mcp_tool_name("posts.read") == "posts_read"
+    assert mcp_tool_name("threads.create") == "threads_create"
+    assert mcp_tool_name("sigmarket.order.read") == "sigmarket_order_read"
+    assert mcp_tool_name("admin.high_risk.write") == "admin_high_risk_write"
+
+    for spec in build_registry():
+        public_name = mcp_tool_name(spec.tool_name)
+        assert len(public_name) <= 64
+        assert all(character.isalnum() or character in "_-" for character in public_name)
 
 
 def test_get_tool_spec_returns_helper_row_metadata() -> None:

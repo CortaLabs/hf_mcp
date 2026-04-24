@@ -19,6 +19,7 @@ from hf_mcp.capabilities import CapabilityPolicy
 from hf_mcp.config import HFMCPSettings, PRESET_CAPABILITIES, PRESET_PARAMETER_FAMILIES
 from hf_mcp.dispatcher import RuntimeBundle, register_tools
 from hf_mcp.metadata import get_tool_specs
+from hf_mcp.registry import mcp_tool_name
 from hf_mcp.server import _FastMCPToolAdapter
 from hf_mcp.server import create_server, serve_stdio
 from hf_mcp.token_store import TokenBundle
@@ -248,7 +249,7 @@ app.run(transport="stdio")
             async with ClientSession(read_stream, write_stream) as session:
                 await session.initialize()
                 result = await session.call_tool(
-                    "me.read",
+                    "me_read",
                     {"output_mode": "raw", "include_raw_payload": True},
                 )
         assert result.structuredContent is not None
@@ -298,7 +299,7 @@ def test_dispatcher_registers_only_policy_allowed_registry_rows() -> None:
     server = _CaptureServer()
     register_tools(server, policy, RuntimeBundle())
 
-    assert set(server.tools) == {"threads.read", "posts.reply"}
+    assert set(server.tools) == {mcp_tool_name("threads.read"), mcp_tool_name("posts.reply")}
 
 
 def test_dispatcher_excludes_disabled_capabilities_even_when_registry_contains_rows() -> None:
@@ -310,9 +311,9 @@ def test_dispatcher_excludes_disabled_capabilities_even_when_registry_contains_r
     server = _CaptureServer()
     register_tools(server, policy, RuntimeBundle())
 
-    assert "threads.read" in server.tools
-    assert "posts.reply" not in server.tools
-    assert "admin.high_risk.write" not in server.tools
+    assert mcp_tool_name("threads.read") in server.tools
+    assert mcp_tool_name("posts.reply") not in server.tools
+    assert mcp_tool_name("admin.high_risk.write") not in server.tools
 
 
 def test_metadata_and_annotations_are_remote_tier4_and_operation_honest() -> None:
@@ -327,7 +328,7 @@ def test_metadata_and_annotations_are_remote_tier4_and_operation_honest() -> Non
     server = _CaptureServer()
     register_tools(server, policy, RuntimeBundle())
 
-    read_annotations = server.tools["threads.read"]["annotations"]
+    read_annotations = server.tools[mcp_tool_name("threads.read")]["annotations"]
     assert read_annotations["readOnlyHint"] is True
     assert read_annotations["destructiveHint"] is False
     assert read_annotations["openWorldHint"] is True
@@ -339,9 +340,9 @@ def test_metadata_and_annotations_are_remote_tier4_and_operation_honest() -> Non
     assert (
         read_annotations["_meta"]["x-hf-output-field-bundles"] == "separate_from_rendering"
     )
-    assert server.tools["threads.read"]["output_schema"] is not None
+    assert server.tools[mcp_tool_name("threads.read")]["output_schema"] is not None
 
-    write_annotations = server.tools["posts.reply"]["annotations"]
+    write_annotations = server.tools[mcp_tool_name("posts.reply")]["annotations"]
     assert write_annotations["readOnlyHint"] is False
     assert write_annotations["destructiveHint"] is True
     assert write_annotations["openWorldHint"] is True
@@ -353,7 +354,7 @@ def test_metadata_and_annotations_are_remote_tier4_and_operation_honest() -> Non
     assert (
         write_annotations["_meta"]["x-hf-output-field-bundles"] == "separate_from_rendering"
     )
-    assert server.tools["posts.reply"]["output_schema"] is None
+    assert server.tools[mcp_tool_name("posts.reply")]["output_schema"] is None
 
 
 def test_create_server_uses_dispatcher_as_single_registration_authority(
@@ -369,7 +370,7 @@ def test_create_server_uses_dispatcher_as_single_registration_authority(
     server = create_server(settings)
 
     assert hasattr(server, "tools")
-    assert set(server.tools) == {"threads.read"}
+    assert set(server.tools) == {mcp_tool_name("threads.read")}
 
 
 def test_create_server_full_api_registers_extended_reads_concretely_and_retains_write_placeholders(
@@ -397,8 +398,9 @@ def test_create_server_full_api_registers_extended_reads_concretely_and_retains_
         "admin.high_risk.read",
     )
     for name in concrete_read_rows:
-        assert name in server.tools
-        assert server.tools[name].handler.__name__ != "_handler"
+        public_name = mcp_tool_name(name)
+        assert public_name in server.tools
+        assert server.tools[public_name].handler.__name__ != "_handler"
 
     retained_write_rows = (
         "contracts.write",
@@ -406,14 +408,15 @@ def test_create_server_full_api_registers_extended_reads_concretely_and_retains_
         "admin.high_risk.write",
     )
     for name in retained_write_rows:
-        assert name in server.tools
-        assert server.tools[name].handler.__name__ == "_handler"
+        public_name = mcp_tool_name(name)
+        assert public_name in server.tools
+        assert server.tools[public_name].handler.__name__ == "_handler"
 
-    contracts_schema = server.tools["contracts.read"].input_schema
-    disputes_schema = server.tools["disputes.read"].input_schema
-    bratings_schema = server.tools["bratings.read"].input_schema
-    market_schema = server.tools["sigmarket.market.read"].input_schema
-    orders_schema = server.tools["sigmarket.order.read"].input_schema
+    contracts_schema = server.tools[mcp_tool_name("contracts.read")].input_schema
+    disputes_schema = server.tools[mcp_tool_name("disputes.read")].input_schema
+    bratings_schema = server.tools[mcp_tool_name("bratings.read")].input_schema
+    market_schema = server.tools[mcp_tool_name("sigmarket.market.read")].input_schema
+    orders_schema = server.tools[mcp_tool_name("sigmarket.order.read")].input_schema
 
     for schema in (contracts_schema, disputes_schema, bratings_schema, market_schema, orders_schema):
         assert schema["properties"]["page"]["default"] == 1
@@ -447,8 +450,8 @@ def test_core_and_extended_read_rows_register_concrete_handlers_when_transport_i
 
     register_tools(server, policy, RuntimeBundle(transport=transport))
 
-    me_handler = server.tools["me.read"]["handler"]
-    bytes_handler = server.tools["bytes.read"]["handler"]
+    me_handler = server.tools[mcp_tool_name("me.read")]["handler"]
+    bytes_handler = server.tools[mcp_tool_name("bytes.read")]["handler"]
     assert me_handler.__name__ != "_handler"
     assert bytes_handler.__name__ != "_handler"
 
@@ -476,9 +479,9 @@ def test_create_server_publishes_truthful_core_read_input_schemas(
     monkeypatch.setattr("hf_mcp.server.resolve_runtime_bundle", lambda _: _runtime_bundle())
     server = create_server(settings)
 
-    me_schema = server.tools["me.read"].input_schema
-    threads_schema = server.tools["threads.read"].input_schema
-    posts_schema = server.tools["posts.read"].input_schema
+    me_schema = server.tools[mcp_tool_name("me.read")].input_schema
+    threads_schema = server.tools[mcp_tool_name("threads.read")].input_schema
+    posts_schema = server.tools[mcp_tool_name("posts.read")].input_schema
 
     assert "uid" not in me_schema["properties"]
     assert "uid" not in me_schema.get("required", [])
@@ -502,9 +505,9 @@ def test_create_server_publishes_truthful_core_read_input_schemas(
     assert posts_schema["properties"]["include_raw_payload"]["type"] == "boolean"
     assert set(posts_schema.get("required", [])) == {"tid"}
 
-    assert server.tools["me.read"].output_schema is not None
-    assert server.tools["threads.read"].output_schema is not None
-    assert server.tools["posts.read"].output_schema is not None
+    assert server.tools[mcp_tool_name("me.read")].output_schema is not None
+    assert server.tools[mcp_tool_name("threads.read")].output_schema is not None
+    assert server.tools[mcp_tool_name("posts.read")].output_schema is not None
 
 
 def test_core_write_rows_register_concrete_handlers_while_later_rows_remain_placeholders() -> None:
@@ -537,10 +540,10 @@ def test_core_write_rows_register_concrete_handlers_while_later_rows_remain_plac
     register_tools(server, policy, RuntimeBundle(transport=transport))
 
     for name in ["threads.create", "posts.reply", "bytes.transfer", "bytes.deposit", "bytes.withdraw", "bytes.bump"]:
-        assert server.tools[name]["handler"].__name__ != "_handler"
-    assert server.tools["contracts.write"]["handler"].__name__ == "_handler"
-    assert server.tools["sigmarket.write"]["handler"].__name__ == "_handler"
-    assert server.tools["admin.high_risk.write"]["handler"].__name__ == "_handler"
+        assert server.tools[mcp_tool_name(name)]["handler"].__name__ != "_handler"
+    assert server.tools[mcp_tool_name("contracts.write")]["handler"].__name__ == "_handler"
+    assert server.tools[mcp_tool_name("sigmarket.write")]["handler"].__name__ == "_handler"
+    assert server.tools[mcp_tool_name("admin.high_risk.write")]["handler"].__name__ == "_handler"
 
 
 def test_register_tools_uses_placeholder_handlers_when_runtime_bundle_has_no_transport() -> None:
@@ -551,8 +554,8 @@ def test_register_tools_uses_placeholder_handlers_when_runtime_bundle_has_no_tra
     server = _CaptureServer()
     register_tools(server, policy, RuntimeBundle())
 
-    assert server.tools["threads.read"]["handler"].__name__ == "_handler"
-    assert server.tools["posts.reply"]["handler"].__name__ == "_handler"
+    assert server.tools[mcp_tool_name("threads.read")]["handler"].__name__ == "_handler"
+    assert server.tools[mcp_tool_name("posts.reply")]["handler"].__name__ == "_handler"
 
 
 def test_dispatcher_publishes_truthful_core_write_input_schemas() -> None:
@@ -589,7 +592,7 @@ def test_dispatcher_publishes_truthful_core_write_input_schemas() -> None:
     }
 
     for tool_name, expected_names in expected_parameter_names.items():
-        schema = server.tools[tool_name]["input_schema"]
+        schema = server.tools[mcp_tool_name(tool_name)]["input_schema"]
         assert set(schema["properties"].keys()) == expected_names
 
 
@@ -606,7 +609,7 @@ def test_register_tools_does_not_perform_implicit_bootstrap(monkeypatch: pytest.
     monkeypatch.setattr("hf_mcp.dispatcher.load_token_store", _fail_load_token_store)
     register_tools(server, policy, RuntimeBundle())
 
-    assert set(server.tools) == {"threads.read"}
+    assert set(server.tools) == {mcp_tool_name("threads.read")}
 
 
 def test_create_server_fails_closed_when_runtime_secrets_are_missing() -> None:
@@ -750,8 +753,9 @@ def test_serve_stdio_publishes_dispatcher_contract_for_live_runtime(
         "bytes.bump",
         "contracts.write",
     ):
-        expected_tool = expected_server.tools[tool_name]
-        published = app.registered_tools[tool_name]
+        public_tool_name = mcp_tool_name(tool_name)
+        expected_tool = expected_server.tools[public_tool_name]
+        published = app.registered_tools[public_tool_name]
         published_signature = inspect.signature(published["handler"])
         published_parameters = tuple(published_signature.parameters.values())
         expected_parameter_names = tuple(expected_tool.input_schema.get("properties", {}).keys())
@@ -766,14 +770,14 @@ def test_serve_stdio_publishes_dispatcher_contract_for_live_runtime(
         assert published_annotations == expected_tool.annotations
         assert published["output_schema"] == expected_tool.output_schema
 
-    me_signature = inspect.signature(app.registered_tools["me.read"]["handler"])
+    me_signature = inspect.signature(app.registered_tools[mcp_tool_name("me.read")]["handler"])
     assert "uid" not in me_signature.parameters
     assert me_signature.parameters["include_basic_fields"].default is True
     assert me_signature.parameters["include_advanced_fields"].default is False
     assert me_signature.parameters["output_mode"].default is None
     assert me_signature.parameters["include_raw_payload"].default is None
 
-    threads_signature = inspect.signature(app.registered_tools["threads.read"]["handler"])
+    threads_signature = inspect.signature(app.registered_tools[mcp_tool_name("threads.read")]["handler"])
     assert threads_signature.parameters["fid"].default is inspect.Parameter.empty
     assert threads_signature.parameters["tid"].default is None
     assert threads_signature.parameters["page"].default == 1
@@ -781,7 +785,7 @@ def test_serve_stdio_publishes_dispatcher_contract_for_live_runtime(
     assert threads_signature.parameters["output_mode"].default is None
     assert threads_signature.parameters["include_raw_payload"].default is None
 
-    posts_signature = inspect.signature(app.registered_tools["posts.read"]["handler"])
+    posts_signature = inspect.signature(app.registered_tools[mcp_tool_name("posts.read")]["handler"])
     assert posts_signature.parameters["tid"].default is inspect.Parameter.empty
     assert posts_signature.parameters["pid"].default is None
     assert posts_signature.parameters["page"].default == 1
@@ -790,38 +794,38 @@ def test_serve_stdio_publishes_dispatcher_contract_for_live_runtime(
     assert posts_signature.parameters["output_mode"].default is None
     assert posts_signature.parameters["include_raw_payload"].default is None
 
-    reply_signature = inspect.signature(app.registered_tools["posts.reply"]["handler"])
+    reply_signature = inspect.signature(app.registered_tools[mcp_tool_name("posts.reply")]["handler"])
     assert set(reply_signature.parameters.keys()) == {"tid", "message", "confirm_live"}
     assert "subject" not in reply_signature.parameters
 
-    transfer_signature = inspect.signature(app.registered_tools["bytes.transfer"]["handler"])
+    transfer_signature = inspect.signature(app.registered_tools[mcp_tool_name("bytes.transfer")]["handler"])
     assert set(transfer_signature.parameters.keys()) == {"target_uid", "amount", "confirm_live"}
     assert "note" not in transfer_signature.parameters
 
-    deposit_signature = inspect.signature(app.registered_tools["bytes.deposit"]["handler"])
+    deposit_signature = inspect.signature(app.registered_tools[mcp_tool_name("bytes.deposit")]["handler"])
     assert set(deposit_signature.parameters.keys()) == {"amount", "confirm_live"}
     assert "target_uid" not in deposit_signature.parameters
     assert "note" not in deposit_signature.parameters
 
-    withdraw_signature = inspect.signature(app.registered_tools["bytes.withdraw"]["handler"])
+    withdraw_signature = inspect.signature(app.registered_tools[mcp_tool_name("bytes.withdraw")]["handler"])
     assert set(withdraw_signature.parameters.keys()) == {"amount", "confirm_live"}
     assert "target_uid" not in withdraw_signature.parameters
     assert "note" not in withdraw_signature.parameters
 
-    bump_signature = inspect.signature(app.registered_tools["bytes.bump"]["handler"])
+    bump_signature = inspect.signature(app.registered_tools[mcp_tool_name("bytes.bump")]["handler"])
     assert tuple(bump_signature.parameters.keys()) == ("confirm_live", "tid")
     assert "target_uid" not in bump_signature.parameters
     assert "amount" not in bump_signature.parameters
     assert "note" not in bump_signature.parameters
 
-    contracts_signature = inspect.signature(app.registered_tools["contracts.read"]["handler"])
+    contracts_signature = inspect.signature(app.registered_tools[mcp_tool_name("contracts.read")]["handler"])
     assert contracts_signature.parameters["cid"].default is None
     assert contracts_signature.parameters["uid"].default is None
     assert contracts_signature.parameters["page"].default == 1
     assert contracts_signature.parameters["per_page"].default == 30
     assert "contract_id" not in contracts_signature.parameters
 
-    disputes_signature = inspect.signature(app.registered_tools["disputes.read"]["handler"])
+    disputes_signature = inspect.signature(app.registered_tools[mcp_tool_name("disputes.read")]["handler"])
     assert disputes_signature.parameters["cdid"].default is None
     assert disputes_signature.parameters["uid"].default is None
     assert disputes_signature.parameters["page"].default == 1
@@ -829,18 +833,18 @@ def test_serve_stdio_publishes_dispatcher_contract_for_live_runtime(
     assert "did" not in disputes_signature.parameters
     assert "dispute_id" not in disputes_signature.parameters
 
-    bratings_signature = inspect.signature(app.registered_tools["bratings.read"]["handler"])
+    bratings_signature = inspect.signature(app.registered_tools[mcp_tool_name("bratings.read")]["handler"])
     assert bratings_signature.parameters["uid"].default is None
     assert bratings_signature.parameters["page"].default == 1
     assert bratings_signature.parameters["per_page"].default == 30
 
-    market_signature = inspect.signature(app.registered_tools["sigmarket.market.read"]["handler"])
+    market_signature = inspect.signature(app.registered_tools[mcp_tool_name("sigmarket.market.read")]["handler"])
     assert market_signature.parameters["uid"].default is None
     assert market_signature.parameters["page"].default == 1
     assert market_signature.parameters["per_page"].default == 30
     assert "listing_id" not in market_signature.parameters
 
-    order_signature = inspect.signature(app.registered_tools["sigmarket.order.read"]["handler"])
+    order_signature = inspect.signature(app.registered_tools[mcp_tool_name("sigmarket.order.read")]["handler"])
     assert order_signature.parameters["oid"].default is None
     assert order_signature.parameters["uid"].default is None
     assert order_signature.parameters["page"].default == 1
@@ -888,7 +892,7 @@ def test_serve_stdio_runs_stdio_runtime_once_without_restart_loop(
     serve_stdio(settings)
 
     assert run_calls == ["stdio"]
-    assert registered_names == ["threads.read"]
+    assert registered_names == [mcp_tool_name("threads.read")]
 
 
 def test_serve_stdio_does_not_retry_when_stdio_is_closed(

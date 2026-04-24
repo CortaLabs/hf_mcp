@@ -8,7 +8,7 @@ from .annotations import build_annotations
 from .capabilities import CapabilityPolicy
 from .config import HFMCPSettings
 from .metadata import get_tool_specs
-from .registry import get_documented_write_specs
+from .registry import get_documented_write_specs, mcp_tool_name
 from .schemas import build_tool_output_schema, build_tool_schema
 from .token_store import load_token_store
 from .tools.read_core import build_core_read_handlers
@@ -140,7 +140,7 @@ def register_tools(server: Any, policy: CapabilityPolicy, runtime: RuntimeBundle
         annotations = build_annotations(spec)
         registered = _register_via_register_tool(
             server,
-            name=spec.tool_name,
+            name=mcp_tool_name(spec.tool_name),
             description=_tool_description(spec.tool_name, spec.operation),
             input_schema=schema,
             annotations=annotations,

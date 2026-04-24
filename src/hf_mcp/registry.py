@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import re
 from typing import Literal
 
 from .capabilities import CAPABILITY_PARAMETER_FAMILIES
 
 Operation = Literal["read", "write"]
 TransportKind = Literal["generic", "helper"]
+
+_MCP_TOOL_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
 
 
 @dataclass(frozen=True, slots=True)
@@ -251,12 +254,30 @@ def _build_tool_spec(row: _MatrixRow) -> ToolSpec:
     )
 
 
+def mcp_tool_name(canonical_tool_name: str) -> str:
+    """Return the public MCP-safe tool name for a canonical HF tool id."""
+    public_name = canonical_tool_name.replace(".", "_")
+    if not _MCP_TOOL_NAME_PATTERN.fullmatch(public_name):
+        raise ValueError(
+            f"Canonical tool '{canonical_tool_name}' maps to invalid MCP tool name '{public_name}'."
+        )
+    return public_name
+
+
 def _validate_registry(specs: list[ToolSpec]) -> None:
     tool_names = [spec.tool_name for spec in specs]
     duplicate_tool_names = sorted(name for name in set(tool_names) if tool_names.count(name) > 1)
     if duplicate_tool_names:
         dupes = ", ".join(duplicate_tool_names)
         raise ValueError(f"Duplicate tool_name entries in registry: {dupes}")
+
+    public_tool_names = [mcp_tool_name(spec.tool_name) for spec in specs]
+    duplicate_public_tool_names = sorted(
+        name for name in set(public_tool_names) if public_tool_names.count(name) > 1
+    )
+    if duplicate_public_tool_names:
+        dupes = ", ".join(duplicate_public_tool_names)
+        raise ValueError(f"Duplicate MCP tool name entries in registry: {dupes}")
 
     coverage_families = [spec.coverage_family for spec in specs]
     duplicate_coverage_families = sorted(
@@ -331,4 +352,5 @@ __all__ = [
     "get_tool_spec",
     "get_core_read_specs",
     "get_extended_read_specs",
+    "mcp_tool_name",
 ]
