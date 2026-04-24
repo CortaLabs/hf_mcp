@@ -103,15 +103,20 @@ def format_body_text(value: str, body_format: BodyFormat) -> str:
 
 def markdown_to_mycode(value: str) -> str:
     code_blocks: list[str] = []
+    inline_code_blocks: list[str] = []
 
     def _stash_code_block(match: re.Match[str]) -> str:
         code_blocks.append(f"[code]{match.group(1)}[/code]")
         return f"\u0000CODE{len(code_blocks) - 1}\u0000"
 
+    def _stash_inline_code(match: re.Match[str]) -> str:
+        inline_code_blocks.append(f"[code]{match.group(1)}[/code]")
+        return f"\u0000INLCODE{len(inline_code_blocks) - 1}\u0000"
+
     text = _MARKDOWN_CODE_BLOCK_PATTERN.sub(_stash_code_block, value)
+    text = _MARKDOWN_INLINE_CODE_PATTERN.sub(_stash_inline_code, text)
     text = _MARKDOWN_IMAGE_PATTERN.sub(lambda match: f"[img]{match.group(1)}[/img]", text)
     text = _MARKDOWN_LINK_PATTERN.sub(lambda match: f"[url={match.group(2)}]{match.group(1)}[/url]", text)
-    text = _MARKDOWN_INLINE_CODE_PATTERN.sub(lambda match: f"[code]{match.group(1)}[/code]", text)
     text = re.sub(r"\*\*(.+?)\*\*", r"[b]\1[/b]", text, flags=re.DOTALL)
     text = re.sub(r"__(.+?)__", r"[b]\1[/b]", text, flags=re.DOTALL)
     text = re.sub(r"~~(.+?)~~", r"[s]\1[/s]", text, flags=re.DOTALL)
@@ -122,6 +127,8 @@ def markdown_to_mycode(value: str) -> str:
 
     for index, replacement in enumerate(code_blocks):
         text = text.replace(f"\u0000CODE{index}\u0000", replacement)
+    for index, replacement in enumerate(inline_code_blocks):
+        text = text.replace(f"\u0000INLCODE{index}\u0000", replacement)
 
     return _tidy_text(text)
 

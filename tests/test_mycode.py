@@ -81,3 +81,15 @@ def test_markdown_to_mycode_converts_common_agent_markdown() -> None:
         "[quote]quoted[/quote]\n\n"
         "[code]{\"keep\":\"exact\"}\n[/code]"
     )
+
+
+def test_markdown_to_mycode_protects_inline_code_from_emphasis_rules() -> None:
+    source = (
+        'Use `body_format="markdown"` and `message_format="markdown"`.\n'
+        "Keep `snake_case_value` literal while **bold** still converts."
+    )
+
+    assert markdown_to_mycode(source) == (
+        'Use [code]body_format="markdown"[/code] and [code]message_format="markdown"[/code].\n'
+        "Keep [code]snake_case_value[/code] literal while [b]bold[/b] still converts."
+    )
