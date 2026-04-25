@@ -9,11 +9,15 @@ It is called [b]hf-mcp[/b], and the repo is here:
 
 [align=center][url=https://github.com/CortaLabs/hf_mcp]https://github.com/CortaLabs/hf_mcp[/url][/align]
 
+Current release line: [b]0.3.0[/b].
+
 The short version: this lets an MCP-capable AI client talk to HF through structured API tools instead of scraping pages, guessing selectors, or trying to drive a browser like a confused intern.
 
 You install the package, authorize your HF account through OAuth, run the MCP server, and then your client can use named tools for HF reads and guarded writes.
 
-That is the point. Less weird glue code. Fewer random scripts. A cleaner base layer for people who want to build actual HF-aware assistants.
+The current release also adds a real exploration flow. An agent can now start with [b]zero known IDs[/b], call `forums.index`, pick a real forum from the packaged catalog, and follow `_hf_flow.next_actions` into `forums.read`, `threads.read`, and `posts.read`.
+
+That is the point. Less weird glue code. Fewer random scripts. A cleaner base layer for people who want to build actual HF-aware assistants that can explore, read, draft, and move through HF context without every ID being hand-fed.
 
 [align=center][img]https://i.ibb.co.com/N2NSzmv9/divider.gif[/img][/align]
 [size=x-large][align=center][css=68]What It Can Do Right Now[/css][/align][/size]
@@ -25,6 +29,7 @@ Current read tools cover the stuff an agent needs to actually understand what is
 [list]
 [*][b]Account context[/b] - read your own HF account state through `me.read`.
 [*][b]Users[/b] - inspect public user data by UID.
+[*][b]Root discovery[/b] - call `forums.index` / `forums_index` when you do not know any IDs yet.
 [*][b]Forums[/b] - read forum sections by FID.
 [*][b]Threads[/b] - browse threads inside a forum.
 [*][b]Posts[/b] - read posts inside a thread, including post bodies when needed.
@@ -37,7 +42,50 @@ Current read tools cover the stuff an agent needs to actually understand what is
 
 The registered MCP surface is concrete right now. Exposed tools map to actual implemented handlers.
 
-The core browsing path is the important part: an assistant can move from forum, to thread, to posts, to users without needing you to manually feed it every ID after the first step.
+The core browsing path is the important part: an assistant can start from `forums.index` without knowing any IDs, then move from forum, to thread, to posts, to users without needing you to manually feed it every selector.
+
+Every flow-aware response carries an additive `_hf_flow` object in `structuredContent`. That object has breadcrumbs and `next_actions`, so one tool result can tell the agent the valid next tool calls.
+
+Concrete path:
+
+[code]forums.index -> forums.read -> threads.read -> posts.read[/code]
+
+Example zero-ID entry call:
+
+[code]{
+  "tool": "forums.index",
+  "arguments": {
+    "view": "tree"
+  }
+}[/code]
+
+Example flow metadata shape:
+
+[code]structuredContent:
+{
+  "forums_index": [
+    {
+      "fid": 375,
+      "name": "API",
+      "type": "forum"
+    }
+  ],
+  "_hf_flow": {
+    "entry_tool": "forums.index",
+    "breadcrumbs": ["forum_catalog", "forums.index"],
+    "next_actions": [
+      {
+        "tool": "forums.read",
+        "arguments": {
+          "fid": 375
+        },
+        "reason": "Read this forum and discover threads."
+      }
+    ]
+  }
+}[/code]
+
+`forums.index` is local package catalog data, not a live scrape of the HF forum tree. It is intentionally useful as a root map, and it can drift between package updates if HF changes the forum structure.
 
 Selector handling is also less annoying now. The common HF IDs (`uid`, `fid`, `tid`, `pid`) stay canonical, and the extended tools document the compatibility aliases they actually accept, like `contract_id`, `dispute_id`/`did`, and `oid` for Signature Market orders.
 
@@ -52,6 +100,8 @@ Read output is designed for both humans and scripts. You do not have to choose b
 Those three modes are intentional, not accidental. `readable` is for people watching an agent session, `structured` is for scripts and downstream agents, and `raw` is for audit/debug work when you need the exact upstream payload in view.
 
 Formatting is part of this workflow too. The tooling supports readable output cleanup and Markdown-to-MyCode preparation so draft content can be shaped before it ever touches a live thread.
+
+The flow envelope is not limited to the forum path. `_hf_flow` is emitted by `forums.index`, core reads, supported extended reads, local draft/preflight tools, and successful results from implemented guarded writes after confirmed or stubbed execution. Unsupported write families stay absent.
 
 Example read call:
 
@@ -212,6 +262,8 @@ If you need PM context, use `me.read` with Advanced Info. It can expose counters
 
 For write flows, I recommend using disk drafts plus preflight checks first, then explicit confirmation for the final live call. That keeps accidental post/transfer mistakes down.
 
+Successful guarded writes also return `_hf_flow` when there are meaningful follow-up reads. For example, a confirmed thread create can point back to `threads.read`, `posts.read`, and `forums.read`. The confirmation gate still comes first; flow metadata is not an auto-publish mechanism.
+
 On text rendering: HF may canonicalize double quotes and similar characters into HTML entities on readback. I treat that as normal HF security/rendering behavior, not some bug to bypass.
 
 [align=center][img]https://i.ibb.co.com/N2NSzmv9/divider.gif[/img][/align]
@@ -230,6 +282,8 @@ An agent should not be raw-posting whatever it just generated. The better flow i
 [/list]
 
 That gives you a real approval point. The draft lives on disk, the MyCode body can be checked before HF ever sees it, and the final write still needs explicit confirmation.
+
+Draft and preflight tools also participate in `_hf_flow`, but their next actions stay local by default: inspect, update, preflight again, or delete the draft. They do not point an agent straight into live posting.
 
 The Markdown-to-MyCode conversion is practical, not decorative. Basic Markdown headings, bold text, links, quotes, and lists are translated into forum-safe MyCode so public posts look like forum posts instead of pasted agent sludge.
 
@@ -312,6 +366,7 @@ It includes:
 [*]A stdio MCP server for MCP clients.
 [*]Docs for configuration, auth, tools, security model, and examples.
 [*]Packaged usage skills for agents and clients that support skills.
+[*]A maintained forum catalog and `_hf_flow.next_actions` contract so tools can feed the next tool call.
 [/list]
 
 The goal is for someone to be able to install it, connect it, and understand what each tool does without digging through random source files.
@@ -342,6 +397,6 @@ Package:
 
 If you build HF tools, AI assistants, marketplace helpers, or anything that needs clean API access to forum data, this is the base layer I wanted to exist.
 
-It is still early, but the foundation is there now: OAuth bootstrap, safe read tools, guarded write tools, docs, and a package structure that should be easy to build on.
+It is still early, but the foundation is there now: OAuth bootstrap, zero-ID forum discovery, compounding read flow, safe read tools, guarded write tools, local draft/preflight workflow, docs, and a package structure that should be easy to build on.
 
-If you try it, I would especially like feedback on tool ergonomics. The target is simple: an agent should be able to browse and work with HF without fighting the API shape or guessing what a tool returns.
+If you try it, I would especially like feedback on tool ergonomics. The target is simple: an agent should be able to start from nothing, browse and work with HF, and keep moving from one tool result to the next without fighting the API shape or guessing what a tool returns.

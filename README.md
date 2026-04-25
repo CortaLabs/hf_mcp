@@ -72,6 +72,8 @@ Concrete exploration path:
 - `forums.index` -> `forums.read` -> `threads.read` -> `posts.read`
 - `forums.read` still requires `fid`; it is not root discovery.
 - `_hf_flow` is the machine-readable flow envelope key.
+- `_hf_flow.next_actions` is the communication layer that lets one tool result
+  feed the next tool call without an agent guessing selectors.
 - `_hf_flow` currently ships on `forums.index`, core reads, supported
   extended reads (`bytes.read`, `contracts.read`, `disputes.read`,
   `bratings.read`, `sigmarket.market.read`, and `sigmarket.order.read`),
@@ -162,6 +164,7 @@ python -m hf_mcp serve
 - [`docs/tool_overview.md`](docs/tool_overview.md)
 - [`docs/coverage_matrix.md`](docs/coverage_matrix.md)
 - [`docs/examples.md`](docs/examples.md)
+- [`docs/hf_mcp_hf_launch_post.mycode`](docs/hf_mcp_hf_launch_post.mycode)
 - [`docs/security_model.md`](docs/security_model.md)
 - [`docs/export_boundary.md`](docs/export_boundary.md)
 - [`docs/oauth_callback.html`](docs/oauth_callback.html)

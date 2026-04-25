@@ -11,6 +11,12 @@ owner: hackforums-council
 
 Use this skill as the router for hf-mcp tasks so you choose the right specialized skill quickly and keep guidance aligned with current package truth.
 
+## Foundation Status
+
+`hf-mcp` is the Hack Forums MCP/API foundation layer for this package. It now supports zero-ID exploration through `forums.index`, flow-aware tool chaining through `_hf_flow.next_actions`, local draft/preflight review, and explicitly gated live-capable write helpers.
+
+Future HF-aware agents should consume these shipped tools first instead of scraping pages, inventing direct API clients, or asking the operator to manually provide every selector.
+
 ## Trigger Conditions
 
 - The task mentions `hf-mcp` generally and the next step is unclear.
@@ -35,7 +41,7 @@ Use this skill as the router for hf-mcp tasks so you choose the right specialize
    Use it for tool family selection, required selectors, browse-first optional-filter semantics, and JSON-first read examples.
    Keep compounding flow entry explicit: `forums.index` / `forums_index` is local catalog-backed root discovery, then `forums.read` -> `threads.read` -> `posts.read`.
    Keep selector truth explicit: `forums.read` still requires `fid` and is not root discovery.
-   Keep flow envelope truth explicit: `_hf_flow` is the machine-readable key emitted by `forums.index`, core reads, supported extended reads, local draft/preflight tools, and successful results from implemented guarded writes (write actions remain explicitly confirmed).
+   Keep flow envelope truth explicit: `_hf_flow.next_actions` is the machine-readable handoff layer emitted by `forums.index`, core reads, supported extended reads, local draft/preflight tools, and successful results from implemented guarded writes (write actions remain explicitly confirmed).
 
 4. Route to `hf-mycode` for formatting and syntax work.
    Use it when the user needs MyCode/BBCode authoring, conversion, linting, or syntax troubleshooting.
@@ -51,6 +57,8 @@ Use this skill as the router for hf-mcp tasks so you choose the right specialize
 
 - Confirm the task is routed to exactly one primary sibling skill.
 - Confirm `hf-api-v2` is used when OAuth/API internals are requested.
+- Confirm zero-ID exploration starts with `forums.index` / `forums_index` when no selectors are known.
+- Confirm `_hf_flow.next_actions` is treated as additive handoff metadata, not as permission to auto-execute live writes.
 - Confirm write-capable tasks are routed through write guardrail guidance, not treated as routine reads.
 
 ## Output / Handoff
