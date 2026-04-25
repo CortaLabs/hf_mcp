@@ -29,9 +29,12 @@ Allowed entries are scoped to `products/hf_mcp/` only.
 - Tool inventory source of truth is `src/hf_mcp/registry.py` (`_MATRIX_ROWS`).
 - Concrete exposure vs unsupported boundaries are documented in
   `coverage_matrix.md` and summarized in `tool_overview.md`.
+- `forums.index` / `forums_index` root discovery is local catalog-backed package
+  data (`src/hf_mcp/data/forums_index.json`) and can drift from live HF.
 - Browse semantics are anchored: `threads.read` is forum-anchored (`fid`
   required, optional `tid`), and `posts.read` is thread-anchored (`tid`
   required, optional `pid`).
+- `forums.read` remains `fid`-required and is not root discovery.
 - Extended helper semantics are browse-first optional-filter:
   `contracts.read` => `cid` (optional), optional `uid`;
   `disputes.read` => `cdid` (optional), optional `uid`;
@@ -40,6 +43,12 @@ Allowed entries are scoped to `products/hf_mcp/` only.
   `sigmarket.market.read` => optional `uid`;
   `sigmarket.order.read` => `oid` (optional), optional `uid`.
 - MCP tool outputs are MCP content plus protocol-level `structuredContent`.
+- `_hf_flow` is the machine-readable flow envelope key; it is currently emitted
+  by `forums.index`, core reads, supported extended reads (`bytes.read`,
+  `contracts.read`, `disputes.read`, `bratings.read`,
+  `sigmarket.market.read`, and `sigmarket.order.read`), local
+  draft/preflight tools, and successful results from existing guarded write
+  helpers after confirmed or stubbed execution.
 - Published tool metadata/annotations make this explicit via
   `x-hf-output-default=readable`, `x-hf-output-readable=additive`, and
   `x-hf-output-field-bundles=separate_from_rendering`.
@@ -51,6 +60,7 @@ Allowed entries are scoped to `products/hf_mcp/` only.
   - `posts.reply` on `TID 6083735`
   - at most one `threads.create` in `FID 375`
 - No Bytes live writes are in scope for this wave.
+- Placeholder writes remain out of scope in this wave.
 - `contracts.write` remains unexposed in this wave due missing sandbox proof.
 - Signature Market write operations and admin-only high-risk write operations
   remain unsupported/unexposed in this wave.

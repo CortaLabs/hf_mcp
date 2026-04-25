@@ -33,6 +33,7 @@ CAPABILITY_PARAMETER_FAMILIES: dict[str, frozenset[str]] = {
 }
 
 TOOL_TO_CAPABILITY: dict[str, str] = {capability: capability for capability in CAPABILITY_PARAMETER_FAMILIES}
+TOOL_TO_CAPABILITY["forums.index"] = "forums.read"
 
 
 class CapabilityPolicy:

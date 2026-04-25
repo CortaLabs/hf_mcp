@@ -42,6 +42,7 @@ _EXPECTED_COVERAGE_FAMILIES = frozenset(
     {
         "me.read",
         "users.read",
+        "forums.index",
         "forums.read",
         "threads.read",
         "posts.read",
@@ -84,6 +85,15 @@ _MATRIX_ROWS: tuple[_MatrixRow, ...] = (
         operation="read",
         helper_path="users",
         transport_kind="helper",
+    ),
+    _MatrixRow(
+        tool_name="forums.index",
+        coverage_family="forums.index",
+        capability_family="forums.read",
+        operation="read",
+        helper_path=None,
+        transport_kind="generic",
+        parameter_families=(),
     ),
     _MatrixRow(
         tool_name="forums.read",

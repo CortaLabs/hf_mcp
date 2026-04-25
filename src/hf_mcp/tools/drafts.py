@@ -9,6 +9,7 @@ from hf_mcp.formatting_engine import (
     read_draft_artifact,
     update_draft_metadata,
 )
+from hf_mcp.flow import attach_hf_flow, build_hf_flow
 
 
 def _selector_kwargs(*, draft_id: str | None, draft_path: str | Path | None) -> dict[str, Any]:
@@ -41,6 +42,16 @@ def list_drafts(
         offset=offset,
     )
     summaries = [artifact.summary() for artifact in artifacts]
+    structured_content = {
+        "drafts": summaries,
+        "count": len(summaries),
+        "limit": limit,
+        "offset": offset,
+    }
+    flow = build_hf_flow(
+        tool_name="drafts.list",
+        normalized_payload=structured_content,
+    )
     return {
         "drafts": summaries,
         "count": len(summaries),
@@ -52,12 +63,7 @@ def list_drafts(
                 "text": f"Listed {len(summaries)} draft artifact(s) from local cache.",
             }
         ],
-        "structuredContent": {
-            "drafts": summaries,
-            "count": len(summaries),
-            "limit": limit,
-            "offset": offset,
-        },
+        "structuredContent": attach_hf_flow(structured_content, flow),
     }
 
 
@@ -70,6 +76,12 @@ def read_draft(
     selector = _selector_kwargs(draft_id=draft_id, draft_path=draft_path)
     artifact = read_draft_artifact(draft_dir=draft_dir, **selector)
     summary = artifact.summary()
+    flow = build_hf_flow(
+        tool_name="drafts.read",
+        normalized_payload=summary,
+        arguments={"draft_id": artifact.draft_id},
+    )
+    structured_content = attach_hf_flow(summary, flow)
     return {
         **summary,
         "content": [
@@ -78,7 +90,7 @@ def read_draft(
                 "text": f"Loaded draft {artifact.draft_id} from local cache.",
             }
         ],
-        "structuredContent": summary,
+        "structuredContent": structured_content,
     }
 
 
@@ -102,6 +114,12 @@ def update_draft(
         **selector,
     )
     summary = artifact.summary()
+    flow = build_hf_flow(
+        tool_name="drafts.update",
+        normalized_payload=summary,
+        arguments={"draft_id": artifact.draft_id},
+    )
+    structured_content = attach_hf_flow(summary, flow)
     return {
         **summary,
         "content": [
@@ -110,7 +128,7 @@ def update_draft(
                 "text": f"Updated metadata for draft {artifact.draft_id}.",
             }
         ],
-        "structuredContent": summary,
+        "structuredContent": structured_content,
     }
 
 
@@ -127,6 +145,12 @@ def delete_draft(
         confirm_delete=confirm_delete,
         **selector,
     )
+    flow = build_hf_flow(
+        tool_name="drafts.delete",
+        normalized_payload=tombstone,
+        arguments={"draft_id": tombstone.get("draft_id")},
+    )
+    structured_content = attach_hf_flow(tombstone, flow)
     return {
         **tombstone,
         "content": [
@@ -135,7 +159,7 @@ def delete_draft(
                 "text": f"Deleted draft {tombstone['draft_id']} from local cache.",
             }
         ],
-        "structuredContent": tombstone,
+        "structuredContent": structured_content,
     }
 
 

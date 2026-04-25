@@ -1,0 +1,39 @@
+{
+  "catalog_version": "2026-04-25",
+  "source": "hf-mcp curated package catalog",
+  "nodes": [
+    {
+      "fid": 2,
+      "name": "Marketplace",
+      "is_category": true,
+      "active": true
+    },
+    {
+      "fid": 375,
+      "name": "Signature Sales",
+      "parent_fid": 2,
+      "category_fid": 2,
+      "active": true
+    },
+    {
+      "fid": 169,
+      "name": "Content Writing",
+      "parent_fid": 2,
+      "category_fid": 2,
+      "active": false
+    },
+    {
+      "fid": 45,
+      "name": "General",
+      "is_category": true,
+      "active": true
+    },
+    {
+      "fid": 48,
+      "name": "Introductions",
+      "parent_fid": 45,
+      "category_fid": 45,
+      "active": true
+    }
+  ]
+}

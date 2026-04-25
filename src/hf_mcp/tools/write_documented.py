@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 import html
 from pathlib import Path
 from typing import Any
 
 from hf_mcp.capabilities import CapabilityPolicy
+from hf_mcp.flow import attach_hf_flow, build_hf_flow
 from hf_mcp.formatting_engine import read_draft_artifact, prepare_formatting_report
 from hf_mcp.mycode import coerce_message_format
 from hf_mcp.registry import get_documented_write_specs
@@ -21,6 +22,20 @@ def _require_confirm_live(tool_name: str, confirm_live: bool) -> None:
     raise PermissionError(
         f"Tool '{tool_name}' performs a live remote write and requires confirm_live=True."
     )
+
+
+def _attach_write_flow(
+    *,
+    tool_name: str,
+    response: dict[str, Any],
+    arguments: Mapping[str, Any],
+) -> dict[str, Any]:
+    flow = build_hf_flow(
+        tool_name=tool_name,
+        normalized_payload=response,
+        arguments=arguments,
+    )
+    return attach_hf_flow(response, flow)
 
 
 def _normalize_write_text(value: str, message_format: str = "mycode") -> str:
@@ -85,7 +100,12 @@ def create_thread_live(
             ),
         }
     }
-    return transport.write(asks=asks, helper="threads")
+    response = transport.write(asks=asks, helper="threads")
+    return _attach_write_flow(
+        tool_name="threads.create",
+        response=response,
+        arguments={"fid": fid},
+    )
 
 
 def reply_to_thread_live(
@@ -112,7 +132,12 @@ def reply_to_thread_live(
             ),
         }
     }
-    return transport.write(asks=asks, helper="posts")
+    response = transport.write(asks=asks, helper="posts")
+    return _attach_write_flow(
+        tool_name="posts.reply",
+        response=response,
+        arguments={"tid": tid},
+    )
 
 
 def send_live(
@@ -131,7 +156,13 @@ def send_live(
     if pid is not None:
         payload["_pid"] = pid
     asks = {"bytes": payload}
-    return transport.write(asks=asks, helper="bytes")
+    response = transport.write(asks=asks, helper="bytes")
+    flow_args: dict[str, int] = {"target_uid": target_uid}
+    return _attach_write_flow(
+        tool_name="bytes.transfer",
+        response=response,
+        arguments=flow_args,
+    )
 
 
 def deposit_live(
@@ -142,7 +173,12 @@ def deposit_live(
 ) -> dict[str, Any]:
     _require_confirm_live("bytes.deposit", confirm_live)
     asks = {"bytes": {"_deposit": amount}}
-    return transport.write(asks=asks, helper="bytes/deposit")
+    response = transport.write(asks=asks, helper="bytes/deposit")
+    return _attach_write_flow(
+        tool_name="bytes.deposit",
+        response=response,
+        arguments={},
+    )
 
 
 def withdraw_live(
@@ -153,7 +189,12 @@ def withdraw_live(
 ) -> dict[str, Any]:
     _require_confirm_live("bytes.withdraw", confirm_live)
     asks = {"bytes": {"_withdraw": amount}}
-    return transport.write(asks=asks, helper="bytes/withdraw")
+    response = transport.write(asks=asks, helper="bytes/withdraw")
+    return _attach_write_flow(
+        tool_name="bytes.withdraw",
+        response=response,
+        arguments={},
+    )
 
 
 def bump_live(
@@ -164,7 +205,12 @@ def bump_live(
 ) -> dict[str, Any]:
     _require_confirm_live("bytes.bump", confirm_live)
     asks = {"bytes": {"_bump": tid}}
-    return transport.write(asks=asks, helper="bytes/bump")
+    response = transport.write(asks=asks, helper="bytes/bump")
+    return _attach_write_flow(
+        tool_name="bytes.bump",
+        response=response,
+        arguments={"tid": tid},
+    )
 
 
 def build_write_handlers(

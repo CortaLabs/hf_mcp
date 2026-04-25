@@ -914,7 +914,8 @@ def test_registered_posts_handler_supports_output_modes_and_raw_payload_attachme
     handler = build_core_read_handlers(policy, transport)["posts.read"]
 
     readable_result = handler(tid=123, output_mode="readable", include_raw_payload=False)
-    assert readable_result["structuredContent"] == formatted_payload
+    assert readable_result["structuredContent"]["posts"] == formatted_payload["posts"]
+    assert readable_result["structuredContent"]["_hf_flow"]["version"] == 1
     assert readable_result["content"][0]["type"] == "text"
     assert "pid=7" in readable_result["content"][0]["text"]
     assert "tid=123" in readable_result["content"][0]["text"]
@@ -922,11 +923,13 @@ def test_registered_posts_handler_supports_output_modes_and_raw_payload_attachme
     assert len(readable_result["content"]) == 1
 
     structured_result = handler(tid=123, output_mode="structured", include_raw_payload=False)
-    assert structured_result["structuredContent"] == formatted_payload
+    assert structured_result["structuredContent"]["posts"] == formatted_payload["posts"]
+    assert structured_result["structuredContent"]["_hf_flow"]["version"] == 1
     assert structured_result["content"] == [{"type": "text", "text": "posts.read returned 1 row(s)."}]
 
     raw_result = handler(tid=123, output_mode="raw", include_raw_payload=False)
-    assert raw_result["structuredContent"] == normalized_payload
+    assert raw_result["structuredContent"]["posts"] == normalized_payload["posts"]
+    assert raw_result["structuredContent"]["_hf_flow"]["version"] == 1
     assert raw_result["content"][0] == {"type": "text", "text": "posts.read returned 1 row(s)."}
     assert raw_result["content"][1]["type"] == "resource"
     assert raw_result["content"][1]["resource"]["uri"] == "hf-mcp://raw/posts.read"
@@ -934,7 +937,8 @@ def test_registered_posts_handler_supports_output_modes_and_raw_payload_attachme
     assert json.loads(raw_result["content"][1]["resource"]["text"]) == raw_payload
 
     defaults_result = handler(tid=123)
-    assert defaults_result["structuredContent"] == formatted_payload
+    assert defaults_result["structuredContent"]["posts"] == formatted_payload["posts"]
+    assert defaults_result["structuredContent"]["_hf_flow"]["version"] == 1
     assert defaults_result["content"][0] == {"type": "text", "text": "posts.read returned 1 row(s)."}
     assert defaults_result["content"][1]["type"] == "resource"
     assert json.loads(defaults_result["content"][1]["resource"]["text"]) == raw_payload
@@ -943,3 +947,51 @@ def test_registered_posts_handler_supports_output_modes_and_raw_payload_attachme
     assert len(captured["read_raw"]) == 2
     assert all(call["helper"] == "posts" for call in captured["read"])
     assert all(call["helper"] == "posts" for call in captured["read_raw"])
+
+
+def test_core_read_flow_chain_adds_hf_flow_and_preserves_endpoint_root_payloads(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    payload_by_helper = {
+        "forums": {"forums": [{"fid": "375", "name": "General", "children": [{"fid": "901", "name": "Subforum"}]}]},
+        "threads": {"threads": [{"tid": "6324346", "fid": "375", "uid": "5", "subject": "Release notes"}]},
+        "posts": {"posts": [{"pid": "7", "tid": "6324346", "fid": "375", "uid": "5", "subject": "Re: Release notes"}]},
+    }
+
+    def _fake_read(self: HFTransport, asks: dict[str, Any], helper: str | None = None) -> dict[str, Any]:
+        del asks
+        assert helper in payload_by_helper
+        return payload_by_helper[helper]
+
+    monkeypatch.setattr(HFTransport, "read", _fake_read)
+
+    policy = _policy(
+        enabled_capabilities={"forums.read", "threads.read", "posts.read", "users.read"},
+        enabled_parameter_families={"selectors.forum", "selectors.thread", "selectors.post", "selectors.user", "filters.pagination"},
+    )
+    transport = HFTransport(token_store=_StubTokenStore(), base_url="https://example.test")
+    handlers = build_core_read_handlers(policy, transport)
+
+    forums_result = handlers["forums.read"](fid=375)
+    assert forums_result["structuredContent"]["forums"] == payload_by_helper["forums"]["forums"]
+    forums_flow = forums_result["structuredContent"]["_hf_flow"]
+    forum_actions = {(action["tool"], tuple(sorted(action["arguments"].items()))) for action in forums_flow["next_actions"]}
+    assert ("threads.read", (("fid", 375),)) in forum_actions
+    assert ("forums.read", (("fid", 901),)) in forum_actions
+
+    threads_result = handlers["threads.read"](fid=375)
+    assert threads_result["structuredContent"]["threads"] == payload_by_helper["threads"]["threads"]
+    threads_flow = threads_result["structuredContent"]["_hf_flow"]
+    thread_actions = {(action["tool"], tuple(sorted(action["arguments"].items()))) for action in threads_flow["next_actions"]}
+    assert ("posts.read", (("tid", 6324346),)) in thread_actions
+    assert ("users.read", (("uid", 5),)) in thread_actions
+    assert ("forums.read", (("fid", 375),)) in thread_actions
+
+    posts_result = handlers["posts.read"](tid=6324346)
+    assert posts_result["structuredContent"]["posts"] == payload_by_helper["posts"]["posts"]
+    posts_flow = posts_result["structuredContent"]["_hf_flow"]
+    post_actions = {(action["tool"], tuple(sorted(action["arguments"].items()))) for action in posts_flow["next_actions"]}
+    assert ("threads.read", (("tid", 6324346),)) in post_actions
+    assert ("users.read", (("uid", 5),)) in post_actions
+    assert ("forums.read", (("fid", 375),)) in post_actions
+    assert ("posts.read", (("pid", 7),)) in post_actions

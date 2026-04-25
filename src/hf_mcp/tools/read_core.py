@@ -6,6 +6,7 @@ from typing import Any, cast
 
 from hf_mcp.capabilities import CapabilityPolicy
 from hf_mcp.config import HFMCPSettings
+from hf_mcp.flow import attach_hf_flow, build_hf_flow
 from hf_mcp.normalizers import format_body_fields, normalize_response
 from hf_mcp.output_modes import ReadOutputMode, resolve_read_output_defaults
 from hf_mcp.registry import get_core_read_specs
@@ -433,13 +434,21 @@ def _build_read_tool_result(
     mode: ReadOutputMode,
     raw_payload: Mapping[str, Any] | None,
     include_raw_payload: bool,
+    arguments: Mapping[str, Any] | None = None,
+    source: str | None = None,
 ) -> dict[str, Any]:
     content: list[dict[str, Any]] = [{"type": "text", "text": _build_content_summary(tool_name, normalized_payload, mode)}]
     if raw_payload is not None and (mode == "raw" or include_raw_payload):
         content.append(_build_raw_resource(tool_name, raw_payload))
+    flow = build_hf_flow(
+        tool_name=tool_name,
+        normalized_payload=normalized_payload,
+        arguments=arguments,
+        source=source,
+    )
     return {
         "content": content,
-        "structuredContent": normalized_payload,
+        "structuredContent": attach_hf_flow(normalized_payload, flow),
     }
 
 
@@ -455,6 +464,7 @@ def build_core_read_handlers(policy: CapabilityPolicy, transport: HFTransport) -
         output_mode: str | None,
         include_raw_payload: bool | None,
         body_format: str | None,
+        arguments: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         defaults = resolve_read_output_defaults(settings, output_mode, include_raw_payload, body_format)
         need_raw = defaults.mode == "raw" or defaults.include_raw_payload
@@ -471,6 +481,8 @@ def build_core_read_handlers(policy: CapabilityPolicy, transport: HFTransport) -
             mode=defaults.mode,
             raw_payload=raw_payload,
             include_raw_payload=defaults.include_raw_payload,
+            arguments=arguments,
+            source=helper,
         )
 
     for spec in get_core_read_specs():
@@ -499,6 +511,10 @@ def build_core_read_handlers(policy: CapabilityPolicy, transport: HFTransport) -
                     output_mode=output_mode,
                     include_raw_payload=include_raw_payload,
                     body_format=body_format,
+                    arguments={
+                        "include_basic_fields": include_basic_fields,
+                        "include_advanced_fields": include_advanced_fields,
+                    },
                 )
 
             handlers[spec.tool_name] = _me_handler
@@ -526,6 +542,11 @@ def build_core_read_handlers(policy: CapabilityPolicy, transport: HFTransport) -
                     output_mode=output_mode,
                     include_raw_payload=include_raw_payload,
                     body_format=body_format,
+                    arguments={
+                        "uid": uid,
+                        "page": page,
+                        "per_page": per_page,
+                    },
                 )
 
             handlers[spec.tool_name] = _users_handler
@@ -547,6 +568,11 @@ def build_core_read_handlers(policy: CapabilityPolicy, transport: HFTransport) -
                     output_mode=output_mode,
                     include_raw_payload=include_raw_payload,
                     body_format=body_format,
+                    arguments={
+                        "fid": fid,
+                        "page": page,
+                        "per_page": per_page,
+                    },
                 )
 
             handlers[spec.tool_name] = _forums_handler
@@ -570,6 +596,13 @@ def build_core_read_handlers(policy: CapabilityPolicy, transport: HFTransport) -
                     output_mode=output_mode,
                     include_raw_payload=include_raw_payload,
                     body_format=body_format,
+                    arguments={
+                        "fid": fid,
+                        "tid": tid,
+                        "uid": uid,
+                        "page": page,
+                        "per_page": per_page,
+                    },
                 )
 
             handlers[spec.tool_name] = _threads_handler
@@ -601,6 +634,14 @@ def build_core_read_handlers(policy: CapabilityPolicy, transport: HFTransport) -
                     output_mode=output_mode,
                     include_raw_payload=include_raw_payload,
                     body_format=body_format,
+                    arguments={
+                        "tid": tid,
+                        "pid": pid,
+                        "uid": uid,
+                        "page": page,
+                        "per_page": per_page,
+                        "include_post_body": include_post_body,
+                    },
                 )
 
             handlers[spec.tool_name] = _posts_handler

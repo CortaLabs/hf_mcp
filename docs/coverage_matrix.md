@@ -16,6 +16,7 @@ This matrix tracks final public endpoint-family status for `hf-mcp`.
 |---|---|---|---|---|---|
 | `me.read` | read | available now | OpenAPI-confirmed | unproven | PM counters (`unreadpms`, `totalpms`) may appear when Advanced Info fields are enabled |
 | `users.read` | read | available now | OpenAPI-confirmed | unproven | canonical selector `uid` |
+| `forums.index` | read | available now | OpenAPI-confirmed | unproven | local catalog-backed root discovery (`forums.index` / `forums_index`); `_hf_flow` emitted; catalog can drift from live HF |
 | `forums.read` | read | available now | OpenAPI-confirmed | unproven | canonical selector `fid` |
 | `threads.read` | read | available now | OpenAPI-confirmed | unproven | canonical selector `fid`; compatibility selectors `tid`/`uid` accepted |
 | `posts.read` | read | available now | OpenAPI-confirmed | unproven | canonical selector `tid`; compatibility selectors `pid`/`uid` accepted |
@@ -43,3 +44,4 @@ This matrix tracks final public endpoint-family status for `hf-mcp`.
 - `not exposed` rows are explicit unsupported boundaries, not callable tools.
 - Capability policy may disable available rows, but this table tracks final exposure eligibility.
 - Manual live validation remains intentionally narrower than full write availability in this wave.
+- `forums.index` is package-catalog truth for zero-ID entry; treat it as a maintained local index, not authoritative live HF state.

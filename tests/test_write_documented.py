@@ -29,12 +29,34 @@ from hf_mcp.write_preflight import WritePreflightError, validate_write_body
 
 
 class _CaptureTransport:
-    def __init__(self) -> None:
+    def __init__(self, responses: dict[str, dict[str, Any]] | None = None) -> None:
         self.calls: list[dict[str, Any]] = []
+        self._responses = responses or {}
 
     def write(self, *, asks: dict[str, Any], helper: str | None = None) -> dict[str, Any]:
         self.calls.append({"asks": asks, "helper": helper})
+        if helper is not None and helper in self._responses:
+            return dict(self._responses[helper])
         return {"ok": True, "asks": asks, "helper": helper}
+
+
+def _flow_actions(result: dict[str, Any]) -> set[tuple[str, tuple[tuple[str, int], ...]]]:
+    flow = result.get("_hf_flow")
+    assert isinstance(flow, dict)
+    next_actions = flow.get("next_actions")
+    assert isinstance(next_actions, list)
+
+    actions: set[tuple[str, tuple[tuple[str, int], ...]]] = set()
+    for action in next_actions:
+        assert isinstance(action, dict)
+        tool = action.get("tool")
+        arguments = action.get("arguments")
+        if not isinstance(tool, str):
+            continue
+        if not isinstance(arguments, dict):
+            continue
+        actions.add((tool, tuple(sorted((str(key), int(value)) for key, value in arguments.items()))))
+    return actions
 
 
 def _policy(*, enabled_capabilities: set[str], enabled_parameter_families: set[str]) -> CapabilityPolicy:
@@ -118,6 +140,20 @@ def test_core_write_helpers_fail_closed_without_confirm_live(
     assert transport.calls == []
 
 
+def test_bound_write_handlers_still_fail_closed_without_confirm_live() -> None:
+    policy = _policy(
+        enabled_capabilities={"threads.create", "posts.reply"},
+        enabled_parameter_families={"selectors.forum", "selectors.thread", "writes.content", "confirm.live"},
+    )
+    transport = _CaptureTransport()
+    handlers = build_write_handlers(policy, transport)
+
+    with pytest.raises(PermissionError, match="posts.reply"):
+        handlers["posts.reply"](tid=77, message="Denied", message_format="mycode", confirm_live=False)
+
+    assert transport.calls == []
+
+
 def test_create_thread_live_shapes_payload_and_helper_path() -> None:
     transport = _CaptureTransport()
 
@@ -154,6 +190,57 @@ def test_reply_and_bytes_write_helpers_shape_payloads_truthfully() -> None:
         {"asks": {"bytes": {"_withdraw": 20}}, "helper": "bytes/withdraw"},
         {"asks": {"bytes": {"_bump": 77}}, "helper": "bytes/bump"},
     ]
+
+
+def test_confirmed_stubbed_writes_attach_post_action_hf_flow_metadata() -> None:
+    transport = _CaptureTransport(
+        responses={
+            "threads": {"threads": [{"tid": "6324346", "fid": "375"}], "ok": True},
+            "posts": {"posts": [{"tid": "6324346", "pid": "9001"}], "ok": True},
+            "bytes": {"bytes": [{"uid": "2047020"}], "ok": True},
+            "bytes/deposit": {"ok": True},
+        }
+    )
+
+    thread_result = create_thread_live(
+        transport=transport,
+        fid=375,
+        subject="Thread title",
+        message="Thread body",
+        confirm_live=True,
+    )
+    thread_actions = _flow_actions(thread_result)
+    assert ("threads.read", (("tid", 6324346),)) in thread_actions
+    assert ("posts.read", (("tid", 6324346),)) in thread_actions
+    assert ("forums.read", (("fid", 375),)) in thread_actions
+
+    reply_result = reply_to_thread_live(
+        transport=transport,
+        tid=6324346,
+        message="Reply body",
+        confirm_live=True,
+    )
+    reply_actions = _flow_actions(reply_result)
+    assert ("posts.read", (("tid", 6324346),)) in reply_actions
+
+    transfer_result = send_live(
+        transport=transport,
+        target_uid=2047020,
+        amount=50,
+        confirm_live=True,
+    )
+    transfer_actions = _flow_actions(transfer_result)
+    assert ("bytes.read", (("uid", 2047020),)) in transfer_actions
+    assert ("users.read", (("uid", 2047020),)) in transfer_actions
+
+    no_id_result = deposit_live(
+        transport=transport,
+        amount=12,
+        confirm_live=True,
+    )
+    flow = no_id_result.get("_hf_flow")
+    assert isinstance(flow, dict)
+    assert flow.get("next_actions") == []
 
 
 def test_write_helpers_decode_html_entities_in_mycode_text() -> None:

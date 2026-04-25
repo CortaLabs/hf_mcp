@@ -2,7 +2,7 @@
 
 `hf-mcp` is a standalone MCP server package for the Hack Forums API v2.
 
-Current release line: `0.2.11`.
+Current release line: `0.3.0`.
 
 ## Install
 
@@ -60,6 +60,23 @@ Compatibility contract for read tools:
 
 See [`docs/configuration.md`](docs/configuration.md) for `read_output_defaults` config and
 [`docs/examples.md`](docs/examples.md) for concrete request/response examples.
+
+## Compounding flow discovery
+
+Use `forums.index` (alias `forums_index`) for root discovery when you do not yet
+have IDs. This tool is backed by maintained package catalog data and can drift
+from live Hack Forums state between package updates.
+
+Concrete exploration path:
+
+- `forums.index` -> `forums.read` -> `threads.read` -> `posts.read`
+- `forums.read` still requires `fid`; it is not root discovery.
+- `_hf_flow` is the machine-readable flow envelope key.
+- `_hf_flow` currently ships on `forums.index`, core reads, supported
+  extended reads (`bytes.read`, `contracts.read`, `disputes.read`,
+  `bratings.read`, `sigmarket.market.read`, and `sigmarket.order.read`),
+  local draft/preflight tools, and successful results from existing guarded
+  write helpers after confirmed or stubbed execution.
 
 ## Automation usage
 

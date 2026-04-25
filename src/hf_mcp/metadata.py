@@ -3,7 +3,7 @@ from __future__ import annotations
 from .capabilities import CapabilityPolicy
 from .registry import ToolSpec, build_registry, has_concrete_handler
 
-_LOCAL_INSPECTION_TOOLS = frozenset({"formatting.preflight", "drafts.list", "drafts.read"})
+_LOCAL_INSPECTION_TOOLS = frozenset({"formatting.preflight", "drafts.list", "drafts.read", "forums.index"})
 _LOCAL_MUTATION_TOOLS = frozenset({"drafts.update", "drafts.delete"})
 _REMOTE_LOCALITY = "remote"
 _REMOTE_RUNTIME_TIER = 4

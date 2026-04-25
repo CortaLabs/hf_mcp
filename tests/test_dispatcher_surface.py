@@ -167,7 +167,16 @@ def test_fastmcp_adapter_converts_hf_envelope_dict_to_protocol_call_tool_result(
                 },
             },
         ],
-        "structuredContent": {"me": [{"uid": "5"}]},
+        "structuredContent": {
+            "me": [{"uid": "5"}],
+            "_hf_flow": {
+                "version": 1,
+                "entry_tool": "me.read",
+                "breadcrumbs": ["me"],
+                "entities": {"forum_ids": [], "thread_ids": [], "post_ids": [], "user_ids": [5]},
+                "next_actions": [],
+            },
+        },
     }
 
     fake_app = _FakeApp()
@@ -190,7 +199,9 @@ def test_fastmcp_adapter_converts_hf_envelope_dict_to_protocol_call_tool_result(
     assert fake_app._handler is not None
     normalized = fake_app._handler()
     assert isinstance(normalized, mcp_types.CallToolResult)
-    assert normalized.structuredContent == {"me": [{"uid": "5"}]}
+    assert normalized.structuredContent["me"] == [{"uid": "5"}]
+    assert normalized.structuredContent["_hf_flow"]["version"] == 1
+    assert isinstance(normalized.structuredContent["_hf_flow"]["next_actions"], list)
     assert len(normalized.content) == 2
     assert isinstance(normalized.content[0], mcp_types.TextContent)
     assert isinstance(normalized.content[1], mcp_types.EmbeddedResource)
@@ -423,6 +434,7 @@ def test_metadata_and_annotations_are_remote_tier4_and_operation_honest() -> Non
         read_annotations["_meta"]["x-hf-output-field-bundles"] == "separate_from_rendering"
     )
     assert server.tools[mcp_tool_name("threads.read")]["output_schema"] is not None
+    assert server.tools[mcp_tool_name("threads.read")]["output_schema"]["x-hf-flow-envelope"] == "_hf_flow"
 
     write_annotations = server.tools[mcp_tool_name("posts.reply")]["annotations"]
     assert write_annotations["readOnlyHint"] is False
@@ -829,6 +841,56 @@ def test_dispatcher_registers_concrete_local_draft_handlers_without_transport(tm
     deleted = delete_tool(draft_id=draft_id, confirm_delete=True)
     assert deleted["structuredContent"]["deleted"] is True
     assert deleted["structuredContent"]["draft_id"] == draft_id
+
+
+def test_forums_index_registers_local_handler_without_transport_and_keeps_structured_content_contract() -> None:
+    policy = _policy(
+        enabled_capabilities={"forums.read"},
+        enabled_parameter_families={"selectors.forum", "filters.pagination"},
+    )
+    server = _CaptureServer()
+
+    register_tools(server, policy, RuntimeBundle())
+
+    assert mcp_tool_name("forums.index") in server.tools
+    assert mcp_tool_name("forums.read") not in server.tools
+    tool = server.tools[mcp_tool_name("forums.index")]
+    assert tool["annotations"]["readOnlyHint"] is True
+    assert tool["annotations"]["_meta"]["x-hf-locality"] == "local"
+    assert tool["annotations"]["_meta"]["x-hf-runtime-tier"] == 1
+
+    result = tool["handler"]()
+    assert isinstance(result, dict)
+    assert isinstance(result.get("content"), list)
+    assert isinstance(result.get("structuredContent"), dict)
+    assert "_hf_flow" in result["structuredContent"]
+    assert isinstance(result["structuredContent"]["_hf_flow"].get("next_actions"), list)
+
+
+def test_dispatcher_extended_read_handler_includes_hf_flow_structured_content(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def _fake_read(self: HFTransport, *, asks: dict[str, Any], helper: str) -> dict[str, Any]:
+        del asks
+        assert helper == "sigmarket/order"
+        return {"sigmarket/order": [{"smid": "17", "buyer": "2047020", "seller": "1"}]}
+
+    monkeypatch.setattr(HFTransport, "read", _fake_read)
+
+    policy = _policy(
+        enabled_capabilities={"sigmarket.order.read"},
+        enabled_parameter_families={"selectors.sigmarket", "filters.pagination"},
+    )
+    server = _CaptureServer()
+    transport = HFTransport(token_store=_StubTokenStore(), base_url="https://example.test")
+    register_tools(server, policy, RuntimeBundle(transport=transport))
+
+    tool = server.tools[mcp_tool_name("sigmarket.order.read")]
+    assert tool["output_schema"]["x-hf-flow-envelope"] == "_hf_flow"
+    result = tool["handler"](oid=17)
+    assert "_hf_flow" in result["structuredContent"]
+    assert result["structuredContent"]["_hf_flow"]["entry_tool"] == "sigmarket.order.read"
+    assert isinstance(result["structuredContent"]["_hf_flow"]["next_actions"], list)
 
 
 def test_dispatcher_publishes_truthful_core_write_input_schemas() -> None:

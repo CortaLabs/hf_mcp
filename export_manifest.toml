@@ -9,5 +9,6 @@ allowlist = [
   "products/hf_mcp/docs/**",
   "products/hf_mcp/skills/**",
   "products/hf_mcp/src/hf_mcp/**",
+  "products/hf_mcp/src/hf_mcp/data/**",
   "products/hf_mcp/tests/**",
 ]

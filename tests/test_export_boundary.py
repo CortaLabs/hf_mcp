@@ -14,6 +14,7 @@ ALLOWED_PREFIX = "products/hf_mcp/"
 YAML_EXAMPLE = "products/hf_mcp/config.example.yaml"
 TOML_EXAMPLE = "products/hf_mcp/config.example.toml"
 SKILLS_SUBTREE = "products/hf_mcp/skills/**"
+CATALOG_DATA_SUBTREE = "products/hf_mcp/src/hf_mcp/data/**"
 FORBIDDEN_EXPORT_REFERENCES = (".council", ".scribe", ".claude", ".codex", "../", "..\\")
 EXPECTED_MANIFEST_LINES = {
     "include README.md",
@@ -25,6 +26,7 @@ EXPECTED_MANIFEST_LINES = {
     "recursive-include skills *.md",
     "recursive-include tests *.py",
     "recursive-include src/hf_mcp *.py",
+    "recursive-include src/hf_mcp/data *.json",
     "global-exclude __pycache__ *.py[cod]",
 }
 
@@ -44,6 +46,7 @@ def test_export_manifest_is_product_subtree_only() -> None:
     _validate_allowlist(allowlist)
     assert YAML_EXAMPLE in allowlist
     assert SKILLS_SUBTREE in allowlist
+    assert CATALOG_DATA_SUBTREE in allowlist
     assert TOML_EXAMPLE not in allowlist
 
 
@@ -101,13 +104,15 @@ def test_export_manifest_rejects_root_level_assets() -> None:
 
 
 def test_pyproject_release_contract_and_metadata_boundary() -> None:
-    project = tomllib.loads(PYPROJECT_PATH.read_text(encoding="utf-8"))["project"]
+    pyproject = tomllib.loads(PYPROJECT_PATH.read_text(encoding="utf-8"))
+    project = pyproject["project"]
 
     assert project["name"] == "hf-mcp"
     assert isinstance(project["version"], str) and project["version"].strip()
     assert project["scripts"]["hf-mcp"] == "hf_mcp.cli:main"
     assert project["keywords"] == ["hackforums", "mcp", "model-context-protocol"]
     assert "Programming Language :: Python :: 3.11" in project["classifiers"]
+    assert pyproject["tool"]["setuptools"]["package-data"]["hf_mcp"] == ["data/*.json"]
 
     pyproject_text = PYPROJECT_PATH.read_text(encoding="utf-8").lower()
     for forbidden in FORBIDDEN_EXPORT_REFERENCES:

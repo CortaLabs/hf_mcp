@@ -6,6 +6,7 @@ from typing import Any, cast
 
 from hf_mcp.capabilities import CapabilityPolicy
 from hf_mcp.config import HFMCPSettings
+from hf_mcp.flow import attach_hf_flow, build_hf_flow
 from hf_mcp.normalizers import format_body_fields, normalize_extended_payload
 from hf_mcp.output_modes import ReadOutputMode, resolve_read_output_defaults
 from hf_mcp.registry import get_extended_read_specs
@@ -13,6 +14,17 @@ from hf_mcp.transport import HFTransport
 
 ReadHandler = Callable[..., dict[str, Any]]
 AskBuilder = Callable[..., tuple[dict[str, dict[str, Any]], str]]
+
+_FLOW_EXTENDED_TOOL_NAMES: frozenset[str] = frozenset(
+    {
+        "bytes.read",
+        "contracts.read",
+        "disputes.read",
+        "bratings.read",
+        "sigmarket.market.read",
+        "sigmarket.order.read",
+    }
+)
 
 _SELECTOR_ALIASES: dict[str, dict[str, str]] = {
     "bytes.read": {"target_uid": "uid"},
@@ -410,11 +422,21 @@ def _build_read_tool_result(
     mode: ReadOutputMode,
     raw_payload: Mapping[str, Any] | None,
     include_raw_payload: bool,
+    arguments: Mapping[str, Any] | None = None,
+    source: str | None = None,
 ) -> dict[str, Any]:
     content: list[dict[str, Any]] = [{"type": "text", "text": _build_content_summary(tool_name, normalized_payload, mode)}]
     if raw_payload is not None and (mode == "raw" or include_raw_payload):
         content.append(_build_raw_resource(tool_name, raw_payload))
-    return {"content": content, "structuredContent": normalized_payload}
+    if tool_name not in _FLOW_EXTENDED_TOOL_NAMES:
+        return {"content": content, "structuredContent": normalized_payload}
+    flow = build_hf_flow(
+        tool_name=tool_name,
+        normalized_payload=normalized_payload,
+        arguments=arguments,
+        source=source,
+    )
+    return {"content": content, "structuredContent": attach_hf_flow(normalized_payload, flow)}
 
 
 def list_entries(
@@ -599,6 +621,7 @@ def build_extended_read_handlers(policy: CapabilityPolicy, transport: HFTranspor
         output_mode: str | None,
         include_raw_payload: bool | None,
         body_format: str | None,
+        arguments: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         defaults = resolve_read_output_defaults(settings, output_mode, include_raw_payload, body_format)
         need_raw = defaults.mode == "raw" or defaults.include_raw_payload
@@ -615,6 +638,8 @@ def build_extended_read_handlers(policy: CapabilityPolicy, transport: HFTranspor
             mode=defaults.mode,
             raw_payload=raw_payload,
             include_raw_payload=defaults.include_raw_payload,
+            arguments=arguments,
+            source=helper,
         )
 
     def _build_handler(tool_name: str, builder: AskBuilder) -> ReadHandler:
@@ -634,6 +659,7 @@ def build_extended_read_handlers(policy: CapabilityPolicy, transport: HFTranspor
                 output_mode=output_mode,
                 include_raw_payload=include_raw_payload,
                 body_format=body_format,
+                arguments=normalized_kwargs,
             )
 
         return _call

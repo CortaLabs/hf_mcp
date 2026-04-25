@@ -12,6 +12,7 @@ from .registry import mcp_tool_name
 from .schemas import build_tool_output_schema, build_tool_schema
 from .token_store import load_token_store
 from .tools.drafts import build_draft_handlers
+from .tools.forum_index import build_forum_index_handlers
 from .tools.formatting import build_formatting_handlers
 from .tools.read_core import build_core_read_handlers
 from .tools.read_extended import build_extended_read_handlers
@@ -42,7 +43,11 @@ def _require_runtime_secrets(settings: HFMCPSettings) -> None:
 
 
 def _tool_description(tool_name: str, operation: str) -> str:
-    locality = "local" if tool_name == "formatting.preflight" or tool_name.startswith("drafts.") else "remote"
+    locality = (
+        "local"
+        if tool_name in {"formatting.preflight", "forums.index"} or tool_name.startswith("drafts.")
+        else "remote"
+    )
     return f"Hack Forums {locality} {operation} tool for {tool_name}."
 
 
@@ -110,6 +115,7 @@ def register_tools(server: Any, policy: CapabilityPolicy, runtime: RuntimeBundle
     draft_dir = runtime.settings.draft_dir if runtime.settings is not None else DEFAULT_DRAFT_DIR
     concrete_handlers: dict[str, Any] = build_formatting_handlers(draft_dir=draft_dir)
     concrete_handlers.update(build_draft_handlers(draft_dir=draft_dir))
+    concrete_handlers.update(build_forum_index_handlers())
     transport = runtime.transport
 
     if isinstance(transport, HFTransport):

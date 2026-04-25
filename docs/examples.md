@@ -3,6 +3,62 @@
 All examples are `JSON-first` and use structured request/response shapes that
 match the current public tool registry.
 
+## Zero-ID exploration chain (`forums.index`)
+
+Use `forums.index` (alias `forums_index`) as local catalog-backed root discovery
+when you do not yet have IDs.
+
+- Concrete chain: `forums.index` -> `forums.read` -> `threads.read` -> `posts.read`
+- `forums.read` still requires `fid`; it is not root discovery.
+- `_hf_flow` is the machine-readable flow key and currently appears on
+  `forums.index`, core reads, supported extended reads (`bytes.read`,
+  `contracts.read`, `disputes.read`, `bratings.read`,
+  `sigmarket.market.read`, and `sigmarket.order.read`), local
+  draft/preflight tools, and successful results from existing guarded write
+  helpers after confirmed or stubbed execution.
+- The forums index is maintained package data and can drift from live HF.
+
+Request:
+
+```json
+{
+  "tool": "forums.index",
+  "arguments": {
+    "view": "flat"
+  }
+}
+```
+
+Response text shown to the client:
+
+```text
+forums.index loaded 3 forum(s) from local catalog.
+- fid=375, name=MCP Development
+- fid=4, name=General Discussion
+- fid=18, name=Coding
+```
+
+Structured sidecar (excerpt):
+
+```json
+{
+  "forums_index": [
+    {
+      "fid": "375",
+      "name": "MCP Development",
+      "description": "Primary forum for API/MCP tooling threads"
+    }
+  ],
+  "_hf_flow": {
+    "entry_tool": "forums.index",
+    "breadcrumbs": ["forum_catalog", "forums.index"],
+    "next_actions": [
+      {"tool": "forums.read", "arguments": {"fid": 375}}
+    ]
+  }
+}
+```
+
 ## Read output modes (`threads.read`)
 
 Read tools accept per-call output overrides:

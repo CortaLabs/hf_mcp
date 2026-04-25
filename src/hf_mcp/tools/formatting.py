@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any
 
 from hf_mcp.formatting_engine import write_draft_artifact
+from hf_mcp.flow import attach_hf_flow, build_hf_flow
 
 
 def preflight_formatting(
@@ -24,7 +25,7 @@ def preflight_formatting(
             ),
         }
     ]
-    summary["structuredContent"] = {
+    structured_content = {
         "draft_id": artifact.draft_id,
         "path": artifact.path,
         "integrity": artifact.report.integrity,
@@ -32,6 +33,11 @@ def preflight_formatting(
         "mycode_preview": summary["mycode_preview"],
         "simulated_agent_markdown_preview": summary["simulated_agent_markdown_preview"],
     }
+    flow = build_hf_flow(
+        tool_name="formatting.preflight",
+        normalized_payload=structured_content,
+    )
+    summary["structuredContent"] = attach_hf_flow(structured_content, flow)
     return summary
 
 

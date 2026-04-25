@@ -48,10 +48,27 @@ Body-format behavior:
 When `output_mode=raw`, `body_format` resolves to `raw` unless explicitly
 overridden for that call.
 
+## Root discovery and flow contract
+
+- `forums.index` (alias `forums_index`) is local catalog-backed root discovery.
+- The catalog is maintained package data and can drift from live HF between
+  package updates.
+- Concrete chain: `forums.index` -> `forums.read` -> `threads.read` ->
+  `posts.read`.
+- `forums.read` remains selector-bound (`fid` required) and is not root
+  discovery.
+- `_hf_flow` is the machine-readable flow key and is currently emitted by
+  `forums.index`, core reads, supported extended reads (`bytes.read`,
+  `contracts.read`, `disputes.read`, `bratings.read`,
+  `sigmarket.market.read`, and `sigmarket.order.read`), local
+  draft/preflight tools, and successful results from existing guarded write
+  helpers after confirmed or stubbed execution.
+
 ## Canonical selectors and compatibility aliases
 
 Core reads:
 
+- `forums.index`: selector-free root discovery from the packaged forum catalog.
 - `threads.read`: canonical browse anchor is `fid`; compatibility selectors `tid`
   and `uid` are accepted for compatibility callers.
 - `posts.read`: canonical browse anchor is `tid`; compatibility selectors `pid`
@@ -77,6 +94,7 @@ PM boundary:
 |---|---|---|
 | `me.read` | available now | Read profile/account details for the authenticated account |
 | `users.read` | available now | Read public user details by target uid |
+| `forums.index` | available now | Local catalog-backed root discovery when no IDs are known |
 | `forums.read` | available now | List forum metadata/threads by forum id |
 | `threads.read` | available now | Forum-anchored browse (`fid` canonical; compatibility selectors accepted) |
 | `posts.read` | available now | Thread-anchored browse (`tid` canonical; compatibility selectors accepted) |

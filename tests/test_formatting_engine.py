@@ -23,6 +23,7 @@ from hf_mcp.formatting_engine import (
     update_draft_metadata,
     write_draft_artifact,
 )
+from hf_mcp.tools.formatting import preflight_formatting
 
 
 def test_formatting_report_models_known_hf_quote_mutations() -> None:
@@ -304,3 +305,20 @@ def test_delete_draft_artifact_requires_confirm_and_confines_paths(tmp_path: Pat
     outside_json.write_text("{}", encoding="utf-8")
     with pytest.raises(ValueError, match="configured draft directory"):
         delete_draft_artifact(draft_path=outside_json, draft_dir=draft_root, confirm_delete=True)
+
+
+def test_preflight_formatting_emits_local_hf_flow_actions_only(tmp_path: Path) -> None:
+    result = preflight_formatting(
+        message="Local-only preflight body",
+        message_format="markdown",
+        draft_dir=tmp_path,
+    )
+
+    structured = result["structuredContent"]
+    assert "_hf_flow" in structured
+    flow = structured["_hf_flow"]
+    tools = {action["tool"] for action in flow["next_actions"]}
+    assert tools == {"drafts.list", "drafts.read", "drafts.update"}
+    assert all(not tool.startswith(("threads.", "posts.", "bytes.")) for tool in tools)
+    for action in flow["next_actions"]:
+        assert "draft_path" not in action.get("arguments", {})

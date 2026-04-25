@@ -14,7 +14,7 @@ from hf_mcp.capabilities import CapabilityPolicy
 from hf_mcp.config import HFMCPSettings
 from hf_mcp.metadata import get_tool_specs
 from hf_mcp.registry import build_registry, get_tool_spec, mcp_tool_name
-from hf_mcp.schemas import build_tool_schema
+from hf_mcp.schemas import build_tool_output_schema, build_tool_schema
 import hf_mcp.registry as registry_module
 
 
@@ -39,7 +39,14 @@ def test_registry_covers_documented_matrix_once() -> None:
     assert "transport.read" not in tool_names
     assert "transport.write" not in tool_names
     assert "." not in "".join(mcp_tool_names)
-    local_generic_tools = {"formatting.preflight", "drafts.list", "drafts.read", "drafts.update", "drafts.delete"}
+    local_generic_tools = {
+        "formatting.preflight",
+        "forums.index",
+        "drafts.list",
+        "drafts.read",
+        "drafts.update",
+        "drafts.delete",
+    }
     assert all(
         spec.transport_kind == ("generic" if spec.tool_name in local_generic_tools else "helper")
         for spec in specs
@@ -52,6 +59,7 @@ def test_mcp_tool_names_are_desktop_client_safe() -> None:
     assert mcp_tool_name("sigmarket.order.read") == "sigmarket_order_read"
     assert mcp_tool_name("admin.high_risk.read") == "admin_high_risk_read"
     assert mcp_tool_name("formatting.preflight") == "formatting_preflight"
+    assert mcp_tool_name("forums.index") == "forums_index"
     assert mcp_tool_name("drafts.list") == "drafts_list"
     assert mcp_tool_name("drafts.read") == "drafts_read"
     assert mcp_tool_name("drafts.update") == "drafts_update"
@@ -69,6 +77,33 @@ def test_get_tool_spec_returns_helper_row_metadata() -> None:
     assert spec.helper_path == "threads"
     assert spec.coverage_family == "threads.read"
     assert spec.transport_kind == "helper"
+
+
+def test_forums_index_registry_and_schema_are_selector_free_and_output_metadata_honest() -> None:
+    spec = get_tool_spec("forums.index")
+    assert spec.operation == "read"
+    assert spec.helper_path is None
+    assert spec.transport_kind == "generic"
+
+    policy = _policy(
+        capabilities={"forums.read"},
+        parameter_families={"selectors.forum", "filters.pagination"},
+    )
+    schema = build_tool_schema(spec, policy)
+    assert set(schema["properties"]) == {
+        "view",
+        "include_inactive",
+        "output_mode",
+        "include_raw_payload",
+        "body_format",
+    }
+    assert "required" not in schema
+    assert "anyOf" not in schema
+
+    output_schema = build_tool_output_schema(spec)
+    assert output_schema is not None
+    assert output_schema["x-hf-helper-path"] is None
+    assert output_schema["x-hf-output-modes"] == ["readable", "structured", "raw"]
 
 
 def test_build_tool_schema_prunes_to_allowed_parameter_families() -> None:
@@ -347,3 +382,20 @@ def test_build_tool_schema_truthful_local_draft_shapes() -> None:
     assert delete_schema["required"] == ["confirm_delete"]
     assert delete_schema["properties"]["confirm_delete"]["const"] is True
     assert delete_schema["anyOf"] == [{"required": ["draft_id"]}, {"required": ["draft_path"]}]
+
+
+def test_build_tool_output_schema_marks_local_flow_envelope_metadata_honestly() -> None:
+    preflight_spec = get_tool_spec("formatting.preflight")
+    preflight_output = build_tool_output_schema(preflight_spec)
+    assert preflight_output is not None
+    assert preflight_output["x-hf-flow-envelope"] == "_hf_flow"
+
+    list_spec = get_tool_spec("drafts.list")
+    list_output = build_tool_output_schema(list_spec)
+    assert list_output is not None
+    assert list_output["x-hf-flow-envelope"] == "_hf_flow"
+
+    read_spec = get_tool_spec("drafts.read")
+    read_output = build_tool_output_schema(read_spec)
+    assert read_output is not None
+    assert read_output["x-hf-flow-envelope"] == "_hf_flow"

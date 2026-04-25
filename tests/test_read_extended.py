@@ -19,6 +19,7 @@ from hf_mcp.output_modes import ReadOutputDefaults
 from hf_mcp.registry import get_extended_read_specs, get_tool_spec
 from hf_mcp.token_store import TokenBundle
 from hf_mcp.tools.read_extended import (
+    _build_read_tool_result,
     build_extended_read_handlers,
     list_admin_high_risk,
     list_bratings,
@@ -44,6 +45,34 @@ def _policy(*, enabled_capabilities: set[str], enabled_parameter_families: set[s
             enabled_parameter_families=frozenset(enabled_parameter_families),
         )
     )
+
+
+def _actions_as_tuples(flow: dict[str, object]) -> set[tuple[str, tuple[tuple[str, int], ...]]]:
+    actions = flow.get("next_actions")
+    assert isinstance(actions, list)
+    normalized: set[tuple[str, tuple[tuple[str, int], ...]]] = set()
+    for action in actions:
+        assert isinstance(action, dict)
+        tool = action.get("tool")
+        arguments = action.get("arguments")
+        if not isinstance(tool, str) or not isinstance(arguments, dict):
+            continue
+        normalized.add((tool, tuple(sorted((str(key), int(value)) for key, value in arguments.items()))))
+    return normalized
+
+
+def _assert_structured_payload_with_flow(
+    *,
+    tool_name: str,
+    structured_content: dict[str, Any],
+    expected_payload: dict[str, Any],
+) -> None:
+    for key, value in expected_payload.items():
+        assert structured_content[key] == value
+    assert "_hf_flow" in structured_content
+    flow = structured_content["_hf_flow"]
+    assert flow["entry_tool"] == tool_name
+    assert isinstance(flow.get("next_actions"), list)
 
 
 def test_extended_read_specs_match_registry_rows_and_parameter_families() -> None:
@@ -130,7 +159,11 @@ def test_extended_handlers_accept_schema_surface_selector_names(
     handlers = build_extended_read_handlers(policy, transport)
 
     result = handlers[tool_name](**kwargs)
-    assert result["structuredContent"] == {response_key: []}
+    _assert_structured_payload_with_flow(
+        tool_name=tool_name,
+        structured_content=result["structuredContent"],
+        expected_payload={response_key: []},
+    )
     assert result["content"] == [{"type": "text", "text": f"{tool_name} returned 0 row(s)."}]
 
 
@@ -181,7 +214,11 @@ def test_extended_handlers_keep_legacy_selector_aliases_for_compatibility(
     handlers = build_extended_read_handlers(policy, transport)
 
     result = handlers[tool_name](**kwargs)
-    assert result["structuredContent"] == {response_key: []}
+    _assert_structured_payload_with_flow(
+        tool_name=tool_name,
+        structured_content=result["structuredContent"],
+        expected_payload={response_key: []},
+    )
     assert result["content"] == [{"type": "text", "text": f"{tool_name} returned 0 row(s)."}]
 
 
@@ -205,7 +242,11 @@ def test_sigmarket_order_legacy_oid_alias_maps_to_canonical_smid_payload(monkeyp
     handler = build_extended_read_handlers(policy, transport)["sigmarket.order.read"]
 
     result = handler(oid=17)
-    assert result["structuredContent"] == {"sigmarket/order": []}
+    _assert_structured_payload_with_flow(
+        tool_name="sigmarket.order.read",
+        structured_content=result["structuredContent"],
+        expected_payload={"sigmarket/order": []},
+    )
     assert captured["helper"] == "sigmarket/order"
     assert captured["asks"]["sigmarket/order"]["_smid"] == 17
     assert "_oid" not in captured["asks"]["sigmarket/order"]
@@ -250,7 +291,11 @@ def test_registered_sigmarket_order_handler_supports_output_modes_and_raw_payloa
     handler = build_extended_read_handlers(policy, transport)["sigmarket.order.read"]
 
     readable_result = handler(smid=17, output_mode="readable", include_raw_payload=False)
-    assert readable_result["structuredContent"] == normalize_extended_payload(read_payload)
+    _assert_structured_payload_with_flow(
+        tool_name="sigmarket.order.read",
+        structured_content=readable_result["structuredContent"],
+        expected_payload=normalize_extended_payload(read_payload),
+    )
     assert readable_result["content"][0]["type"] == "text"
     assert "smid=12" in readable_result["content"][0]["text"]
     assert "status=2" in readable_result["content"][0]["text"]
@@ -259,11 +304,19 @@ def test_registered_sigmarket_order_handler_supports_output_modes_and_raw_payloa
     assert len(readable_result["content"]) == 1
 
     structured_result = handler(smid=17, output_mode="structured", include_raw_payload=False)
-    assert structured_result["structuredContent"] == normalize_extended_payload(read_payload)
+    _assert_structured_payload_with_flow(
+        tool_name="sigmarket.order.read",
+        structured_content=structured_result["structuredContent"],
+        expected_payload=normalize_extended_payload(read_payload),
+    )
     assert structured_result["content"] == [{"type": "text", "text": "sigmarket.order.read returned 2 row(s)."}]
 
     raw_result = handler(smid=17, output_mode="raw", include_raw_payload=False)
-    assert raw_result["structuredContent"] == normalize_extended_payload(raw_payload)
+    _assert_structured_payload_with_flow(
+        tool_name="sigmarket.order.read",
+        structured_content=raw_result["structuredContent"],
+        expected_payload=normalize_extended_payload(raw_payload),
+    )
     assert raw_result["content"][0] == {"type": "text", "text": "sigmarket.order.read returned 2 row(s)."}
     assert raw_result["content"][1]["type"] == "resource"
     assert raw_result["content"][1]["resource"]["uri"] == "hf-mcp://raw/sigmarket.order.read"
@@ -273,12 +326,20 @@ def test_registered_sigmarket_order_handler_supports_output_modes_and_raw_payloa
     assert raw_result["structuredContent"]["sigmarket/order"][0]["smid"] == "12"
 
     readable_with_raw = handler(smid=17, output_mode="readable", include_raw_payload=True)
-    assert readable_with_raw["structuredContent"] == normalize_extended_payload(raw_payload)
+    _assert_structured_payload_with_flow(
+        tool_name="sigmarket.order.read",
+        structured_content=readable_with_raw["structuredContent"],
+        expected_payload=normalize_extended_payload(raw_payload),
+    )
     assert readable_with_raw["content"][1]["type"] == "resource"
     assert json.loads(readable_with_raw["content"][1]["resource"]["text"]) == raw_payload
 
     defaults_result = handler(smid=17)
-    assert defaults_result["structuredContent"] == normalize_extended_payload(raw_payload)
+    _assert_structured_payload_with_flow(
+        tool_name="sigmarket.order.read",
+        structured_content=defaults_result["structuredContent"],
+        expected_payload=normalize_extended_payload(raw_payload),
+    )
     assert defaults_result["content"][0] == {"type": "text", "text": "sigmarket.order.read returned 2 row(s)."}
     assert defaults_result["content"][1]["type"] == "resource"
     assert json.loads(defaults_result["content"][1]["resource"]["text"]) == raw_payload
@@ -289,6 +350,118 @@ def test_registered_sigmarket_order_handler_supports_output_modes_and_raw_payloa
     assert all(call["helper"] == "sigmarket/order" for call in captured["read_raw"])
     assert all(call["asks"]["sigmarket/order"]["_smid"] == 17 for call in captured["read"])
     assert all(call["asks"]["sigmarket/order"]["_smid"] == 17 for call in captured["read_raw"])
+
+
+@pytest.mark.parametrize(
+    ("tool_name", "kwargs", "response_payload", "expected_actions"),
+    [
+        (
+            "contracts.read",
+            {"cid": 7},
+            {"contracts": [{"cid": "7", "tid": "1234", "inituid": "99", "otheruid": "77", "idispute": "11"}]},
+            {
+                ("disputes.read", (("cid", 7),)),
+                ("threads.read", (("tid", 1234),)),
+                ("users.read", (("uid", 77),)),
+                ("users.read", (("uid", 99),)),
+            },
+        ),
+        (
+            "disputes.read",
+            {"cdid": 11},
+            {"disputes": [{"cdid": "11", "contractid": "7", "claimantuid": "99", "dispute_tid": "4321"}]},
+            {
+                ("contracts.read", (("cid", 7),)),
+                ("threads.read", (("tid", 4321),)),
+                ("users.read", (("uid", 99),)),
+            },
+        ),
+        (
+            "bratings.read",
+            {"crid": 31},
+            {"bratings": [{"crid": "31", "contractid": "7", "fromid": "101", "toid": "202"}]},
+            {
+                ("contracts.read", (("cid", 7),)),
+                ("users.read", (("uid", 101),)),
+                ("users.read", (("uid", 202),)),
+            },
+        ),
+        (
+            "sigmarket.market.read",
+            {"uid": 2047020},
+            {"sigmarket/market": [{"uid": "2047020"}]},
+            {
+                ("users.read", (("uid", 2047020),)),
+                ("sigmarket.order.read", (("uid", 2047020),)),
+            },
+        ),
+        (
+            "sigmarket.order.read",
+            {"oid": 17},
+            {"sigmarket/order": [{"smid": "17", "buyer": "2047020", "seller": "1"}]},
+            {
+                ("sigmarket.order.read", (("smid", 17),)),
+                ("users.read", (("uid", 1),)),
+                ("users.read", (("uid", 2047020),)),
+                ("sigmarket.market.read", (("uid", 1),)),
+                ("sigmarket.market.read", (("uid", 2047020),)),
+            },
+        ),
+    ],
+)
+def test_extended_handlers_emit_hf_flow_with_expected_pivots(
+    monkeypatch: pytest.MonkeyPatch,
+    tool_name: str,
+    kwargs: dict[str, int],
+    response_payload: dict[str, Any],
+    expected_actions: set[tuple[str, tuple[tuple[str, int], ...]]],
+) -> None:
+    def _fake_read(self: HFTransport, asks: dict[str, Any], helper: str | None = None) -> dict[str, Any]:
+        del asks
+        del helper
+        return response_payload
+
+    monkeypatch.setattr(HFTransport, "read", _fake_read)
+
+    policy = _policy(
+        enabled_capabilities={
+            "contracts.read",
+            "disputes.read",
+            "bratings.read",
+            "sigmarket.market.read",
+            "sigmarket.order.read",
+        },
+        enabled_parameter_families={
+            "selectors.contract",
+            "selectors.dispute",
+            "selectors.sigmarket",
+            "filters.pagination",
+        },
+    )
+    transport = HFTransport(token_store=_StubTokenStore(), base_url="https://example.test")
+    handler = build_extended_read_handlers(policy, transport)[tool_name]
+
+    result = handler(**kwargs)
+
+    assert "_hf_flow" in result["structuredContent"]
+    flow = result["structuredContent"]["_hf_flow"]
+    assert flow["entry_tool"] == tool_name
+    assert expected_actions <= _actions_as_tuples(flow)
+
+
+def test_admin_high_risk_read_result_does_not_emit_hf_flow_until_flow_is_designed() -> None:
+    result = _build_read_tool_result(
+        tool_name="admin.high_risk.read",
+        normalized_payload={"admin/high-risk/read": [{"uid": "7", "risk_score": "99"}]},
+        mode="readable",
+        raw_payload=None,
+        include_raw_payload=False,
+        arguments={"page": 1},
+        source="admin/high-risk/read",
+    )
+
+    assert result["structuredContent"] == {"admin/high-risk/read": [{"uid": "7", "risk_score": "99"}]}
+    assert "_hf_flow" not in result["structuredContent"]
 
 
 def test_readable_summary_omits_dispute_free_text_notes(monkeypatch: pytest.MonkeyPatch) -> None:

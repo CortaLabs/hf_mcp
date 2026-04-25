@@ -25,8 +25,11 @@ Use this skill for read-only hf-mcp usage so tool selection, selector usage, and
 
 ## Procedure
 
-1. Start with core reads for direct forum/content anchors.
-   - `me.read`, `users.read`, `forums.read`, `threads.read`, `posts.read`
+1. Start with root discovery if IDs are unknown, then move to anchored reads.
+   - Root discovery: `forums.index` / `forums_index` (local catalog-backed package data that can drift from live HF).
+   - Exploration chain: `forums.index` -> `forums.read` -> `threads.read` -> `posts.read`.
+   - `forums.read` still requires `fid`; it is not root discovery.
+   - Core anchored reads: `me.read`, `users.read`, `forums.read`, `threads.read`, `posts.read`.
    - Canonical selectors for anchored reads: `fid`, `tid`, `pid`.
 
 2. Use extended reads as single browse-first tools, not split browse/detail interfaces.
@@ -48,6 +51,7 @@ Use this skill for read-only hf-mcp usage so tool selection, selector usage, and
    - `structured` keeps `structuredContent` but intentionally makes the text summary terse.
    - `raw` attaches the upstream JSON payload as a resource; `include_raw_payload=true` adds that raw resource to `readable` or `structured`.
    - For `threads.read`, readable output should show the formatted thread body from nested `firstpost.message` plus useful thread and first-post fields when Hack Forums returns them.
+   - `_hf_flow` is the machine-readable flow key emitted by `forums.index`, core reads, supported extended reads, local draft/preflight tools, and successful results from implemented guarded writes (live writes still require explicit confirmation).
 
 6. Keep output handling JSON-first.
    - Treat request/response payloads as structured JSON.
@@ -64,6 +68,8 @@ Use this skill for read-only hf-mcp usage so tool selection, selector usage, and
 
 - Confirm the selected read tool is in the shipped read matrix.
 - Confirm selector naming stays canonical (`fid`, `tid`, `pid`, `cid`, `cdid`, `oid`) when those selectors are used.
+- Confirm root discovery guidance names `forums.index` / `forums_index` as local catalog-backed package data, including drift warning.
+- Confirm `forums.read` is described as `fid`-required and not root discovery.
 - Confirm body formatting matches the caller's need: `markdown` for agent readability, `clean` for stripped text, or `raw` for exact MyCode.
 - Confirm `output_mode` matches the caller's structural need: `readable` for rich text+structuredContent, `structured` for terse text+structuredContent, or `raw` / `include_raw_payload=true` when upstream JSON evidence is needed.
 - Confirm extended reads are described as browse-first optional-filter tools, not as separate browse/detail tool pairs.

@@ -133,6 +133,7 @@ _FAMILY_PROPERTY_SPECS: dict[str, tuple[tuple[str, dict[str, Any], bool], ...]] 
 }
 
 _TOOL_REQUIRED_OVERRIDES: dict[str, tuple[str, ...]] = {
+    "forums.index": (),
     "bytes.read": (),
     "threads.read": (),
     "posts.read": (),
@@ -216,6 +217,34 @@ _READ_BODY_FORMAT_SCHEMA: dict[str, Any] = {
     "default": "markdown",
     "description": "How BBCode/MyCode body fields should be exposed in structuredContent.",
 }
+_FLOW_ENVELOPE_TOOL_NAMES: frozenset[str] = frozenset(
+    {
+        "formatting.preflight",
+        "forums.index",
+        "me.read",
+        "users.read",
+        "forums.read",
+        "threads.read",
+        "posts.read",
+        "bytes.read",
+        "contracts.read",
+        "disputes.read",
+        "bratings.read",
+        "sigmarket.market.read",
+        "sigmarket.order.read",
+        "drafts.list",
+        "drafts.read",
+    }
+)
+_FORUMS_INDEX_VIEW_SCHEMA: dict[str, Any] = {
+    "type": "string",
+    "enum": ["flat", "tree"],
+    "default": "flat",
+}
+_FORUMS_INDEX_INCLUDE_INACTIVE_SCHEMA: dict[str, Any] = {
+    "type": "boolean",
+    "default": False,
+}
 
 
 def _tag_with_family(schema: dict[str, Any], family: str) -> dict[str, Any]:
@@ -297,6 +326,15 @@ def build_tool_schema(spec: ToolSpec, policy: CapabilityPolicy) -> dict[str, Any
         updated_properties.setdefault("include_raw_payload", dict(_READ_INCLUDE_RAW_PAYLOAD_SCHEMA))
         updated_properties.setdefault("body_format", dict(_READ_BODY_FORMAT_SCHEMA))
         schema["properties"] = updated_properties
+    if spec.tool_name == "forums.index" and policy.can_register(spec.tool_name):
+        properties = schema.get("properties")
+        if isinstance(properties, dict):
+            updated_properties = dict(properties)
+        else:
+            updated_properties = {}
+        updated_properties["view"] = dict(_FORUMS_INDEX_VIEW_SCHEMA)
+        updated_properties["include_inactive"] = dict(_FORUMS_INDEX_INCLUDE_INACTIVE_SCHEMA)
+        schema["properties"] = updated_properties
     if spec.tool_name == "formatting.preflight":
         schema["anyOf"] = [{"required": ["message"]}, {"required": ["source_path"]}]
     elif spec.tool_name in {"drafts.read", "drafts.update", "drafts.delete"}:
@@ -323,14 +361,18 @@ def build_tool_output_schema(spec: ToolSpec) -> dict[str, object] | None:
             "additionalProperties": True,
             "x-hf-helper-path": spec.helper_path,
             "x-hf-formatting-engine": True,
+            "x-hf-flow-envelope": "_hf_flow",
         }
-    return {
+    schema: dict[str, object] = {
         "type": "object",
         "additionalProperties": True,
         "x-hf-helper-path": spec.helper_path,
         "x-hf-output-modes": ["readable", "structured", "raw"],
         "x-hf-body-formats": ["raw", "clean", "markdown"],
     }
+    if spec.tool_name in _FLOW_ENVELOPE_TOOL_NAMES:
+        schema["x-hf-flow-envelope"] = "_hf_flow"
+    return schema
 
 
 __all__ = ["build_tool_output_schema", "build_tool_schema"]

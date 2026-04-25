@@ -33,6 +33,9 @@ Use this skill as the router for hf-mcp tasks so you choose the right specialize
 
 3. Route to `hf-mcp-reads` for read tooling.
    Use it for tool family selection, required selectors, browse-first optional-filter semantics, and JSON-first read examples.
+   Keep compounding flow entry explicit: `forums.index` / `forums_index` is local catalog-backed root discovery, then `forums.read` -> `threads.read` -> `posts.read`.
+   Keep selector truth explicit: `forums.read` still requires `fid` and is not root discovery.
+   Keep flow envelope truth explicit: `_hf_flow` is the machine-readable key emitted by `forums.index`, core reads, supported extended reads, local draft/preflight tools, and successful results from implemented guarded writes (write actions remain explicitly confirmed).
 
 4. Route to `hf-mycode` for formatting and syntax work.
    Use it when the user needs MyCode/BBCode authoring, conversion, linting, or syntax troubleshooting.
