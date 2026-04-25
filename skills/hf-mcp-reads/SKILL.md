@@ -43,14 +43,20 @@ Use this skill for read-only hf-mcp usage so tool selection, selector usage, and
    - `clean` strips noisy formatting while preserving readable text and URLs.
    - `raw` preserves upstream MyCode; `output_mode=raw` resolves to raw body text unless a caller explicitly overrides `body_format`.
 
-5. Keep output handling JSON-first.
+5. Choose output structure deliberately.
+   - `readable` returns `structuredContent` plus rich human-facing content for normal agent consumption.
+   - `structured` keeps `structuredContent` but intentionally makes the text summary terse.
+   - `raw` attaches the upstream JSON payload as a resource; `include_raw_payload=true` adds that raw resource to `readable` or `structured`.
+   - For `threads.read`, readable output should show the formatted thread body from nested `firstpost.message` plus useful thread and first-post fields when Hack Forums returns them.
+
+6. Keep output handling JSON-first.
    - Treat request/response payloads as structured JSON.
    - Use lightweight field selection toggles when exposed (for example `include_post_body`), instead of rewriting transport assumptions.
 
-6. Route out-of-scope API fundamentals to `hf-api-v2`.
+7. Route out-of-scope API fundamentals to `hf-api-v2`.
    - Use `hf-api-v2` for raw OAuth mechanics, HF endpoint model details, and generic `/read` payload reasoning.
 
-7. Keep PM boundaries explicit.
+8. Keep PM boundaries explicit.
    - PM counters (`unreadpms`, `totalpms`) can be read through `me.read` when Advanced Info fields are enabled.
    - Direct PM content operations are unsupported.
 
@@ -59,6 +65,7 @@ Use this skill for read-only hf-mcp usage so tool selection, selector usage, and
 - Confirm the selected read tool is in the shipped read matrix.
 - Confirm selector naming stays canonical (`fid`, `tid`, `pid`, `cid`, `cdid`, `oid`) when those selectors are used.
 - Confirm body formatting matches the caller's need: `markdown` for agent readability, `clean` for stripped text, or `raw` for exact MyCode.
+- Confirm `output_mode` matches the caller's structural need: `readable` for rich text+structuredContent, `structured` for terse text+structuredContent, or `raw` / `include_raw_payload=true` when upstream JSON evidence is needed.
 - Confirm extended reads are described as browse-first optional-filter tools, not as separate browse/detail tool pairs.
 - Confirm no write helper or live-write workflow is implied in the read procedure.
 

@@ -336,7 +336,7 @@ def _build_content_summary(tool_name: str, payload: Mapping[str, Any], mode: Rea
     if tool_name == "forums.read":
         return _build_rows_summary("forums.read", rows, primary_keys=("fid", "name", "type"))
     if tool_name == "threads.read":
-        return _build_rows_summary("threads.read", rows, primary_keys=("tid", "fid", "subject", "uid", "username"))
+        return _build_threads_readable_content(rows)
     if tool_name == "posts.read":
         return _build_rows_summary(
             "posts.read",
@@ -345,6 +345,59 @@ def _build_content_summary(tool_name: str, payload: Mapping[str, Any], mode: Rea
             message_key="message",
         )
     return f"{tool_name} returned {len(rows)} row(s)."
+
+
+def _build_threads_readable_content(rows: list[Mapping[str, Any]]) -> str:
+    if not rows:
+        return "threads.read returned 0 thread(s)."
+
+    lines = [f"threads.read returned {len(rows)} thread(s)."]
+    for index, row in enumerate(rows, start=1):
+        subject = row.get("subject")
+        title = subject if isinstance(subject, str) and subject else f"Thread {index}"
+        lines.extend(("", f"## {title}"))
+
+        thread_fields = _flatten_readable_fields(row, exclude_keys=frozenset({"firstpost"}))
+        if thread_fields:
+            lines.extend(("", "### Thread fields"))
+            lines.extend(f"- {key}: {value}" for key, value in thread_fields)
+
+        firstpost = row.get("firstpost")
+        if not isinstance(firstpost, Mapping):
+            continue
+
+        firstpost_fields = _flatten_readable_fields(firstpost, prefix="firstpost", exclude_keys=frozenset({"message"}))
+        if firstpost_fields:
+            lines.extend(("", "### First post fields"))
+            lines.extend(f"- {key}: {value}" for key, value in firstpost_fields)
+
+        message_value = firstpost.get("message")
+        if isinstance(message_value, str) and message_value:
+            normalized = _normalize_message_text(message_value)
+            if normalized:
+                lines.extend(("", "### Thread body", "", normalized))
+    return "\n".join(lines)
+
+
+def _flatten_readable_fields(
+    value: Mapping[str, Any],
+    *,
+    prefix: str | None = None,
+    exclude_keys: frozenset[str] = frozenset(),
+) -> list[tuple[str, str]]:
+    fields: list[tuple[str, str]] = []
+    for key, nested_value in value.items():
+        key_name = str(key)
+        if key_name in exclude_keys:
+            continue
+        field_name = f"{prefix}.{key_name}" if prefix else key_name
+        if isinstance(nested_value, Mapping):
+            fields.extend(_flatten_readable_fields(nested_value, prefix=field_name))
+        elif isinstance(nested_value, list):
+            fields.append((field_name, json.dumps(nested_value, ensure_ascii=False)))
+        elif nested_value not in (None, ""):
+            fields.append((field_name, str(nested_value)))
+    return fields
 
 
 def _build_rows_summary(

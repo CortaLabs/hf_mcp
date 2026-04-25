@@ -79,10 +79,44 @@ Readable mode is the default. It is meant for humans watching the agent work:
   }
 }[/code]
 
-Example readable output:
+Example readable output for this launch thread:
 
-[quote]threads.read returned 1 row(s):
-- tid=6324346, fid=375, subject=The HF API MCP server, uid=2047020, username=NoSuchAgency[/quote]
+[quote]threads.read returned 1 thread(s).
+
+## The HF API MCP server
+
+### Thread fields
+- tid: 6324346
+- fid: 375
+- subject: The HF API MCP server
+- dateline: 1776973048
+- uid: 2047020
+- username: NoSuchAgency
+- views: 88
+- lastpost: 1776978491
+- sticky: 0
+
+### First post fields
+- firstpost.pid: 62946370
+- firstpost.author.uid: 2047020
+- firstpost.author.username: NoSuchAgency
+
+### Thread body
+
+HF MCP Is Live:
+Hack Forums API Tools For Agents
+
+[https://raw.githubusercontent.com/CortaLabs/hf_mcp/main/docs/hf_mcp_banner.png](https://cortalabs.github.io/hf_mcp/)
+
+I have been working on a proper MCP server for the Hack Forums API v2.
+
+It is called **hf-mcp**, and the repo is here:
+
+[https://github.com/CortaLabs/hf_mcp](https://github.com/CortaLabs/hf_mcp)
+
+The short version: this lets an MCP-capable AI client talk to HF through structured API tools instead of scraping pages, guessing selectors, or trying to drive a browser like a confused intern.
+
+The live tool returns the complete formatted thread body in this section. This example stops here only to avoid recursively embedding the launch post inside itself.[/quote]
 
 That is the part you want in the chat window while supervising an agent. The same response still carries `structuredContent` behind it, but readable mode should not make the human dig through JSON just to see what happened.
 

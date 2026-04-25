@@ -806,6 +806,53 @@ def test_registered_posts_handler_formats_mycode_body_fields_by_default(
     assert raw_result["structuredContent"]["posts"][0]["message"] == "[b]Bold[/b] [url=https://example.test]link[/url]"
 
 
+def test_registered_threads_handler_returns_rich_markdown_thread_content(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    normalized_payload = {
+        "threads": [
+            {
+                "tid": "6324346",
+                "fid": "12",
+                "subject": "Release notes",
+                "uid": "5",
+                "username": "operator",
+                "views": "42",
+                "firstpost": {
+                    "pid": "99",
+                    "message": "[b]Line one[/b]\n  Line two  ",
+                    "author": {"uid": "5", "username": "operator"},
+                },
+            }
+        ]
+    }
+
+    monkeypatch.setattr(HFTransport, "read", lambda self, asks, helper=None: normalized_payload)
+
+    settings = HFMCPSettings(
+        profile="test",
+        enabled_capabilities=frozenset({"threads.read"}),
+        enabled_parameter_families=frozenset({"selectors.thread", "filters.pagination"}),
+    )
+    policy = CapabilityPolicy(settings)
+    transport = HFTransport(token_store=_StubTokenStore(), base_url="https://example.test")
+    handler = build_core_read_handlers(policy, transport)["threads.read"]
+
+    result = handler(tid=6324346, output_mode="readable", include_raw_payload=False)
+
+    assert result["structuredContent"]["threads"][0]["firstpost"]["message"] == "**Line one**\n  Line two"
+    assert result["content"][0]["type"] == "text"
+    assert "## Release notes" in result["content"][0]["text"]
+    assert "- tid: 6324346" in result["content"][0]["text"]
+    assert "- views: 42" in result["content"][0]["text"]
+    assert "- firstpost.pid: 99" in result["content"][0]["text"]
+    assert "- firstpost.author.username: operator" in result["content"][0]["text"]
+    assert "### Thread body" in result["content"][0]["text"]
+    assert "**Line one**\nLine two" in result["content"][0]["text"]
+    assert "firstpost.message=" not in result["content"][0]["text"]
+    assert len(result["content"]) == 1
+
+
 def test_registered_posts_handler_supports_output_modes_and_raw_payload_attachment(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -2,7 +2,7 @@
 
 `hf-mcp` is a standalone MCP server package for the Hack Forums API v2.
 
-Current release line: `0.2.8`.
+Current release line: `0.2.11`.
 
 ## Install
 
@@ -45,7 +45,7 @@ Full precedence and policy split are documented in [`docs/configuration.md`](doc
 
 ## Read output defaults
 
-Read tools default to human-readable summaries while keeping canonical JSON for scripts.
+Read tools default to human-readable content while keeping canonical JSON for scripts.
 
 - default mode: `readable`
 - per-call override: `output_mode` (`readable`, `structured`, `raw`)
@@ -54,6 +54,7 @@ Read tools default to human-readable summaries while keeping canonical JSON for 
 Compatibility contract for read tools:
 
 - `structuredContent` always carries normalized/canonical JSON for automation.
+- `output_mode="readable"` is the human surface; for thread reads it includes the formatted thread body plus useful thread and first-post fields.
 - `output_mode="structured"` keeps script-friendly `structuredContent` with terse text.
 - raw payload remains available as an additive JSON resource when `output_mode="raw"` or `include_raw_payload=true`.
 

@@ -29,8 +29,27 @@ Request:
 Response text shown to the client:
 
 ```text
-threads.read returned 1 row(s):
-- tid=123, fid=375, subject=Topic title, uid=5, username=alice
+threads.read returned 1 thread(s).
+
+## Topic title
+
+### Thread fields
+- tid: 123
+- fid: 375
+- subject: Topic title
+- uid: 5
+- username: alice
+
+### First post fields
+- firstpost.pid: 456
+- firstpost.author.uid: 5
+- firstpost.author.username: alice
+
+### Thread body
+
+**Launch notes**
+
+This is the thread body returned from `firstpost.message`.
 ```
 
 The same call still returns canonical `structuredContent` for automation clients:
@@ -43,7 +62,15 @@ The same call still returns canonical `structuredContent` for automation clients
       "fid": "375",
       "subject": "Topic title",
       "uid": "5",
-      "username": "alice"
+      "username": "alice",
+      "firstpost": {
+        "pid": "456",
+        "message": "**Launch notes**\n\nThis is the thread body returned from `firstpost.message`.",
+        "author": {
+          "uid": "5",
+          "username": "alice"
+        }
+      }
     }
   ]
 }

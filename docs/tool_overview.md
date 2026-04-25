@@ -30,7 +30,8 @@ All read tools in this overview support the same output controls:
 
 Mode behavior:
 
-- `readable` (default): human-readable text + canonical `structuredContent`
+- `readable` (default): rich human-readable text + canonical `structuredContent`;
+  thread reads include formatted first-post body content when Hack Forums returns it
 - `structured`: terse text + canonical `structuredContent` for scripts
 - `raw`: terse text + canonical `structuredContent` + additive raw JSON resource
 

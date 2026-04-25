@@ -105,7 +105,7 @@ read_output_defaults:
 
 Mode options:
 
-- `readable` (default): human-readable text plus canonical `structuredContent`
+- `readable` (default): rich human-readable text plus canonical `structuredContent`; thread reads include formatted first-post body content when Hack Forums returns it
 - `structured`: terse text plus canonical `structuredContent` for script compatibility
 - `raw`: terse text plus canonical `structuredContent`, with the exact upstream payload attached as an additive JSON resource
 
