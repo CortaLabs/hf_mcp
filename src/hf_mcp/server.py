@@ -62,7 +62,7 @@ class _FastMCPToolAdapter:
         handler: Any,
         output_schema: dict[str, object] | None = None,
     ) -> None:
-        wrapped_handler = _with_schema_signature(handler, input_schema)
+        wrapped_handler = _with_schema_signature(name, handler, input_schema)
         fastmcp_annotations = _build_fastmcp_annotations(annotations)
         add_tool_kwargs: dict[str, object] = {
             "name": name,
@@ -168,13 +168,19 @@ def _signature_from_schema(handler: Any, input_schema: dict[str, object]) -> ins
     return inspect.Signature(parameters=parameters)
 
 
-def _with_schema_signature(handler: Any, input_schema: dict[str, object]) -> Any:
+def _tool_handler_name(tool_name: str) -> str:
+    return f"{tool_name.replace('.', '_').replace('-', '_')}_handler"
+
+
+def _with_schema_signature(tool_name: str, handler: Any, input_schema: dict[str, object]) -> Any:
     signature = _signature_from_schema(handler, input_schema)
 
     def _wrapped_handler(**kwargs: Any) -> Any:
         return _normalize_handler_result(handler(**kwargs))
 
-    _wrapped_handler.__name__ = getattr(handler, "__name__", "tool_handler")
+    handler_name = _tool_handler_name(tool_name)
+    _wrapped_handler.__name__ = handler_name
+    _wrapped_handler.__qualname__ = handler_name
     _wrapped_handler.__doc__ = getattr(handler, "__doc__", "")
     _wrapped_handler.__module__ = getattr(handler, "__module__", __name__)
     _wrapped_handler.__signature__ = signature

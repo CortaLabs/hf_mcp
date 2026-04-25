@@ -19,7 +19,7 @@ from hf_mcp.capabilities import CapabilityPolicy
 from hf_mcp.config import HFMCPSettings, PRESET_CAPABILITIES, PRESET_PARAMETER_FAMILIES
 from hf_mcp.dispatcher import RuntimeBundle, register_tools
 from hf_mcp.metadata import get_tool_specs
-from hf_mcp.registry import mcp_tool_name
+from hf_mcp.registry import get_documented_write_specs, mcp_tool_name
 from hf_mcp.server import _FastMCPToolAdapter
 from hf_mcp.server import create_server, serve_stdio
 from hf_mcp.token_store import TokenBundle
@@ -109,6 +109,15 @@ def _assert_rejects_nested_envelope_json_text(result: Any) -> None:
             and isinstance(parsed.get("structuredContent"), dict)
         ):
             raise AssertionError("Nested envelope JSON detected in text content")
+
+
+def _assert_not_placeholder_handler(handler: Any) -> None:
+    assert getattr(handler, "__name__", "") != "_handler"
+    code = getattr(handler, "__code__", None)
+    if code is None:
+        return
+    string_constants = [constant for constant in code.co_consts if isinstance(constant, str)]
+    assert all("not implemented yet" not in constant for constant in string_constants)
 
 
 def test_nested_envelope_json_in_text_content_is_rejected_by_validator() -> None:
@@ -260,6 +269,76 @@ app.run(transport="stdio")
     anyio.run(_run_probe)
 
 
+def test_runtime_stdio_tool_list_has_unique_input_schema_titles_for_extended_reads() -> None:
+    from mcp import ClientSession
+    from mcp.client.stdio import StdioServerParameters, stdio_client
+
+    server_probe = """
+from hf_mcp.capabilities import CapabilityPolicy
+from hf_mcp.config import HFMCPSettings, PRESET_PARAMETER_FAMILIES
+from hf_mcp.dispatcher import RuntimeBundle, register_tools
+from hf_mcp.server import _FastMCPToolAdapter
+from hf_mcp.token_store import TokenBundle
+from hf_mcp.transport import HFTransport
+from mcp.server.fastmcp import FastMCP
+
+class _ProbeTokenStore:
+    def require_bundle(self):
+        return TokenBundle(access_token="token", token_type="Bearer", scope=frozenset({"read"}))
+
+transport = HFTransport(token_store=_ProbeTokenStore(), base_url="https://example.test")
+settings = HFMCPSettings(
+    profile="test",
+    enabled_capabilities=frozenset({
+        "bytes.read",
+        "contracts.read",
+        "disputes.read",
+        "bratings.read",
+        "sigmarket.market.read",
+        "sigmarket.order.read",
+        "admin.high_risk.read",
+    }),
+    enabled_parameter_families=PRESET_PARAMETER_FAMILIES["full_api"],
+)
+policy = CapabilityPolicy(settings)
+app = FastMCP(name="hf-mcp-probe")
+adapter = _FastMCPToolAdapter(app)
+register_tools(adapter, policy, RuntimeBundle(transport=transport))
+app.run(transport="stdio")
+"""
+
+    async def _run_probe() -> None:
+        env = dict(os.environ)
+        pythonpath = env.get("PYTHONPATH")
+        src_path = str(SRC_PATH)
+        env["PYTHONPATH"] = f"{src_path}:{pythonpath}" if pythonpath else src_path
+        params = StdioServerParameters(
+            command=sys.executable,
+            args=["-c", server_probe],
+            env=env,
+            cwd=str(PRODUCT_ROOT),
+        )
+        async with stdio_client(params) as (read_stream, write_stream):
+            async with ClientSession(read_stream, write_stream) as session:
+                await session.initialize()
+                result = await session.list_tools()
+
+        titles = {
+            tool.name: (tool.inputSchema or {}).get("title")
+            for tool in result.tools
+        }
+        assert titles["bytes_read"] == "bytes_read_handlerArguments"
+        assert titles["contracts_read"] == "contracts_read_handlerArguments"
+        assert titles["disputes_read"] == "disputes_read_handlerArguments"
+        assert titles["bratings_read"] == "bratings_read_handlerArguments"
+        assert titles["sigmarket_market_read"] == "sigmarket_market_read_handlerArguments"
+        assert titles["sigmarket_order_read"] == "sigmarket_order_read_handlerArguments"
+        assert titles["admin_high_risk_read"] == "admin_high_risk_read_handlerArguments"
+        assert len(set(titles.values())) == len(titles)
+
+    anyio.run(_run_probe)
+
+
 def test_core_read_handler_contract_stays_internal_envelope_dict() -> None:
     policy = _policy(
         enabled_capabilities={"me.read"},
@@ -297,7 +376,8 @@ def test_dispatcher_registers_only_policy_allowed_registry_rows() -> None:
     )
 
     server = _CaptureServer()
-    register_tools(server, policy, RuntimeBundle())
+    transport = HFTransport(token_store=_StubTokenStore(), base_url="https://example.test")
+    register_tools(server, policy, RuntimeBundle(transport=transport))
 
     assert set(server.tools) == {mcp_tool_name("threads.read"), mcp_tool_name("posts.reply")}
 
@@ -309,7 +389,8 @@ def test_dispatcher_excludes_disabled_capabilities_even_when_registry_contains_r
     )
 
     server = _CaptureServer()
-    register_tools(server, policy, RuntimeBundle())
+    transport = HFTransport(token_store=_StubTokenStore(), base_url="https://example.test")
+    register_tools(server, policy, RuntimeBundle(transport=transport))
 
     assert mcp_tool_name("threads.read") in server.tools
     assert mcp_tool_name("posts.reply") not in server.tools
@@ -326,7 +407,8 @@ def test_metadata_and_annotations_are_remote_tier4_and_operation_honest() -> Non
     assert [spec.tool_name for spec in specs] == ["threads.read", "posts.reply"]
 
     server = _CaptureServer()
-    register_tools(server, policy, RuntimeBundle())
+    transport = HFTransport(token_store=_StubTokenStore(), base_url="https://example.test")
+    register_tools(server, policy, RuntimeBundle(transport=transport))
 
     read_annotations = server.tools[mcp_tool_name("threads.read")]["annotations"]
     assert read_annotations["readOnlyHint"] is True
@@ -418,7 +500,7 @@ def test_create_server_uses_dispatcher_as_single_registration_authority(
     assert set(server.tools) == {mcp_tool_name("threads.read")}
 
 
-def test_create_server_full_api_registers_extended_reads_concretely_and_retains_write_placeholders(
+def test_create_server_full_api_registers_extended_reads_concretely_and_omits_placeholder_writes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     settings = HFMCPSettings(
@@ -445,17 +527,16 @@ def test_create_server_full_api_registers_extended_reads_concretely_and_retains_
     for name in concrete_read_rows:
         public_name = mcp_tool_name(name)
         assert public_name in server.tools
-        assert server.tools[public_name].handler.__name__ != "_handler"
+        _assert_not_placeholder_handler(server.tools[public_name].handler)
 
-    retained_write_rows = (
+    omitted_write_rows = (
         "contracts.write",
         "sigmarket.write",
         "admin.high_risk.write",
     )
-    for name in retained_write_rows:
+    for name in omitted_write_rows:
         public_name = mcp_tool_name(name)
-        assert public_name in server.tools
-        assert server.tools[public_name].handler.__name__ == "_handler"
+        assert public_name not in server.tools
 
     contracts_schema = server.tools[mcp_tool_name("contracts.read")].input_schema
     disputes_schema = server.tools[mcp_tool_name("disputes.read")].input_schema
@@ -485,6 +566,18 @@ def test_create_server_full_api_registers_extended_reads_concretely_and_retains_
     assert "listing_id" not in orders_schema["properties"]
 
 
+def test_documented_write_specs_omit_unproven_later_lane_writes() -> None:
+    specs = get_documented_write_specs()
+    assert {spec.tool_name for spec in specs} == {
+        "threads.create",
+        "posts.reply",
+        "bytes.transfer",
+        "bytes.deposit",
+        "bytes.withdraw",
+        "bytes.bump",
+    }
+
+
 def test_core_and_extended_read_rows_register_concrete_handlers_when_transport_is_available() -> None:
     policy = _policy(
         enabled_capabilities={"me.read", "bytes.read"},
@@ -497,8 +590,8 @@ def test_core_and_extended_read_rows_register_concrete_handlers_when_transport_i
 
     me_handler = server.tools[mcp_tool_name("me.read")]["handler"]
     bytes_handler = server.tools[mcp_tool_name("bytes.read")]["handler"]
-    assert me_handler.__name__ != "_handler"
-    assert bytes_handler.__name__ != "_handler"
+    _assert_not_placeholder_handler(me_handler)
+    _assert_not_placeholder_handler(bytes_handler)
 
 
 def test_create_server_publishes_truthful_core_read_input_schemas(
@@ -544,7 +637,12 @@ def test_create_server_publishes_truthful_core_read_input_schemas(
     assert threads_schema["properties"]["output_mode"]["default"] == "readable"
     assert threads_schema["properties"]["include_raw_payload"]["default"] is False
     assert threads_schema["properties"]["body_format"]["default"] == "markdown"
-    assert set(threads_schema.get("required", [])) == {"fid"}
+    assert threads_schema.get("required", []) == []
+    assert {tuple(item["required"]) for item in threads_schema.get("anyOf", [])} == {
+        ("fid",),
+        ("tid",),
+        ("uid",),
+    }
 
     assert posts_schema["properties"]["page"]["default"] == 1
     assert posts_schema["properties"]["per_page"]["default"] == 30
@@ -552,14 +650,19 @@ def test_create_server_publishes_truthful_core_read_input_schemas(
     assert set(posts_schema["properties"]["output_mode"]["enum"]) == {"readable", "structured", "raw"}
     assert posts_schema["properties"]["include_raw_payload"]["type"] == "boolean"
     assert set(posts_schema["properties"]["body_format"]["enum"]) == {"raw", "clean", "markdown"}
-    assert set(posts_schema.get("required", [])) == {"tid"}
+    assert posts_schema.get("required", []) == []
+    assert {tuple(item["required"]) for item in posts_schema.get("anyOf", [])} == {
+        ("pid",),
+        ("tid",),
+        ("uid",),
+    }
 
     assert server.tools[mcp_tool_name("me.read")].output_schema is not None
     assert server.tools[mcp_tool_name("threads.read")].output_schema is not None
     assert server.tools[mcp_tool_name("posts.read")].output_schema is not None
 
 
-def test_core_write_rows_register_concrete_handlers_while_later_rows_remain_placeholders() -> None:
+def test_core_write_rows_register_concrete_handlers_and_omit_placeholder_rows() -> None:
     policy = _policy(
         enabled_capabilities={
             "threads.create",
@@ -589,10 +692,10 @@ def test_core_write_rows_register_concrete_handlers_while_later_rows_remain_plac
     register_tools(server, policy, RuntimeBundle(transport=transport))
 
     for name in ["threads.create", "posts.reply", "bytes.transfer", "bytes.deposit", "bytes.withdraw", "bytes.bump"]:
-        assert server.tools[mcp_tool_name(name)]["handler"].__name__ != "_handler"
-    assert server.tools[mcp_tool_name("contracts.write")]["handler"].__name__ == "_handler"
-    assert server.tools[mcp_tool_name("sigmarket.write")]["handler"].__name__ == "_handler"
-    assert server.tools[mcp_tool_name("admin.high_risk.write")]["handler"].__name__ == "_handler"
+        _assert_not_placeholder_handler(server.tools[mcp_tool_name(name)]["handler"])
+    assert mcp_tool_name("contracts.write") not in server.tools
+    assert mcp_tool_name("sigmarket.write") not in server.tools
+    assert mcp_tool_name("admin.high_risk.write") not in server.tools
 
 
 def test_register_tools_passes_runtime_draft_dir_into_write_handlers(
@@ -635,7 +738,7 @@ def test_register_tools_passes_runtime_draft_dir_into_write_handlers(
     assert captured["draft_dir"] == tmp_path
 
 
-def test_register_tools_uses_placeholder_handlers_when_runtime_bundle_has_no_transport() -> None:
+def test_register_tools_omits_remote_rows_when_runtime_bundle_has_no_transport() -> None:
     policy = _policy(
         enabled_capabilities={"threads.read", "posts.reply"},
         enabled_parameter_families={"selectors.thread", "writes.content", "confirm.live"},
@@ -643,8 +746,8 @@ def test_register_tools_uses_placeholder_handlers_when_runtime_bundle_has_no_tra
     server = _CaptureServer()
     register_tools(server, policy, RuntimeBundle())
 
-    assert server.tools[mcp_tool_name("threads.read")]["handler"].__name__ == "_handler"
-    assert server.tools[mcp_tool_name("posts.reply")]["handler"].__name__ == "_handler"
+    assert mcp_tool_name("threads.read") not in server.tools
+    assert mcp_tool_name("posts.reply") not in server.tools
 
 
 def test_formatting_preflight_registers_local_handler_without_transport(tmp_path: Path) -> None:
@@ -698,7 +801,7 @@ def test_dispatcher_registers_concrete_local_draft_handlers_without_transport(tm
     register_tools(server, policy, runtime)
 
     for tool_name in ("drafts.list", "drafts.read", "drafts.update", "drafts.delete"):
-        assert server.tools[mcp_tool_name(tool_name)]["handler"].__name__ != "_handler"
+        _assert_not_placeholder_handler(server.tools[mcp_tool_name(tool_name)]["handler"])
 
     preflight = server.tools[mcp_tool_name("formatting.preflight")]["handler"]
     created = preflight(message="Local draft body", message_format="markdown")
@@ -779,7 +882,7 @@ def test_register_tools_does_not_perform_implicit_bootstrap(monkeypatch: pytest.
     monkeypatch.setattr("hf_mcp.dispatcher.load_token_store", _fail_load_token_store)
     register_tools(server, policy, RuntimeBundle())
 
-    assert set(server.tools) == {mcp_tool_name("threads.read")}
+    assert server.tools == {}
 
 
 def test_create_server_fails_closed_when_runtime_secrets_are_missing() -> None:
@@ -921,11 +1024,13 @@ def test_serve_stdio_publishes_dispatcher_contract_for_live_runtime(
         "bytes.deposit",
         "bytes.withdraw",
         "bytes.bump",
-        "contracts.write",
+        "contracts.read",
     ):
         public_tool_name = mcp_tool_name(tool_name)
         expected_tool = expected_server.tools[public_tool_name]
         published = app.registered_tools[public_tool_name]
+        _assert_not_placeholder_handler(published["handler"])
+        assert published["handler"].__name__ == f"{public_tool_name}_handler"
         published_signature = inspect.signature(published["handler"])
         published_parameters = tuple(published_signature.parameters.values())
         expected_parameter_names = tuple(expected_tool.input_schema.get("properties", {}).keys())
@@ -940,6 +1045,16 @@ def test_serve_stdio_publishes_dispatcher_contract_for_live_runtime(
         assert published_annotations == expected_tool.annotations
         assert published["output_schema"] == expected_tool.output_schema
 
+    assert mcp_tool_name("contracts.write") not in app.registered_tools
+    assert mcp_tool_name("sigmarket.write") not in app.registered_tools
+    assert mcp_tool_name("admin.high_risk.write") not in app.registered_tools
+    assert len(
+        {
+            tool["handler"].__name__
+            for tool in app.registered_tools.values()
+        }
+    ) == len(app.registered_tools)
+
     me_signature = inspect.signature(app.registered_tools[mcp_tool_name("me.read")]["handler"])
     assert "uid" not in me_signature.parameters
     assert me_signature.parameters["include_basic_fields"].default is True
@@ -949,8 +1064,9 @@ def test_serve_stdio_publishes_dispatcher_contract_for_live_runtime(
     assert me_signature.parameters["body_format"].default is None
 
     threads_signature = inspect.signature(app.registered_tools[mcp_tool_name("threads.read")]["handler"])
-    assert threads_signature.parameters["fid"].default is inspect.Parameter.empty
+    assert threads_signature.parameters["fid"].default is None
     assert threads_signature.parameters["tid"].default is None
+    assert threads_signature.parameters["uid"].default is None
     assert threads_signature.parameters["page"].default == 1
     assert threads_signature.parameters["per_page"].default == 30
     assert threads_signature.parameters["output_mode"].default is None
@@ -958,8 +1074,9 @@ def test_serve_stdio_publishes_dispatcher_contract_for_live_runtime(
     assert threads_signature.parameters["body_format"].default is None
 
     posts_signature = inspect.signature(app.registered_tools[mcp_tool_name("posts.read")]["handler"])
-    assert posts_signature.parameters["tid"].default is inspect.Parameter.empty
+    assert posts_signature.parameters["tid"].default is None
     assert posts_signature.parameters["pid"].default is None
+    assert posts_signature.parameters["uid"].default is None
     assert posts_signature.parameters["page"].default == 1
     assert posts_signature.parameters["per_page"].default == 30
     assert posts_signature.parameters["include_post_body"].default is True

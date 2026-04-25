@@ -38,7 +38,7 @@ Use this skill as the router for hf-mcp tasks so you choose the right specialize
    Use it when the user needs MyCode/BBCode authoring, conversion, linting, or syntax troubleshooting.
 
 5. Route to `hf-mcp-writes` for write tooling.
-   Use it for concrete write helpers, `confirm_live=true` requirements, and placeholder-row boundaries.
+   Use it for concrete write helpers, `confirm_live=true` requirements, and unsupported-boundary handling.
    Keep draft semantics explicit: `scheduled_at` is metadata only and there is no built-in scheduler.
 
 6. Keep boundaries explicit.
@@ -60,5 +60,5 @@ Use this skill as the router for hf-mcp tasks so you choose the right specialize
 
 - Do not duplicate full procedures from sibling skills in this router.
 - Do not re-teach the full HF API contract here; hand that off to `hf-api-v2`.
-- Do not claim placeholder write rows are concrete callable helpers.
+- Do not claim unsupported write families are concrete callable helpers.
 - Do not normalize uncontrolled live-write automation.

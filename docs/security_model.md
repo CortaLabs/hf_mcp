@@ -29,8 +29,9 @@ as open-world input/output, so controls default to fail-closed behavior.
 - Manual live validation in this wave is limited to `posts.reply` on
   `TID 6083735` and at most one `threads.create` in `FID 375`.
 - No Bytes live writes are in scope for this wave.
-- Placeholder writes remain out of scope in this wave:
-  `contracts.write`, `sigmarket.write`, `admin.high_risk.write`.
+- `contracts.write` remains unexposed in this wave due missing sandbox proof.
+- Signature Market write operations and admin-only high-risk write operations
+  remain unsupported/unexposed in this wave.
 - Keep audit logs outside the tracked package tree.
 
 ## Ownership and cross-links

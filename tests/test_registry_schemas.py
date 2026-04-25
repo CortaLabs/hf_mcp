@@ -12,6 +12,7 @@ if str(SRC_PATH) not in sys.path:
 
 from hf_mcp.capabilities import CapabilityPolicy
 from hf_mcp.config import HFMCPSettings
+from hf_mcp.metadata import get_tool_specs
 from hf_mcp.registry import build_registry, get_tool_spec, mcp_tool_name
 from hf_mcp.schemas import build_tool_schema
 import hf_mcp.registry as registry_module
@@ -49,7 +50,7 @@ def test_mcp_tool_names_are_desktop_client_safe() -> None:
     assert mcp_tool_name("posts.read") == "posts_read"
     assert mcp_tool_name("threads.create") == "threads_create"
     assert mcp_tool_name("sigmarket.order.read") == "sigmarket_order_read"
-    assert mcp_tool_name("admin.high_risk.write") == "admin_high_risk_write"
+    assert mcp_tool_name("admin.high_risk.read") == "admin_high_risk_read"
     assert mcp_tool_name("formatting.preflight") == "formatting_preflight"
     assert mcp_tool_name("drafts.list") == "drafts_list"
     assert mcp_tool_name("drafts.read") == "drafts_read"
@@ -79,8 +80,9 @@ def test_build_tool_schema_prunes_to_allowed_parameter_families() -> None:
 
     schema = build_tool_schema(spec, policy)
 
-    assert set(schema["properties"]) == {"tid", "output_mode", "include_raw_payload", "body_format"}
-    assert schema["required"] == ["tid"]
+    assert set(schema["properties"]) == {"tid", "uid", "output_mode", "include_raw_payload", "body_format"}
+    assert "required" not in schema
+    assert schema["anyOf"] == [{"required": ["tid"]}, {"required": ["uid"]}]
     assert schema["x-hf-coverage-family"] == "threads.read"
 
 
@@ -100,6 +102,61 @@ def test_build_tool_schema_fails_closed_when_capability_disabled() -> None:
     }
 
 
+def test_posts_schema_supports_pid_tid_uid_selector_anyof() -> None:
+    spec = get_tool_spec("posts.read")
+    policy = _policy(
+        capabilities={"posts.read"},
+        parameter_families={"selectors.thread", "selectors.post", "filters.pagination", "fields.posts.body"},
+    )
+
+    schema = build_tool_schema(spec, policy)
+
+    assert {"pid", "tid", "uid", "page", "per_page"} <= set(schema["properties"])
+    assert "required" not in schema
+    assert schema["anyOf"] == [{"required": ["pid"]}, {"required": ["tid"]}, {"required": ["uid"]}]
+    assert schema["additionalProperties"] is False
+
+
+def test_extended_read_schemas_expose_canonical_selectors_and_alias_compatibility() -> None:
+    policy = _policy(
+        capabilities={
+            "bytes.read",
+            "contracts.read",
+            "disputes.read",
+            "bratings.read",
+            "sigmarket.market.read",
+            "sigmarket.order.read",
+        },
+        parameter_families={
+            "selectors.bytes",
+            "selectors.contract",
+            "selectors.dispute",
+            "selectors.sigmarket",
+            "filters.pagination",
+            "fields.bytes.amount",
+        },
+    )
+
+    bytes_schema = build_tool_schema(get_tool_spec("bytes.read"), policy)
+    assert {"id", "uid", "from_uid", "to_uid", "target_uid", "page", "per_page"} <= set(bytes_schema["properties"])
+    assert "required" not in bytes_schema
+
+    contracts_schema = build_tool_schema(get_tool_spec("contracts.read"), policy)
+    assert {"cid", "uid"} <= set(contracts_schema["properties"])
+    assert "contract_id" not in contracts_schema["properties"]
+
+    disputes_schema = build_tool_schema(get_tool_spec("disputes.read"), policy)
+    assert {"cdid", "cid", "uid", "claimantuid", "defendantuid"} <= set(disputes_schema["properties"])
+    assert "dispute_id" not in disputes_schema["properties"]
+
+    bratings_schema = build_tool_schema(get_tool_spec("bratings.read"), policy)
+    assert {"crid", "cid", "uid", "from_uid", "to_uid"} <= set(bratings_schema["properties"])
+
+    order_schema = build_tool_schema(get_tool_spec("sigmarket.order.read"), policy)
+    assert {"smid", "oid", "uid", "seller", "buyer"} <= set(order_schema["properties"])
+    assert "listing_id" not in order_schema["properties"]
+
+
 def test_build_registry_rejects_duplicate_tool_names(monkeypatch: pytest.MonkeyPatch) -> None:
     duplicate_row = registry_module._MATRIX_ROWS[0]
     monkeypatch.setattr(registry_module, "_MATRIX_ROWS", registry_module._MATRIX_ROWS + (duplicate_row,))
@@ -115,12 +172,46 @@ def test_build_registry_rejects_missing_documented_family(monkeypatch: pytest.Mo
         tuple(
             row
             for row in registry_module._MATRIX_ROWS
-            if row.coverage_family != "contracts.write"
+            if row.coverage_family != "bytes.bump"
         ),
     )
 
-    with pytest.raises(ValueError, match="Missing documented coverage families: contracts.write"):
+    with pytest.raises(ValueError, match="Missing documented coverage families: bytes.bump"):
         build_registry()
+
+
+def test_has_concrete_handler_is_true_for_registered_rows() -> None:
+    assert registry_module.has_concrete_handler("threads.read") is True
+    assert registry_module.has_concrete_handler("posts.reply") is True
+
+
+def test_get_tool_specs_omits_forbidden_write_families_when_policy_enables_them() -> None:
+    policy = _policy(
+        capabilities={
+            "threads.read",
+            "posts.reply",
+            "contracts.write",
+            "sigmarket.write",
+            "admin.high_risk.write",
+            "formatting.preflight",
+        },
+        parameter_families={"selectors.thread", "writes.content", "confirm.live", "formatting.content"},
+    )
+
+    tool_names = {spec.tool_name for spec in get_tool_specs(policy)}
+    assert "threads.read" in tool_names
+    assert "posts.reply" in tool_names
+    assert "contracts.write" not in tool_names
+    assert "sigmarket.write" not in tool_names
+    assert "admin.high_risk.write" not in tool_names
+    assert {"drafts.list", "drafts.read", "drafts.update", "drafts.delete"} <= tool_names
+
+
+def test_build_registry_does_not_emit_removed_placeholder_write_rows() -> None:
+    tool_names = {spec.tool_name for spec in build_registry()}
+    assert "contracts.write" not in tool_names
+    assert "sigmarket.write" not in tool_names
+    assert "admin.high_risk.write" not in tool_names
 
 
 def test_build_tool_schema_adds_read_output_mode_params_only_for_reads() -> None:

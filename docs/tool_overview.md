@@ -1,20 +1,22 @@
 # Tool Overview
 
 This page summarizes the shipped MCP tool surface defined in
-`src/hf_mcp/registry.py` (`_MATRIX_ROWS`) for operator use.
+`src/hf_mcp/registry.py` for operator use.
 
-Status labels:
+## Availability labels
 
-- `concrete today`: shipped and intended for immediate use
-- `placeholder row only`: documented row retained for coverage continuity; do not
-  treat as a concrete helper commitment today
+- `available now`: concrete and registered for downstream MCP clients
+- `not exposed`: intentionally unavailable in the registered MCP surface
 
-Output stance:
+## Evidence tiers
 
-- `JSON-first`: examples and payload discussion assume structured JSON request and
-  response shapes
-- Read-tool default mode is `readable`; script compatibility remains in
-  normalized `structuredContent`
+Evidence tags used in this document and the coverage matrix:
+
+- `OpenAPI-confirmed`
+- `PHP-source-confirmed`
+- `HF_API_REFERENCE-confirmed`
+- `live-proven`
+- `unproven`
 
 ## Read output contract
 
@@ -45,82 +47,70 @@ Body-format behavior:
 When `output_mode=raw`, `body_format` resolves to `raw` unless explicitly
 overridden for that call.
 
-## Account and identity reads
+## Canonical selectors and compatibility aliases
 
-| Tool | Status | What it is for |
+Core reads:
+
+- `threads.read`: canonical browse anchor is `fid`; compatibility selectors `tid`
+  and `uid` are accepted for compatibility callers.
+- `posts.read`: canonical browse anchor is `tid`; compatibility selectors `pid`
+  and `uid` are accepted for compatibility callers.
+- `forums.read`: canonical selector is `fid`.
+
+Extended reads:
+
+- `bytes.read`: canonical selector is `target_uid`; compatibility alias `uid` is accepted.
+- `contracts.read`: canonical selector is `cid`; compatibility alias `contract_id` is accepted.
+- `disputes.read`: canonical selector is `cdid`; compatibility aliases `dispute_id` and `did` are accepted.
+- `sigmarket.order.read`: canonical selector is `smid`; compatibility alias `oid` is accepted.
+
+PM boundary:
+
+- PM counters (`unreadpms`, `totalpms`) are available via `me.read` when Advanced
+  Info fields are enabled.
+- Direct PM content operations are unsupported.
+
+## Available reads
+
+| Tool | Availability | What it is for |
 |---|---|---|
-| `me.read` | concrete today | Read profile/account details for the authenticated account |
-| `users.read` | concrete today | Read public user details by target uid |
-| `bratings.read` | concrete today | Browse-first optional-filter read; no required selector (`uid` optional) |
+| `me.read` | available now | Read profile/account details for the authenticated account |
+| `users.read` | available now | Read public user details by target uid |
+| `forums.read` | available now | List forum metadata/threads by forum id |
+| `threads.read` | available now | Forum-anchored browse (`fid` canonical; compatibility selectors accepted) |
+| `posts.read` | available now | Thread-anchored browse (`tid` canonical; compatibility selectors accepted) |
+| `bytes.read` | available now | Read Bytes balance/details for a target user |
+| `contracts.read` | available now | Browse-first optional-filter read |
+| `disputes.read` | available now | Browse-first optional-filter read |
+| `bratings.read` | available now | Browse-first optional-filter read |
+| `sigmarket.market.read` | available now | Browse-first optional-filter read |
+| `sigmarket.order.read` | available now | Browse-first optional-filter read |
+| `admin.high_risk.read` | available now | Read high-risk admin surface data (privileged scope) |
 
-## Forum and content reads
+## Available writes
 
-| Tool | Status | What it is for |
+All write tools below require `confirm_live=true`.
+Content writes (`threads.create`, `posts.reply`) also accept `message_format`.
+
+| Tool | Availability | What it is for |
 |---|---|---|
-| `forums.read` | concrete today | List forum metadata/threads by forum id |
-| `threads.read` | concrete today | Forum-anchored browse (`fid` required, optional `tid`) |
-| `posts.read` | concrete today | Thread-anchored browse (`tid` required, optional `pid`) |
-| `bytes.read` | concrete today | Read Bytes balance/details for a target user (`target_uid`) |
+| `threads.create` | available now | Create a new thread in a target forum (`fid`) |
+| `posts.reply` | available now | Reply to an existing thread (`tid`) |
+| `bytes.transfer` | available now | Transfer Bytes to a target user (`target_uid`, `amount`) |
+| `bytes.deposit` | available now | Deposit Bytes (`amount`) |
+| `bytes.withdraw` | available now | Withdraw Bytes (`amount`) |
+| `bytes.bump` | available now | Bump Bytes by thread id (`tid`) |
 
-## Market, contracts, and disputes reads
+## Not exposed boundaries
 
-| Tool | Status | What it is for |
-|---|---|---|
-| `contracts.read` | concrete today | Browse-first optional-filter read (`cid` optional, `uid` optional) |
-| `disputes.read` | concrete today | Browse-first optional-filter read (`cdid` optional, `uid` optional; `did` is a legacy alias) |
-| `sigmarket.market.read` | concrete today | Browse-first optional-filter read (`uid` optional) |
-| `sigmarket.order.read` | concrete today | Browse-first optional-filter read (`oid` optional, `uid` optional) |
-| `admin.high_risk.read` | concrete today | Read high-risk admin surface data (privileged scope) |
-
-## Write tools available today
-
-All write rows below require `confirm_live=true`.
-Content writes (`threads.create`, `posts.reply`) also accept
-`message_format`; omit it or use `mycode` for ready-to-post MyCode, or use
-`markdown` to convert common Markdown into HF MyCode before sending.
-
-Draft lifecycle note:
-
-- `scheduled_at` on draft artifacts is metadata only for operator planning.
-- `hf-mcp` does not include a scheduler/queue that auto-runs writes at a future time.
-- Publish still requires an explicit concrete write call with `confirm_live=true`.
-
-| Tool | Status | What it is for |
-|---|---|---|
-| `threads.create` | concrete today | Create a new thread in a target forum (`fid`) |
-| `posts.reply` | concrete today | Reply to an existing thread (`tid`) |
-| `bytes.transfer` | concrete today | Transfer Bytes to a target user (`target_uid`, `amount`) |
-| `bytes.deposit` | concrete today | Deposit Bytes (`amount`) |
-| `bytes.withdraw` | concrete today | Withdraw Bytes (`amount`) |
-| `bytes.bump` | concrete today | Bump Bytes by thread id (`tid`) |
-
-## Manual live-validation envelope (this wave)
-
-- Manual live checks are operator-controlled and limited to concrete content writes:
-  - `posts.reply` on `TID 6083735`
-  - at most one `threads.create` in `FID 375`
-- No Bytes live writes are in-scope for this wave.
-- Placeholder writes remain out of scope (`contracts.write`, `sigmarket.write`,
-  `admin.high_risk.write`).
-
-## Placeholder write rows (coverage continuity)
-
-These rows are part of the documented product coverage target, but are
-placeholder-only today.
-
-| Tool | Status | Notes |
-|---|---|---|
-| `contracts.write` | placeholder row only | Listed in registry/matrix for later-lane contract write coverage |
-| `sigmarket.write` | placeholder row only | Listed in registry/matrix for later-lane sigmarket write coverage |
-| `admin.high_risk.write` | placeholder row only | Listed in registry/matrix for later-lane admin write coverage |
+- `contracts.write` is not exposed because sandbox proof is unavailable.
+- Signature Market write operations are unsupported and not exposed.
+- Admin-only high-risk write operations are unsupported and not exposed.
 
 ## Operator notes
 
 - Use this page for grouped operator orientation.
-- Use `docs/coverage_matrix.md` for row-by-row contract tracking.
+- Use `docs/coverage_matrix.md` for row-by-row contract/evidence tracking.
 - Use `docs/examples.md` for compact JSON-first request/response snippets.
-- Treat HF quote/entity canonicalization on live writes as expected HF sanitization behavior, not as a workaround target.
 - Use `docs/configuration.md` for path and override behavior (`HF_MCP_CONFIG`,
   `HF_MCP_ENV_FILE`, `HF_MCP_TOKEN_PATH`).
-- Extended read contract note: these five rows are single browse-first tools,
-  not split browse/detail tooling.

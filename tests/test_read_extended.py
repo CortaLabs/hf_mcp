@@ -85,11 +85,11 @@ def test_build_extended_handlers_registers_only_policy_allowed_rows() -> None:
 @pytest.mark.parametrize(
     ("tool_name", "kwargs", "response_key"),
     [
-        ("bytes.read", {"target_uid": 5}, "bytes"),
+        ("bytes.read", {"uid": 5}, "bytes"),
         ("contracts.read", {"cid": 7}, "contracts"),
         ("disputes.read", {"cdid": 11}, "disputes"),
         ("sigmarket.market.read", {"uid": 13}, "sigmarket/market"),
-        ("sigmarket.order.read", {"oid": 17}, "sigmarket/order"),
+        ("sigmarket.order.read", {"smid": 17}, "sigmarket/order"),
     ],
 )
 def test_extended_handlers_accept_schema_surface_selector_names(
@@ -137,9 +137,11 @@ def test_extended_handlers_accept_schema_surface_selector_names(
 @pytest.mark.parametrize(
     ("tool_name", "kwargs", "response_key"),
     [
+        ("bytes.read", {"target_uid": 5}, "bytes"),
         ("contracts.read", {"contract_id": 7}, "contracts"),
         ("disputes.read", {"dispute_id": 11}, "disputes"),
         ("disputes.read", {"did": 11}, "disputes"),
+        ("sigmarket.order.read", {"oid": 17}, "sigmarket/order"),
     ],
 )
 def test_extended_handlers_keep_legacy_selector_aliases_for_compatibility(
@@ -160,12 +162,14 @@ def test_extended_handlers_keep_legacy_selector_aliases_for_compatibility(
 
     policy = _policy(
         enabled_capabilities={
+            "bytes.read",
             "contracts.read",
             "disputes.read",
             "sigmarket.market.read",
             "sigmarket.order.read",
         },
         enabled_parameter_families={
+            "selectors.bytes",
             "selectors.contract",
             "selectors.dispute",
             "selectors.sigmarket",
@@ -181,20 +185,46 @@ def test_extended_handlers_keep_legacy_selector_aliases_for_compatibility(
     assert result["content"] == [{"type": "text", "text": f"{tool_name} returned 0 row(s)."}]
 
 
+def test_sigmarket_order_legacy_oid_alias_maps_to_canonical_smid_payload(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, Any] = {}
+
+    def _fake_read(self: HFTransport, asks: dict[str, Any], helper: str | None = None) -> dict[str, Any]:
+        captured["asks"] = asks
+        captured["helper"] = helper
+        return {"sigmarket/order": []}
+
+    monkeypatch.setattr(HFTransport, "read", _fake_read)
+
+    settings = HFMCPSettings(
+        profile="test",
+        enabled_capabilities=frozenset({"sigmarket.order.read"}),
+        enabled_parameter_families=frozenset({"selectors.sigmarket", "filters.pagination"}),
+    )
+    policy = CapabilityPolicy(settings)
+    transport = HFTransport(token_store=_StubTokenStore(), base_url="https://example.test")
+    handler = build_extended_read_handlers(policy, transport)["sigmarket.order.read"]
+
+    result = handler(oid=17)
+    assert result["structuredContent"] == {"sigmarket/order": []}
+    assert captured["helper"] == "sigmarket/order"
+    assert captured["asks"]["sigmarket/order"]["_smid"] == 17
+    assert "_oid" not in captured["asks"]["sigmarket/order"]
+
+
 def test_registered_sigmarket_order_handler_supports_output_modes_and_raw_payload_attachment(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     captured: dict[str, list[dict[str, Any]]] = {"read": [], "read_raw": []}
     read_payload = {
         "sigmarket/order": [
-            {"oid": "3", "status": "1", "dateline": "1710000000", "amount": "5"},
-            {"oid": "12", "status": "2", "dateline": "1710001000", "amount": "8"},
+            {"smid": "3", "status": "1", "dateline": "1710000000", "amount": "5"},
+            {"smid": "12", "status": "2", "dateline": "1710001000", "amount": "8"},
         ]
     }
     raw_payload = {
         "sigmarket/order": [
-            {"oid": "3", "status": "1", "dateline": "1710000000", "amount": "5"},
-            {"oid": "12", "status": "2", "dateline": "1710001000", "amount": "8"},
+            {"smid": "3", "status": "1", "dateline": "1710000000", "amount": "5"},
+            {"smid": "12", "status": "2", "dateline": "1710001000", "amount": "8"},
         ]
     }
 
@@ -219,35 +249,35 @@ def test_registered_sigmarket_order_handler_supports_output_modes_and_raw_payloa
     transport = HFTransport(token_store=_StubTokenStore(), base_url="https://example.test")
     handler = build_extended_read_handlers(policy, transport)["sigmarket.order.read"]
 
-    readable_result = handler(oid=17, output_mode="readable", include_raw_payload=False)
+    readable_result = handler(smid=17, output_mode="readable", include_raw_payload=False)
     assert readable_result["structuredContent"] == normalize_extended_payload(read_payload)
     assert readable_result["content"][0]["type"] == "text"
-    assert "oid=12" in readable_result["content"][0]["text"]
+    assert "smid=12" in readable_result["content"][0]["text"]
     assert "status=2" in readable_result["content"][0]["text"]
     assert "dateline=1710001000" in readable_result["content"][0]["text"]
     assert "amount=8" in readable_result["content"][0]["text"]
     assert len(readable_result["content"]) == 1
 
-    structured_result = handler(oid=17, output_mode="structured", include_raw_payload=False)
+    structured_result = handler(smid=17, output_mode="structured", include_raw_payload=False)
     assert structured_result["structuredContent"] == normalize_extended_payload(read_payload)
     assert structured_result["content"] == [{"type": "text", "text": "sigmarket.order.read returned 2 row(s)."}]
 
-    raw_result = handler(oid=17, output_mode="raw", include_raw_payload=False)
+    raw_result = handler(smid=17, output_mode="raw", include_raw_payload=False)
     assert raw_result["structuredContent"] == normalize_extended_payload(raw_payload)
     assert raw_result["content"][0] == {"type": "text", "text": "sigmarket.order.read returned 2 row(s)."}
     assert raw_result["content"][1]["type"] == "resource"
     assert raw_result["content"][1]["resource"]["uri"] == "hf-mcp://raw/sigmarket.order.read"
     assert raw_result["content"][1]["resource"]["mimeType"] == "application/json"
     assert json.loads(raw_result["content"][1]["resource"]["text"]) == raw_payload
-    assert json.loads(raw_result["content"][1]["resource"]["text"])["sigmarket/order"][0]["oid"] == "3"
-    assert raw_result["structuredContent"]["sigmarket/order"][0]["oid"] == "12"
+    assert json.loads(raw_result["content"][1]["resource"]["text"])["sigmarket/order"][0]["smid"] == "3"
+    assert raw_result["structuredContent"]["sigmarket/order"][0]["smid"] == "12"
 
-    readable_with_raw = handler(oid=17, output_mode="readable", include_raw_payload=True)
+    readable_with_raw = handler(smid=17, output_mode="readable", include_raw_payload=True)
     assert readable_with_raw["structuredContent"] == normalize_extended_payload(raw_payload)
     assert readable_with_raw["content"][1]["type"] == "resource"
     assert json.loads(readable_with_raw["content"][1]["resource"]["text"]) == raw_payload
 
-    defaults_result = handler(oid=17)
+    defaults_result = handler(smid=17)
     assert defaults_result["structuredContent"] == normalize_extended_payload(raw_payload)
     assert defaults_result["content"][0] == {"type": "text", "text": "sigmarket.order.read returned 2 row(s)."}
     assert defaults_result["content"][1]["type"] == "resource"
@@ -257,6 +287,39 @@ def test_registered_sigmarket_order_handler_supports_output_modes_and_raw_payloa
     assert len(captured["read_raw"]) == 3
     assert all(call["helper"] == "sigmarket/order" for call in captured["read"])
     assert all(call["helper"] == "sigmarket/order" for call in captured["read_raw"])
+    assert all(call["asks"]["sigmarket/order"]["_smid"] == 17 for call in captured["read"])
+    assert all(call["asks"]["sigmarket/order"]["_smid"] == 17 for call in captured["read_raw"])
+
+
+def test_readable_summary_omits_dispute_free_text_notes(monkeypatch: pytest.MonkeyPatch) -> None:
+    def _fake_read(self: HFTransport, asks: dict[str, Any], helper: str | None = None) -> dict[str, Any]:
+        return {
+            "disputes": [
+                {
+                    "cdid": "11",
+                    "status": "1",
+                    "claimantnotes": "secret claimant note",
+                    "defendantnotes": "secret defendant note",
+                }
+            ]
+        }
+
+    monkeypatch.setattr(HFTransport, "read", _fake_read)
+
+    settings = HFMCPSettings(
+        profile="test",
+        enabled_capabilities=frozenset({"disputes.read"}),
+        enabled_parameter_families=frozenset({"selectors.dispute", "filters.pagination"}),
+        read_output_defaults=ReadOutputDefaults(mode="readable"),
+    )
+    policy = CapabilityPolicy(settings)
+    transport = HFTransport(token_store=_StubTokenStore(), base_url="https://example.test")
+    handler = build_extended_read_handlers(policy, transport)["disputes.read"]
+
+    result = handler(cdid=11)
+    summary = result["content"][0]["text"]
+    assert "claimantnotes" not in summary
+    assert "defendantnotes" not in summary
 
 
 @pytest.mark.parametrize(
@@ -352,12 +415,28 @@ def test_list_entries_delegates_to_bytes_helper_and_coerces_amount(
     monkeypatch.setattr(HFTransport, "_post_json", _fake_post_json)
 
     transport = HFTransport(token_store=_StubTokenStore(), base_url="https://example.test")
-    result = list_entries(transport=transport, uid=99, page=3, per_page=999, include_amount=True)
+    result = list_entries(
+        transport=transport,
+        id=7,
+        uid=99,
+        from_uid=55,
+        to_uid=66,
+        page=3,
+        per_page=999,
+        include_amount=True,
+    )
 
     assert captured["route"] == "/read/bytes"
+    assert captured["payload"]["asks"]["bytes"]["_id"] == 7
     assert captured["payload"]["asks"]["bytes"]["_uid"] == 99
+    assert captured["payload"]["asks"]["bytes"]["_from"] == 55
+    assert captured["payload"]["asks"]["bytes"]["_to"] == 66
     assert captured["payload"]["asks"]["bytes"]["_page"] == 3
     assert captured["payload"]["asks"]["bytes"]["_perpage"] == 30
+    assert captured["payload"]["asks"]["bytes"]["id"] is True
+    assert captured["payload"]["asks"]["bytes"]["dateline"] is True
+    assert captured["payload"]["asks"]["bytes"]["type"] is True
+    assert captured["payload"]["asks"]["bytes"]["reason"] is True
     assert captured["payload"]["asks"]["bytes"]["amount"] is True
     assert captured["headers"]["Authorization"] == "Bearer token"
     assert result["bytes"] == [{"uid": "99", "amount": "42"}]
@@ -417,12 +496,66 @@ def test_list_bratings_uses_conservative_starter_bundle_and_preserves_mapping_ro
     assert "to" not in result["bratings"][0]
 
 
+def test_list_bratings_supports_canonical_selectors_and_optional_expansions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    def _fake_post_json(
+        self: HFTransport,
+        route: str,
+        payload: dict[str, Any],
+        headers: dict[str, str],
+    ) -> dict[str, Any]:
+        captured["route"] = route
+        captured["payload"] = payload
+        captured["headers"] = headers
+        return {"bratings": []}
+
+    monkeypatch.setattr(HFTransport, "_post_json", _fake_post_json)
+
+    transport = HFTransport(token_store=_StubTokenStore(), base_url="https://example.test")
+    result = list_bratings(
+        transport=transport,
+        crid=77,
+        cid=12,
+        uid=202,
+        from_uid=101,
+        to_uid=202,
+        include_from=True,
+        include_to=True,
+    )
+
+    assert captured["route"] == "/read/bratings"
+    asks = captured["payload"]["asks"]["bratings"]
+    assert asks["_crid"] == 77
+    assert asks["_cid"] == 12
+    assert asks["_uid"] == 202
+    assert asks["_from"] == 101
+    assert asks["_to"] == 202
+    assert asks["contract"] is True
+    assert asks["from"] is True
+    assert asks["to"] is True
+    assert result == {"bratings": []}
+
+
 @pytest.mark.parametrize(
-    ("tool_name", "call_kwargs", "response_payload", "expected_ask"),
+    ("tool_name", "call_kwargs", "response_payload", "expected_subset"),
     [
         (
             "contracts",
-            {"cid": 7, "uid": 99, "page": 2, "per_page": 3},
+            {
+                "cid": 7,
+                "uid": 99,
+                "page": 2,
+                "per_page": 3,
+                "include_inituser": True,
+                "include_otheruser": True,
+                "include_escrow": True,
+                "include_thread": True,
+                "include_ibrating": True,
+                "include_obrating": True,
+            },
             {
                 "contracts": [
                     {
@@ -444,31 +577,23 @@ def test_list_bratings_uses_conservative_starter_bundle_and_preserves_mapping_ro
                     }
                 ]
             },
-            {
-                "_page": 2,
-                "_perpage": 3,
-                "_cid": 7,
-                "_uid": 99,
-                "cid": True,
-                "status": True,
-                "type": True,
-                "dateline": True,
-                "tid": True,
-                "inituid": True,
-                "otheruid": True,
-                "iprice": True,
-                "icurrency": True,
-                "iproduct": True,
-                "oprice": True,
-                "ocurrency": True,
-                "oproduct": True,
-                "idispute": True,
-                "odispute": True,
-            },
+            {"_page": 2, "_perpage": 3, "_cid": 7, "_uid": 99, "inituser": True, "otheruser": True, "escrow": True, "thread": True, "ibrating": True, "obrating": True},
         ),
         (
             "disputes",
-            {"cdid": 11, "uid": 99, "page": 2, "per_page": 3},
+            {
+                "cdid": 11,
+                "cid": 7,
+                "uid": 99,
+                "claimantuid": 99,
+                "defendantuid": 77,
+                "page": 2,
+                "per_page": 3,
+                "include_contract": True,
+                "include_claimant": True,
+                "include_defendant": True,
+                "include_dispute_thread": True,
+            },
             {
                 "disputes": [
                     {
@@ -488,16 +613,14 @@ def test_list_bratings_uses_conservative_starter_bundle_and_preserves_mapping_ro
                 "_page": 2,
                 "_perpage": 3,
                 "_cdid": 11,
+                "_cid": 7,
                 "_uid": 99,
-                "cdid": True,
-                "contractid": True,
-                "claimantuid": True,
-                "defendantuid": True,
-                "dateline": True,
-                "status": True,
-                "dispute_tid": True,
-                "claimantnotes": True,
-                "defendantnotes": True,
+                "_claimantuid": 99,
+                "_defendantuid": 77,
+                "contract": True,
+                "claimant": True,
+                "defendant": True,
+                "dispute_thread": True,
             },
         ),
     ],
@@ -505,9 +628,9 @@ def test_list_bratings_uses_conservative_starter_bundle_and_preserves_mapping_ro
 def test_contracts_and_disputes_use_conservative_starter_asks_and_preserve_mapping_rows(
     monkeypatch: pytest.MonkeyPatch,
     tool_name: str,
-    call_kwargs: dict[str, int],
+    call_kwargs: dict[str, Any],
     response_payload: dict[str, Any],
-    expected_ask: dict[str, Any],
+    expected_subset: dict[str, Any],
 ) -> None:
     captured: dict[str, Any] = {}
 
@@ -531,7 +654,53 @@ def test_contracts_and_disputes_use_conservative_starter_asks_and_preserve_mappi
         result = list_disputes(transport=transport, **call_kwargs)
 
     assert captured["route"] == f"/read/{tool_name}"
-    assert captured["payload"]["asks"][tool_name] == expected_ask
+    actual_ask = captured["payload"]["asks"][tool_name]
+    for key, value in expected_subset.items():
+        assert actual_ask[key] == value
+    if tool_name == "contracts":
+        for field in {
+            "cid",
+            "dateline",
+            "otherdateline",
+            "public",
+            "timeout_days",
+            "timeout",
+            "status",
+            "istatus",
+            "ostatus",
+            "cancelstatus",
+            "type",
+            "tid",
+            "inituid",
+            "otheruid",
+            "muid",
+            "iprice",
+            "icurrency",
+            "iproduct",
+            "oprice",
+            "ocurrency",
+            "oproduct",
+            "terms",
+            "template_id",
+            "oaddress",
+            "iaddress",
+            "idispute",
+            "odispute",
+        }:
+            assert actual_ask[field] is True
+    else:
+        for field in {
+            "cdid",
+            "contractid",
+            "claimantuid",
+            "defendantuid",
+            "dateline",
+            "status",
+            "dispute_tid",
+            "claimantnotes",
+            "defendantnotes",
+        }:
+            assert actual_ask[field] is True
     assert captured["headers"]["Authorization"] == "Bearer token"
     assert result == response_payload
 
@@ -578,7 +747,7 @@ def test_contracts_and_disputes_use_conservative_starter_asks_and_preserve_mappi
         ),
         (
             "sigmarket/order",
-            {"oid": 17, "uid": 2047020, "page": 1, "per_page": 3},
+            {"smid": 17, "uid": 2047020, "seller": 1, "buyer": 2047020, "page": 1, "per_page": 3},
             {
                 "sigmarket/order": [
                     {
@@ -596,8 +765,10 @@ def test_contracts_and_disputes_use_conservative_starter_asks_and_preserve_mappi
             {
                 "_page": 1,
                 "_perpage": 3,
-                "_oid": 17,
+                "_smid": 17,
                 "_uid": 2047020,
+                "_seller": 1,
+                "_buyer": 2047020,
                 "smid": True,
                 "buyer": True,
                 "seller": True,
@@ -655,9 +826,9 @@ def test_shared_normalizers_handle_avatar_groups_and_ordering() -> None:
             {"uid": "3", "avatar": "https://cdn.example/avatar.png", "additionalgroups": ""},
         ],
         "sigmarket/order": [
-            {"oid": "3", "subject": "older"},
-            {"oid": "12", "subject": "newer"},
-            {"oid": "7", "subject": "middle"},
+            {"smid": "3", "subject": "older"},
+            {"smid": "12", "subject": "newer"},
+            {"smid": "7", "subject": "middle"},
         ],
     }
 
@@ -667,7 +838,7 @@ def test_shared_normalizers_handle_avatar_groups_and_ordering() -> None:
     assert result["bratings"][0]["additionalgroups"] == ["2", "4", "6"]
     assert result["bratings"][1]["avatar"] == "https://cdn.example/avatar.png"
     assert result["bratings"][1]["additionalgroups"] == []
-    assert [row["oid"] for row in result["sigmarket/order"]] == ["12", "7", "3"]
+    assert [row["smid"] for row in result["sigmarket/order"]] == ["12", "7", "3"]
 
 
 def test_list_orders_preserves_missing_advanced_fields_without_injecting_values(
@@ -679,14 +850,14 @@ def test_list_orders_preserves_missing_advanced_fields_without_injecting_values(
         payload: dict[str, Any],
         headers: dict[str, str],
     ) -> dict[str, Any]:
-        return {"sigmarket/order": {"oid": "5", "subject": "single-row"}}
+        return {"sigmarket/order": {"smid": "5", "subject": "single-row"}}
 
     monkeypatch.setattr(HFTransport, "_post_json", _fake_post_json)
 
     transport = HFTransport(token_store=_StubTokenStore(), base_url="https://example.test")
-    result = list_orders(transport=transport, oid=5, uid=11, page=1, per_page=5)
+    result = list_orders(transport=transport, smid=5, uid=11, page=1, per_page=5)
 
-    assert result["sigmarket/order"] == [{"oid": "5", "subject": "single-row"}]
+    assert result["sigmarket/order"] == [{"smid": "5", "subject": "single-row"}]
     assert "message" not in result["sigmarket/order"][0]
 
 

@@ -8,7 +8,7 @@ from .annotations import build_annotations
 from .capabilities import CapabilityPolicy
 from .config import DEFAULT_DRAFT_DIR, HFMCPSettings
 from .metadata import get_tool_specs
-from .registry import get_documented_write_specs, mcp_tool_name
+from .registry import mcp_tool_name
 from .schemas import build_tool_output_schema, build_tool_schema
 from .token_store import load_token_store
 from .tools.drafts import build_draft_handlers
@@ -44,16 +44,6 @@ def _require_runtime_secrets(settings: HFMCPSettings) -> None:
 def _tool_description(tool_name: str, operation: str) -> str:
     locality = "local" if tool_name == "formatting.preflight" or tool_name.startswith("drafts.") else "remote"
     return f"Hack Forums {locality} {operation} tool for {tool_name}."
-
-
-def _build_unimplemented_handler(tool_name: str) -> Any:
-    def _handler(**kwargs: object) -> object:
-        del kwargs
-        raise NotImplementedError(
-            f"Tool '{tool_name}' is registered from the coverage registry but its handler is not implemented yet."
-        )
-
-    return _handler
 
 
 def _shape_live_input_schema(tool_name: str, input_schema: dict[str, object], handler: Any) -> dict[str, object]:
@@ -127,20 +117,10 @@ def register_tools(server: Any, policy: CapabilityPolicy, runtime: RuntimeBundle
         concrete_handlers.update(build_extended_read_handlers(policy, transport))
         concrete_handlers.update(build_write_handlers(policy, transport, draft_dir=draft_dir))
 
-    specs = list(get_tool_specs(policy))
-    known_names = {spec.tool_name for spec in specs}
-    enabled_capabilities = frozenset(
-        getattr(getattr(policy, "_settings", None), "enabled_capabilities", frozenset())
-    )
-    for spec in get_documented_write_specs():
-        if spec.tool_name in known_names:
+    for spec in get_tool_specs(policy):
+        handler = concrete_handlers.get(spec.tool_name)
+        if handler is None:
             continue
-        if spec.tool_name in enabled_capabilities:
-            specs.append(spec)
-            known_names.add(spec.tool_name)
-
-    for spec in specs:
-        handler = concrete_handlers.get(spec.tool_name, _build_unimplemented_handler(spec.tool_name))
         schema = _shape_live_input_schema(spec.tool_name, build_tool_schema(spec, policy), handler)
         output_schema = build_tool_output_schema(spec)
         annotations = build_annotations(spec)

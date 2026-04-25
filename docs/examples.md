@@ -26,27 +26,26 @@ Request:
 }
 ```
 
-Response (illustrative):
+Response text shown to the client:
+
+```text
+threads.read returned 1 row(s):
+- tid=123, fid=375, subject=Topic title, uid=5, username=alice
+```
+
+The same call still returns canonical `structuredContent` for automation clients:
 
 ```json
 {
-  "content": [
+  "threads": [
     {
-      "type": "text",
-      "text": "threads.read returned 1 row(s):\n- tid=123, fid=375, subject=Topic title, uid=5, username=alice"
+      "tid": "123",
+      "fid": "375",
+      "subject": "Topic title",
+      "uid": "5",
+      "username": "alice"
     }
-  ],
-  "structuredContent": {
-    "threads": [
-      {
-        "tid": "123",
-        "fid": "375",
-        "subject": "Topic title",
-        "uid": "5",
-        "username": "alice"
-      }
-    ]
-  }
+  ]
 }
 ```
 
@@ -232,27 +231,26 @@ Request:
 }
 ```
 
-Response:
+Response text shown to the client:
+
+```text
+threads.read returned 1 row(s):
+- tid=123, fid=375, subject=Topic title, uid=5, username=alice
+```
+
+Structured sidecar:
 
 ```json
 {
-  "content": [
+  "threads": [
     {
-      "type": "text",
-      "text": "threads.read returned 1 row(s):\n- tid=123, fid=375, subject=Topic title, uid=5, username=alice"
+      "tid": "123",
+      "fid": "375",
+      "subject": "Topic title",
+      "uid": "5",
+      "username": "alice"
     }
-  ],
-  "structuredContent": {
-    "threads": [
-      {
-        "tid": "123",
-        "fid": "375",
-        "subject": "Topic title",
-        "uid": "5",
-        "username": "alice"
-      }
-    ]
-  }
+  ]
 }
 ```
 
@@ -372,9 +370,39 @@ not a guaranteed contract shape.
 }
 ```
 
-Placeholder write rows (`contracts.write`, `sigmarket.write`,
-`admin.high_risk.write`) are intentionally excluded from concrete examples
-because they are documented coverage rows, not concrete callable behavior today.
+`contracts.write` is intentionally excluded from runnable examples because it is
+not exposed without operator-approved sandbox proof. Signature Market writes and
+admin-only high-risk writes are also unsupported and unexposed in the current
+registered surface.
+
+## Guarded write: `bytes.transfer`
+
+Request (illustrative shape):
+
+```json
+{
+  "tool": "bytes.transfer",
+  "arguments": {
+    "target_uid": 42,
+    "amount": 10,
+    "note": "Example transfer payload",
+    "confirm_live": true
+  }
+}
+```
+
+Response (illustrative):
+
+```json
+{
+  "bytes": {
+    "status": "ok"
+  }
+}
+```
+
+Use fake transport/local test lanes for routine verification. Live mutations
+stay operator-controlled.
 
 ## Draft metadata and scheduling truth
 

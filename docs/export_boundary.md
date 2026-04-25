@@ -22,12 +22,13 @@ Allowed entries are scoped to `products/hf_mcp/` only.
   `contracts.read`, `disputes.read`, `bratings.read`,
   `sigmarket.market.read`, `sigmarket.order.read`, `admin.high_risk.read`,
   and `bytes.read`.
-- Placeholder rows are only rows without concrete handlers today and currently
-  map to later-lane write placeholders (`contracts.write`, `sigmarket.write`,
-  `admin.high_risk.write`) tracked for documented API coverage.
+- `contracts.write` is not exposed because operator-approved sandbox proof is
+  unavailable.
+- Signature Market write operations and admin-only high-risk write operations
+  are unsupported and not exposed.
 - Tool inventory source of truth is `src/hf_mcp/registry.py` (`_MATRIX_ROWS`).
-- Concrete vs placeholder status is documented in `coverage_matrix.md` and
-  summarized in `tool_overview.md`.
+- Concrete exposure vs unsupported boundaries are documented in
+  `coverage_matrix.md` and summarized in `tool_overview.md`.
 - Browse semantics are anchored: `threads.read` is forum-anchored (`fid`
   required, optional `tid`), and `posts.read` is thread-anchored (`tid`
   required, optional `pid`).
@@ -50,8 +51,9 @@ Allowed entries are scoped to `products/hf_mcp/` only.
   - `posts.reply` on `TID 6083735`
   - at most one `threads.create` in `FID 375`
 - No Bytes live writes are in scope for this wave.
-- Placeholder writes remain out of scope in this wave:
-  `contracts.write`, `sigmarket.write`, `admin.high_risk.write`.
+- `contracts.write` remains unexposed in this wave due missing sandbox proof.
+- Signature Market write operations and admin-only high-risk write operations
+  remain unsupported/unexposed in this wave.
 - Sigmarket live validation status is unchanged: current account/token remains
   scope-limited, so sigmarket probes are expected to return
   `INVALID_KEY_SCOPE_3`; this is scope enforcement, not a repaired write path.

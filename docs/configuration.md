@@ -116,6 +116,11 @@ Per-call read-tool overrides:
 
 Raw payload remains additive. `structuredContent` stays normalized/canonical for scripts even when raw payload is included.
 
+PM support boundary:
+
+- PM counters (`unreadpms`, `totalpms`) can be returned by `me.read` when Advanced Info fields are enabled.
+- Direct PM content operations are unsupported in this package surface.
+
 Body-format options:
 
 - `markdown` (default): convert MyCode/BBCode body fields such as `message` into simple Markdown for agents

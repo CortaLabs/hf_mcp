@@ -29,11 +29,17 @@ Current read tools cover the stuff an agent needs to actually understand what is
 [*][b]Threads[/b] - browse threads inside a forum.
 [*][b]Posts[/b] - read posts inside a thread, including post bodies when needed.
 [*][b]Contracts[/b] - inspect contract data available to your authorized account.
+[*][b]Disputes[/b] - inspect dispute records tied to contracts where your token has access.
 [*][b]B-ratings[/b] - read rating history where your token has access.
 [*][b]Bytes[/b] - inspect Byte activity and balances where supported.
+[*][b]Signature Market (read)[/b] - read-side coverage exists in the tool surface, but I am [i]not[/i] claiming live-proven success for every Signature Market path yet.
 [/list]
 
+The registered MCP surface is concrete right now. Exposed tools map to actual implemented handlers.
+
 The core browsing path is the important part: an assistant can move from forum, to thread, to posts, to users without needing you to manually feed it every ID after the first step.
+
+Selector handling is also less annoying now. The common HF IDs (`uid`, `fid`, `tid`, `pid`) stay canonical, and the extended tools document the compatibility aliases they actually accept, like `contract_id`, `dispute_id`/`did`, and `oid` for Signature Market orders.
 
 Read output is designed for both humans and scripts. You do not have to choose between pretty text and usable data:
 
@@ -42,6 +48,10 @@ Read output is designed for both humans and scripts. You do not have to choose b
 [*][b]Structured for automation[/b] - every read still exposes canonical `structuredContent`, so scripts and agents can parse stable JSON instead of scraping text.
 [*][b]Raw when you need it[/b] - pass `output_mode="raw"` or `include_raw_payload=true` to attach the exact upstream API payload as an MCP resource.
 [/list]
+
+Those three modes are intentional, not accidental. `readable` is for people watching an agent session, `structured` is for scripts and downstream agents, and `raw` is for audit/debug work when you need the exact upstream payload in view.
+
+Formatting is part of this workflow too. The tooling supports readable output cleanup and Markdown-to-MyCode preparation so draft content can be shaped before it ever touches a live thread.
 
 Example read call:
 
@@ -71,23 +81,10 @@ Readable mode is the default. It is meant for humans watching the agent work:
 
 Example readable output:
 
-[code]content:
-- type: text
-  text: "threads.read returned 1 row(s):
-  - tid=6324346, fid=375, subject=The HF API MCP server, uid=2047020, username=NoSuchAgency"
+[quote]threads.read returned 1 row(s):
+- tid=6324346, fid=375, subject=The HF API MCP server, uid=2047020, username=NoSuchAgency[/quote]
 
-structuredContent:
-{
-  "threads": [
-    {
-      "tid": "6324346",
-      "fid": "375",
-      "subject": "The HF API MCP server",
-      "uid": "2047020",
-      "username": "NoSuchAgency"
-    }
-  ]
-}[/code]
+That is the part you want in the chat window while supervising an agent. The same response still carries `structuredContent` behind it, but readable mode should not make the human dig through JSON just to see what happened.
 
 Structured mode is better when you are writing scripts or agent workflows that only need stable fields:
 
@@ -156,9 +153,53 @@ structuredContent:
   ]
 }[/code]
 
-The write side exists too, but it is deliberately gated. Thread creation, replies, and Bytes actions require explicit live confirmation before they run.
+The write side exists too, but it is deliberately gated. Thread creation, post replies, and Bytes actions require explicit live confirmation before they run.
 
 That is not a limitation I am trying to hide. It is there because this touches a real HF account.
+
+Write coverage that is exposed today is concrete:
+
+[list]
+[*]Thread create (`threads.create`)
+[*]Post reply (`posts.reply`)
+[*]Bytes transfer/deposit/withdraw/bump (`bytes.transfer`, `bytes.deposit`, `bytes.withdraw`, `bytes.bump`)
+[/list]
+
+Write coverage that is [i]not[/i] exposed right now is also explicit:
+
+[list]
+[*]`contracts.write` stays out of the registered surface until sandbox proof exists.
+[*]Signature Market write operations are unsupported/unexposed in the public tool registry.
+[*]Admin high-risk write surfaces are unsupported/unexposed.
+[*]PM body-management tools are unsupported/unexposed.
+[/list]
+
+If you need PM context, use `me.read` with Advanced Info. It can expose counters like `unreadpms` and `totalpms`, but it does not expose PM message bodies.
+
+For write flows, I recommend using disk drafts plus preflight checks first, then explicit confirmation for the final live call. That keeps accidental post/transfer mistakes down.
+
+On text rendering: HF may canonicalize double quotes and similar characters into HTML entities on readback. I treat that as normal HF security/rendering behavior, not some bug to bypass.
+
+[align=center][img]https://i.ibb.co.com/N2NSzmv9/divider.gif[/img][/align]
+[size=x-large][align=center][css=68]Drafts And MyCode Prep[/css][/align][/size]
+
+This is the part I care about most for actual agent use.
+
+An agent should not be raw-posting whatever it just generated. The better flow is:
+
+[list]
+[*]Write the reply in Markdown, because that is what most agents produce cleanly.
+[*]Run `formatting.preflight` to convert it into HF MyCode and save a local draft artifact.
+[*]Inspect the draft with `drafts.read`, or list/review drafts with `drafts.list`.
+[*]Mark the draft metadata with `drafts.update` when it is ready or approved.
+[*]Publish with `threads.create` or `posts.reply` by passing `draft_id` or `draft_path`, plus `confirm_live=true`.
+[/list]
+
+That gives you a real approval point. The draft lives on disk, the MyCode body can be checked before HF ever sees it, and the final write still needs explicit confirmation.
+
+The Markdown-to-MyCode conversion is practical, not decorative. Basic Markdown headings, bold text, links, quotes, and lists are translated into forum-safe MyCode so public posts look like forum posts instead of pasted agent sludge.
+
+There is no hidden scheduler auto-posting later. Draft metadata can track status and timing notes, but `hf-mcp` does not wake up on its own and mutate your account.
 
 Setup path:
 

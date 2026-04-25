@@ -50,6 +50,10 @@ Use this skill for read-only hf-mcp usage so tool selection, selector usage, and
 6. Route out-of-scope API fundamentals to `hf-api-v2`.
    - Use `hf-api-v2` for raw OAuth mechanics, HF endpoint model details, and generic `/read` payload reasoning.
 
+7. Keep PM boundaries explicit.
+   - PM counters (`unreadpms`, `totalpms`) can be read through `me.read` when Advanced Info fields are enabled.
+   - Direct PM content operations are unsupported.
+
 ## Verification
 
 - Confirm the selected read tool is in the shipped read matrix.

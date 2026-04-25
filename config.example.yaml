@@ -12,9 +12,9 @@
 # - concrete shipped helpers (usable now), including core reads plus
 #   `bytes.read`, `contracts.read`, `disputes.read`, `bratings.read`,
 #   `sigmarket.market.read`, `sigmarket.order.read`, and `admin.high_risk.read`
-# - registry placeholder rows retained for documented API coverage tracking:
+# - documented API rows that remain intentionally unexposed in presets:
 #   `contracts.write`, `sigmarket.write`, `admin.high_risk.write`
-#   (not promises of live-ready helper behavior)
+#   (not concrete helper behavior in this tranche)
 
 profile: reader
 
@@ -48,9 +48,9 @@ read_output_defaults:
 # Capabilities currently exposed by profile = "full_api":
 # me.read, users.read, forums.read, threads.read, posts.read, bytes.read,
 # contracts.read, disputes.read, bratings.read, sigmarket.market.read,
-# sigmarket.order.read, threads.create, posts.reply, bytes.transfer,
-# bytes.deposit, bytes.withdraw, bytes.bump, contracts.write,
-# sigmarket.write, admin.high_risk.read, admin.high_risk.write
+# sigmarket.order.read, admin.high_risk.read, formatting.preflight,
+# threads.create, posts.reply, bytes.transfer, bytes.deposit,
+# bytes.withdraw, bytes.bump
 #
 # Browse anchor expectations:
 # - threads.read => fid required; tid optional narrowing selector
@@ -76,4 +76,4 @@ read_output_defaults:
 # selectors.bytes, selectors.contract, selectors.dispute, selectors.sigmarket,
 # filters.pagination, fields.me.basic, fields.me.advanced,
 # fields.users.profile, fields.posts.body, fields.bytes.amount,
-# writes.content, writes.bytes, confirm.live
+# formatting.content, writes.content, writes.bytes, confirm.live

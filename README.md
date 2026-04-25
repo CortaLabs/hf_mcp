@@ -131,7 +131,9 @@ python -m hf_mcp serve
 - `scheduled_at` on draft artifacts is metadata for operator workflow only; `hf-mcp` does not ship a scheduler/queue that auto-executes future writes.
 - HF API quote/entity canonicalization on live writes is treated as expected security/sanitization behavior, not a bypass target.
 - Manual live validation in this wave is intentionally narrower: replies only on `TID 6083735` plus at most one `threads.create` in `FID 375`; no Bytes live writes.
-- Placeholder writes remain out of scope in this wave (`contracts.write`, `sigmarket.write`, `admin.high_risk.write`).
+- `contracts.write` is not exposed in this release because operator-approved sandbox proof is unavailable.
+- Signature Market write operations and admin-only high-risk write operations are unsupported and unexposed.
+- PM counters (`unreadpms`, `totalpms`) are available through `me.read` when Advanced Info fields are enabled; direct PM content operations are unsupported.
 - Detailed release-boundary and limitation truth is owned by [`docs/export_boundary.md`](docs/export_boundary.md).
 
 ## Docs map

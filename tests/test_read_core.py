@@ -109,7 +109,7 @@ def test_me_schema_prunes_advanced_parameter_when_family_not_allowed() -> None:
     assert "include_advanced_fields" not in schema["properties"]
 
 
-def test_threads_and_posts_schema_use_anchored_required_selectors() -> None:
+def test_threads_and_posts_schema_accept_any_supported_selector() -> None:
     policy = _policy(
         enabled_capabilities={"threads.read", "posts.read"},
         enabled_parameter_families={"selectors.forum", "selectors.thread", "selectors.post", "filters.pagination", "fields.posts.body"},
@@ -118,13 +118,13 @@ def test_threads_and_posts_schema_use_anchored_required_selectors() -> None:
     threads_schema = build_tool_schema(get_tool_spec("threads.read"), policy)
     posts_schema = build_tool_schema(get_tool_spec("posts.read"), policy)
 
-    assert set(threads_schema.get("required", [])) == {"fid"}
-    assert "tid" in threads_schema["properties"]
-    assert "tid" not in threads_schema["required"]
+    assert {"fid", "tid", "uid"} <= set(threads_schema["properties"])
+    assert "required" not in threads_schema
+    assert threads_schema["anyOf"] == [{"required": ["fid"]}, {"required": ["tid"]}, {"required": ["uid"]}]
 
-    assert set(posts_schema.get("required", [])) == {"tid"}
-    assert "pid" in posts_schema["properties"]
-    assert "pid" not in posts_schema["required"]
+    assert {"pid", "tid", "uid"} <= set(posts_schema["properties"])
+    assert "required" not in posts_schema
+    assert posts_schema["anyOf"] == [{"required": ["pid"]}, {"required": ["tid"]}, {"required": ["uid"]}]
 
 
 def test_dispatcher_output_excludes_disabled_core_read_capability() -> None:
@@ -136,7 +136,7 @@ def test_dispatcher_output_excludes_disabled_core_read_capability() -> None:
 
     register_tools(server, policy, RuntimeBundle())
 
-    assert mcp_tool_name("users.read") in server.tools
+    assert mcp_tool_name("users.read") not in server.tools
     assert mcp_tool_name("me.read") not in server.tools
     assert mcp_tool_name("forums.read") not in server.tools
 
@@ -217,6 +217,7 @@ def test_me_handler_reads_authenticated_profile_without_uid_selector(
     assert me_asks["postnum"] is True
     assert me_asks["awards"] is True
     assert me_asks["bytes"] is True
+    assert me_asks["vault"] is True
     assert me_asks["threadnum"] is True
     assert me_asks["avatar"] is True
     assert me_asks["avatardimensions"] is True
@@ -265,6 +266,7 @@ def test_get_profile_omits_uid_selector_when_called_directly(monkeypatch: pytest
         "postnum": True,
         "awards": True,
         "bytes": True,
+        "vault": True,
         "threadnum": True,
         "avatar": True,
         "avatardimensions": True,
@@ -313,6 +315,7 @@ def test_get_profile_includes_advanced_fields_only_when_opted_in_and_allowed(
     assert me_asks["postnum"] is True
     assert me_asks["awards"] is True
     assert me_asks["bytes"] is True
+    assert me_asks["vault"] is True
     assert me_asks["threadnum"] is True
     assert me_asks["avatar"] is True
     assert me_asks["avatardimensions"] is True
@@ -337,6 +340,7 @@ def test_get_profile_includes_advanced_fields_only_when_opted_in_and_allowed(
         "postnum",
         "awards",
         "bytes",
+        "vault",
         "threadnum",
         "avatar",
         "avatardimensions",
@@ -489,6 +493,43 @@ def test_list_threads_defaults_optional_values_and_requests_record_fields(
     assert result["threads"] == [{"tid": "123", "subject": "Topic"}]
 
 
+def test_list_threads_supports_tid_and_uid_selectors_with_exact_hf_keys(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    def _fake_post_json(
+        self: HFTransport,
+        route: str,
+        payload: dict[str, Any],
+        headers: dict[str, str],
+    ) -> dict[str, Any]:
+        captured["route"] = route
+        captured["payload"] = payload
+        captured["headers"] = headers
+        return {"threads": [{"tid": 123, "subject": "Topic"}]}
+
+    monkeypatch.setattr(HFTransport, "_post_json", _fake_post_json)
+
+    transport = HFTransport(token_store=_StubTokenStore(), base_url="https://example.test")
+    list_threads(transport=transport, tid=123, uid=5, page=None, per_page=None)
+
+    thread_asks = captured["payload"]["asks"]["threads"]
+    assert captured["route"] == "/read/threads"
+    assert "_fid" not in thread_asks
+    assert thread_asks["_tid"] == 123
+    assert thread_asks["_uid"] == 5
+    assert thread_asks["_page"] == 1
+    assert thread_asks["_perpage"] == 30
+
+
+def test_list_threads_requires_at_least_one_selector() -> None:
+    transport = HFTransport(token_store=_StubTokenStore(), base_url="https://example.test")
+
+    with pytest.raises(ValueError, match="threads.read requires at least one selector"):
+        list_threads(transport=transport, fid=None, tid=None, uid=None)
+
+
 def test_list_forums_defaults_optional_values_and_requests_forum_card_fields(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -597,6 +638,74 @@ def test_list_posts_defaults_optional_values_and_requests_record_fields(
     assert "content" not in result
     assert "structuredContent" not in result
     assert result["posts"] == [{"pid": "88", "subject": "No PID filter", "message": "Text"}]
+
+
+def test_list_posts_supports_uid_selector_without_tid(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    def _fake_post_json(
+        self: HFTransport,
+        route: str,
+        payload: dict[str, Any],
+        headers: dict[str, str],
+    ) -> dict[str, Any]:
+        captured["route"] = route
+        captured["payload"] = payload
+        captured["headers"] = headers
+        return {"posts": {"pid": 88, "subject": "UID filter", "message": "Text"}}
+
+    monkeypatch.setattr(HFTransport, "_post_json", _fake_post_json)
+
+    transport = HFTransport(token_store=_StubTokenStore(), base_url="https://example.test")
+    list_posts(transport=transport, uid=5, page=None, per_page=None, include_post_body=None)
+
+    post_asks = captured["payload"]["asks"]["posts"]
+    assert captured["route"] == "/read/posts"
+    assert "_pid" not in post_asks
+    assert "_tid" not in post_asks
+    assert post_asks["_uid"] == 5
+    assert post_asks["_page"] == 1
+    assert post_asks["_perpage"] == 30
+
+
+def test_list_posts_supports_pid_selector_without_tid_or_uid(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    def _fake_post_json(
+        self: HFTransport,
+        route: str,
+        payload: dict[str, Any],
+        headers: dict[str, str],
+    ) -> dict[str, Any]:
+        captured["route"] = route
+        captured["payload"] = payload
+        captured["headers"] = headers
+        return {"posts": {"pid": 88, "subject": "PID filter"}}
+
+    monkeypatch.setattr(HFTransport, "_post_json", _fake_post_json)
+
+    transport = HFTransport(token_store=_StubTokenStore(), base_url="https://example.test")
+    list_posts(transport=transport, pid=88, page=None, per_page=None, include_post_body=False)
+
+    post_asks = captured["payload"]["asks"]["posts"]
+    assert captured["route"] == "/read/posts"
+    assert post_asks["_pid"] == 88
+    assert "_tid" not in post_asks
+    assert "_uid" not in post_asks
+    assert post_asks["_page"] == 1
+    assert post_asks["_perpage"] == 30
+    assert "message" not in post_asks
+
+
+def test_list_posts_requires_at_least_one_selector() -> None:
+    transport = HFTransport(token_store=_StubTokenStore(), base_url="https://example.test")
+
+    with pytest.raises(ValueError, match="posts.read requires at least one selector"):
+        list_posts(transport=transport, tid=None, pid=None, uid=None)
 
 
 def test_list_posts_include_post_body_false_removes_only_message(

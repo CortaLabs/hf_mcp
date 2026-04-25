@@ -15,13 +15,6 @@ from hf_mcp.write_preflight import WritePreflightError, validate_write_body
 WriteHandler = Callable[..., dict[str, Any]]
 
 
-PENDING_LATER_LANE_WRITE_ROWS: dict[str, str] = {
-    "contracts.write": "Documented later-lane write helper is intentionally blocked pending named helper proof.",
-    "sigmarket.write": "Documented later-lane write helper is intentionally blocked pending named helper proof.",
-    "admin.high_risk.write": "Documented later-lane write helper is intentionally blocked pending named helper proof.",
-}
-
-
 def _require_confirm_live(tool_name: str, confirm_live: bool) -> None:
     if confirm_live:
         return
@@ -127,10 +120,17 @@ def send_live(
     transport: HFTransport,
     target_uid: int,
     amount: int,
+    reason: str | None = None,
+    pid: int | None = None,
     confirm_live: bool,
 ) -> dict[str, Any]:
     _require_confirm_live("bytes.transfer", confirm_live)
-    asks = {"bytes": {"_to_uid": target_uid, "_amount": amount}}
+    payload: dict[str, Any] = {"_uid": target_uid, "_amount": amount}
+    if reason is not None:
+        payload["_reason"] = reason
+    if pid is not None:
+        payload["_pid"] = pid
+    asks = {"bytes": payload}
     return transport.write(asks=asks, helper="bytes")
 
 
@@ -141,7 +141,7 @@ def deposit_live(
     confirm_live: bool,
 ) -> dict[str, Any]:
     _require_confirm_live("bytes.deposit", confirm_live)
-    asks = {"bytes": {"_amount": amount}}
+    asks = {"bytes": {"_deposit": amount}}
     return transport.write(asks=asks, helper="bytes/deposit")
 
 
@@ -152,7 +152,7 @@ def withdraw_live(
     confirm_live: bool,
 ) -> dict[str, Any]:
     _require_confirm_live("bytes.withdraw", confirm_live)
-    asks = {"bytes": {"_amount": amount}}
+    asks = {"bytes": {"_withdraw": amount}}
     return transport.write(asks=asks, helper="bytes/withdraw")
 
 
@@ -163,7 +163,7 @@ def bump_live(
     confirm_live: bool,
 ) -> dict[str, Any]:
     _require_confirm_live("bytes.bump", confirm_live)
-    asks = {"bytes": {"_tid": tid}}
+    asks = {"bytes": {"_bump": tid}}
     return transport.write(asks=asks, helper="bytes/bump")
 
 
@@ -202,7 +202,6 @@ def build_write_handlers(
 
 
 __all__ = [
-    "PENDING_LATER_LANE_WRITE_ROWS",
     "build_write_handlers",
     "bump_live",
     "create_thread_live",

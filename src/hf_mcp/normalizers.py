@@ -14,7 +14,7 @@ _ORDERING_KEYS: dict[str, tuple[str, ...]] = {
     "disputes": ("did", "id"),
     "bratings": ("id", "uid"),
     "sigmarket/market": ("mid", "id"),
-    "sigmarket/order": ("oid", "id"),
+    "sigmarket/order": ("smid", "oid", "id"),
 }
 
 

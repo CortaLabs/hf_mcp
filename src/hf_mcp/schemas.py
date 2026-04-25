@@ -133,8 +133,9 @@ _FAMILY_PROPERTY_SPECS: dict[str, tuple[tuple[str, dict[str, Any], bool], ...]] 
 }
 
 _TOOL_REQUIRED_OVERRIDES: dict[str, tuple[str, ...]] = {
-    "threads.read": ("fid",),
-    "posts.read": ("tid",),
+    "bytes.read": (),
+    "threads.read": (),
+    "posts.read": (),
     "contracts.read": (),
     "disputes.read": (),
     "bratings.read": (),
@@ -152,10 +153,39 @@ _TOOL_REQUIRED_OVERRIDES: dict[str, tuple[str, ...]] = {
 }
 
 _TOOL_SELECTOR_PROPERTY_OVERRIDES: dict[str, tuple[tuple[str, str], ...]] = {
+    "bytes.read": (
+        ("id", "selectors.bytes"),
+        ("uid", "selectors.bytes"),
+        ("from_uid", "selectors.bytes"),
+        ("to_uid", "selectors.bytes"),
+        ("page", "filters.pagination"),
+        ("per_page", "filters.pagination"),
+    ),
+    "threads.read": (("uid", "selectors.thread"),),
+    "posts.read": (("uid", "selectors.thread"),),
     "contracts.read": (("cid", "selectors.contract"), ("uid", "selectors.contract")),
-    "disputes.read": (("cdid", "selectors.dispute"), ("uid", "selectors.dispute")),
+    "disputes.read": (
+        ("cdid", "selectors.dispute"),
+        ("cid", "selectors.dispute"),
+        ("uid", "selectors.dispute"),
+        ("claimantuid", "selectors.dispute"),
+        ("defendantuid", "selectors.dispute"),
+    ),
+    "bratings.read": (
+        ("crid", "selectors.dispute"),
+        ("cid", "selectors.dispute"),
+        ("uid", "selectors.dispute"),
+        ("from_uid", "selectors.dispute"),
+        ("to_uid", "selectors.dispute"),
+    ),
     "sigmarket.market.read": (("uid", "selectors.sigmarket"),),
-    "sigmarket.order.read": (("oid", "selectors.sigmarket"), ("uid", "selectors.sigmarket")),
+    "sigmarket.order.read": (
+        ("smid", "selectors.sigmarket"),
+        ("oid", "selectors.sigmarket"),
+        ("uid", "selectors.sigmarket"),
+        ("seller", "selectors.sigmarket"),
+        ("buyer", "selectors.sigmarket"),
+    ),
     "bytes.bump": (("tid", "selectors.thread"),),
 }
 
@@ -232,9 +262,10 @@ def build_tool_schema(spec: ToolSpec, policy: CapabilityPolicy) -> dict[str, Any
         updated_properties = dict(properties)
         for legacy_name in _TOOL_SELECTOR_PROPERTY_REMOVALS.get(spec.tool_name, ()):
             updated_properties.pop(legacy_name, None)
-        for selector_name, selector_family in _TOOL_SELECTOR_PROPERTY_OVERRIDES.get(spec.tool_name, ()):
-            selector_schema = {"type": "integer", "minimum": 1}
-            updated_properties[selector_name] = _tag_with_family(selector_schema, selector_family)
+        if policy.can_register(spec.tool_name):
+            for selector_name, selector_family in _TOOL_SELECTOR_PROPERTY_OVERRIDES.get(spec.tool_name, ()):
+                selector_schema = {"type": "integer", "minimum": 1}
+                updated_properties[selector_name] = _tag_with_family(selector_schema, selector_family)
         schema["properties"] = updated_properties
     required_override = _TOOL_REQUIRED_OVERRIDES.get(spec.tool_name)
     if required_override is not None:
@@ -270,6 +301,14 @@ def build_tool_schema(spec: ToolSpec, policy: CapabilityPolicy) -> dict[str, Any
         schema["anyOf"] = [{"required": ["message"]}, {"required": ["source_path"]}]
     elif spec.tool_name in {"drafts.read", "drafts.update", "drafts.delete"}:
         schema["anyOf"] = [{"required": ["draft_id"]}, {"required": ["draft_path"]}]
+    elif spec.tool_name == "threads.read":
+        selector_options = tuple(field for field in ("fid", "tid", "uid") if field in schema.get("properties", {}))
+        if selector_options:
+            schema["anyOf"] = [{"required": [field]} for field in selector_options]
+    elif spec.tool_name == "posts.read":
+        selector_options = tuple(field for field in ("pid", "tid", "uid") if field in schema.get("properties", {}))
+        if selector_options:
+            schema["anyOf"] = [{"required": [field]} for field in selector_options]
     elif "writes.content" in spec.parameter_families:
         schema["anyOf"] = [{"required": ["message"]}, {"required": ["draft_id"]}, {"required": ["draft_path"]}]
     return schema

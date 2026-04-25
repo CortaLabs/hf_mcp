@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from .capabilities import CapabilityPolicy
-from .registry import ToolSpec, build_registry
+from .registry import ToolSpec, build_registry, has_concrete_handler
 
 _LOCAL_INSPECTION_TOOLS = frozenset({"formatting.preflight", "drafts.list", "drafts.read"})
 _LOCAL_MUTATION_TOOLS = frozenset({"drafts.update", "drafts.delete"})
@@ -41,11 +41,15 @@ def build_tool_meta(spec: ToolSpec) -> dict[str, object]:
     }
 
 
-def get_tool_specs(policy: CapabilityPolicy) -> list[ToolSpec]:
+def get_tool_specs(policy: CapabilityPolicy | None = None) -> list[ToolSpec]:
+    concrete_specs = [spec for spec in build_registry() if has_concrete_handler(spec.tool_name)]
+    if policy is None:
+        return concrete_specs
+
     allow_local_drafts = policy.can_register("formatting.preflight")
     return [
         spec
-        for spec in build_registry()
+        for spec in concrete_specs
         if policy.can_register(spec.tool_name) or (allow_local_drafts and spec.tool_name.startswith("drafts."))
     ]
 

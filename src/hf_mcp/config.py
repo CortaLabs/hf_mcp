@@ -91,6 +91,17 @@ WRITE_CAPABILITIES: frozenset[str] = frozenset(
     }
 )
 
+UNVERIFIED_WRITE_CAPABILITIES: frozenset[str] = frozenset(
+    {
+        "contracts.write",
+        "sigmarket.write",
+        "admin.high_risk.write",
+    }
+)
+
+VERIFIED_CONCRETE_CAPABILITIES: frozenset[str] = ALL_CAPABILITIES - UNVERIFIED_WRITE_CAPABILITIES
+VERIFIED_CONCRETE_PARAMETER_FAMILIES: frozenset[str] = ALL_PARAMETER_FAMILIES
+
 READ_PARAMETER_FAMILIES: frozenset[str] = frozenset(
     {
         "selectors.user",
@@ -122,14 +133,14 @@ FORUM_OPERATOR_PARAMETER_FAMILIES: frozenset[str] = READ_PARAMETER_FAMILIES | fr
 PRESET_CAPABILITIES: dict[str, frozenset[str]] = {
     "reader": READ_CAPABILITIES,
     "forum_operator": FORUM_OPERATOR_CAPABILITIES,
-    "full_api": ALL_CAPABILITIES,
+    "full_api": VERIFIED_CONCRETE_CAPABILITIES,
     "custom": frozenset(),
 }
 
 PRESET_PARAMETER_FAMILIES: dict[str, frozenset[str]] = {
     "reader": READ_PARAMETER_FAMILIES,
     "forum_operator": FORUM_OPERATOR_PARAMETER_FAMILIES,
-    "full_api": ALL_PARAMETER_FAMILIES,
+    "full_api": VERIFIED_CONCRETE_PARAMETER_FAMILIES,
     "custom": frozenset(),
 }
 

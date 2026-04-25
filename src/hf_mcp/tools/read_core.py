@@ -55,6 +55,7 @@ _DEFAULT_ME_BASIC_FIELDS = (
     "postnum",
     "awards",
     "bytes",
+    "vault",
     "threadnum",
     "avatar",
     "avatardimensions",
@@ -137,16 +138,23 @@ def _build_forums_asks(*, fid: int, page: int | None, per_page: int | None) -> d
 
 def _build_threads_asks(
     *,
-    fid: int,
+    fid: int | None,
     tid: int | None,
+    uid: int | None,
     page: int | None,
     per_page: int | None,
 ) -> dict[str, dict[str, Any]]:
-    asks: dict[str, dict[str, Any]] = {
-        "threads": {"_fid": fid, "_page": _coerce_page(page), "_perpage": _coerce_per_page(per_page)}
-    }
+    asks: dict[str, dict[str, Any]] = {"threads": {}}
+    if fid is not None:
+        asks["threads"]["_fid"] = fid
     if tid is not None:
         asks["threads"]["_tid"] = tid
+    if uid is not None:
+        asks["threads"]["_uid"] = uid
+    if "_fid" not in asks["threads"] and "_tid" not in asks["threads"] and "_uid" not in asks["threads"]:
+        raise ValueError("threads.read requires at least one selector: fid, tid, or uid")
+    asks["threads"]["_page"] = _coerce_page(page)
+    asks["threads"]["_perpage"] = _coerce_per_page(per_page)
     for field_name in _DEFAULT_THREAD_FIELDS:
         asks["threads"][field_name] = True
     asks["threads"]["firstpost"] = {
@@ -159,17 +167,24 @@ def _build_threads_asks(
 
 def _build_posts_asks(
     *,
-    tid: int,
+    tid: int | None,
     pid: int | None,
+    uid: int | None,
     page: int | None,
     per_page: int | None,
     include_post_body: bool | None,
 ) -> dict[str, dict[str, Any]]:
-    asks: dict[str, dict[str, Any]] = {
-        "posts": {"_tid": tid, "_page": _coerce_page(page), "_perpage": _coerce_per_page(per_page)},
-    }
+    asks: dict[str, dict[str, Any]] = {"posts": {}}
+    if tid is not None:
+        asks["posts"]["_tid"] = tid
     if pid is not None:
         asks["posts"]["_pid"] = pid
+    if uid is not None:
+        asks["posts"]["_uid"] = uid
+    if "_pid" not in asks["posts"] and "_tid" not in asks["posts"] and "_uid" not in asks["posts"]:
+        raise ValueError("posts.read requires at least one selector: pid, tid, or uid")
+    asks["posts"]["_page"] = _coerce_page(page)
+    asks["posts"]["_perpage"] = _coerce_per_page(per_page)
     for field_name in _DEFAULT_POST_FIELDS:
         asks["posts"][field_name] = True
     if include_post_body is False:
@@ -223,20 +238,22 @@ def list_forums(
 def list_threads(
     *,
     transport: HFTransport,
-    fid: int,
+    fid: int | None = None,
     tid: int | None = None,
+    uid: int | None = None,
     page: int | None = DEFAULT_PAGE,
     per_page: int | None = DEFAULT_PER_PAGE,
 ) -> dict[str, Any]:
-    asks = _build_threads_asks(fid=fid, tid=tid, page=page, per_page=per_page)
+    asks = _build_threads_asks(fid=fid, tid=tid, uid=uid, page=page, per_page=per_page)
     return transport.read(asks=asks, helper="threads")
 
 
 def list_posts(
     *,
     transport: HFTransport,
-    tid: int,
+    tid: int | None = None,
     pid: int | None = None,
+    uid: int | None = None,
     page: int | None = DEFAULT_PAGE,
     per_page: int | None = DEFAULT_PER_PAGE,
     include_post_body: bool | None = True,
@@ -244,6 +261,7 @@ def list_posts(
     asks = _build_posts_asks(
         tid=tid,
         pid=pid,
+        uid=uid,
         page=page,
         per_page=per_page,
         include_post_body=include_post_body,
@@ -482,15 +500,16 @@ def build_core_read_handlers(policy: CapabilityPolicy, transport: HFTransport) -
         elif spec.tool_name == "threads.read":
             def _threads_handler(
                 *,
-                fid: int,
+                fid: int | None = None,
                 tid: int | None = None,
+                uid: int | None = None,
                 page: int | None = DEFAULT_PAGE,
                 per_page: int | None = DEFAULT_PER_PAGE,
                 output_mode: str | None = None,
                 include_raw_payload: bool | None = None,
                 body_format: str | None = None,
             ) -> dict[str, Any]:
-                asks = _build_threads_asks(fid=fid, tid=tid, page=page, per_page=per_page)
+                asks = _build_threads_asks(fid=fid, tid=tid, uid=uid, page=page, per_page=per_page)
                 return _finalize_result(
                     tool_name="threads.read",
                     asks=asks,
@@ -504,8 +523,9 @@ def build_core_read_handlers(policy: CapabilityPolicy, transport: HFTransport) -
         elif spec.tool_name == "posts.read":
             def _posts_handler(
                 *,
-                tid: int,
+                tid: int | None = None,
                 pid: int | None = None,
+                uid: int | None = None,
                 page: int | None = DEFAULT_PAGE,
                 per_page: int | None = DEFAULT_PER_PAGE,
                 include_post_body: bool | None = True,
@@ -516,6 +536,7 @@ def build_core_read_handlers(policy: CapabilityPolicy, transport: HFTransport) -
                 asks = _build_posts_asks(
                     tid=tid,
                     pid=pid,
+                    uid=uid,
                     page=page,
                     per_page=per_page,
                     include_post_body=include_post_body,

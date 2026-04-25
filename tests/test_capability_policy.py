@@ -16,6 +16,7 @@ from hf_mcp.capabilities import CapabilityPolicy
 from hf_mcp.config import (
     ALL_CAPABILITIES,
     ALL_PARAMETER_FAMILIES,
+    DEFAULT_PROFILE,
     HFMCPSettings,
     PRESET_CAPABILITIES,
     PRESET_PARAMETER_FAMILIES,
@@ -60,7 +61,8 @@ def _extract_commented_csv_rows(example_text: str, heading: str) -> set[str]:
 def test_default_profile_is_reader_when_profile_omitted(tmp_path: Path) -> None:
     settings = load_settings(config_path=tmp_path / "missing.yaml", env={})
 
-    assert settings.profile == "reader"
+    assert DEFAULT_PROFILE == "reader"
+    assert settings.profile == DEFAULT_PROFILE
     assert settings.enabled_capabilities == PRESET_CAPABILITIES["reader"]
     assert settings.enabled_parameter_families == PRESET_PARAMETER_FAMILIES["reader"]
 
@@ -75,11 +77,12 @@ def test_full_api_profile_is_explicit_opt_in(tmp_path: Path) -> None:
     settings = load_settings(config_path=config_path, env={})
 
     assert settings.profile == "full_api"
-    assert settings.enabled_capabilities == ALL_CAPABILITIES
+    assert settings.enabled_capabilities == PRESET_CAPABILITIES["full_api"]
+    assert settings.enabled_parameter_families == PRESET_PARAMETER_FAMILIES["full_api"]
     assert settings.enabled_parameter_families == ALL_PARAMETER_FAMILIES
 
 
-def test_full_api_profile_retains_later_lane_rows_for_exposure_control() -> None:
+def test_full_api_profile_exposes_verified_concrete_surface_only() -> None:
     settings = HFMCPSettings(
         profile="full_api",
         enabled_capabilities=PRESET_CAPABILITIES["full_api"],
@@ -89,6 +92,14 @@ def test_full_api_profile_retains_later_lane_rows_for_exposure_control() -> None
 
     retained_rows = {
         "admin.high_risk.read",
+        "threads.create",
+        "posts.reply",
+        "bytes.transfer",
+        "bytes.deposit",
+        "bytes.withdraw",
+        "bytes.bump",
+    }
+    removed_rows = {
         "contracts.write",
         "sigmarket.write",
         "admin.high_risk.write",
@@ -96,6 +107,9 @@ def test_full_api_profile_retains_later_lane_rows_for_exposure_control() -> None
     for name in retained_rows:
         assert name in settings.enabled_capabilities
         assert policy.can_register(name) is True
+    for name in removed_rows:
+        assert name not in settings.enabled_capabilities
+        assert policy.can_register(name) is False
 
 
 def test_reader_preset_disables_registration_for_write_capabilities(tmp_path: Path) -> None:
@@ -128,6 +142,139 @@ def test_forum_operator_can_disable_parameter_family_explicitly(tmp_path: Path) 
     assert policy.can_register("posts.reply") is True
     assert "writes.content" in policy.allowed_parameter_families("posts.reply")
     assert "confirm.live" not in policy.allowed_parameter_families("posts.reply")
+
+
+@pytest.mark.parametrize(
+    ("disabled_family", "tool", "expected_register"),
+    [
+        ("selectors.user", "users.read", True),
+        ("selectors.contract", "contracts.read", True),
+        ("selectors.sigmarket", "sigmarket.market.read", True),
+        ("formatting.content", "formatting.preflight", False),
+        ("writes.content", "posts.reply", True),
+        ("writes.bytes", "bytes.transfer", True),
+        ("confirm.live", "threads.create", True),
+    ],
+)
+def test_full_api_family_disables_support_required_permission_groups(
+    tmp_path: Path,
+    disabled_family: str,
+    tool: str,
+    expected_register: bool,
+) -> None:
+    config_path = _write_config(
+        tmp_path,
+        f"""
+        profile: full_api
+        disabled_parameter_families:
+          - {disabled_family}
+        """,
+    )
+    settings = load_settings(config_path=config_path, env={})
+    policy = CapabilityPolicy(settings)
+
+    assert policy.can_register(tool) is expected_register
+    assert disabled_family not in policy.allowed_parameter_families(tool)
+
+
+@pytest.mark.parametrize(
+    ("disabled_family", "tool", "schema", "removed_property"),
+    [
+        (
+            "selectors.user",
+            "users.read",
+            {
+                "type": "object",
+                "properties": {
+                    "_uid": {"type": "integer", "x-hf-parameter-family": "selectors.user"},
+                    "_page": {"type": "integer", "x-hf-parameter-family": "filters.pagination"},
+                },
+            },
+            "_uid",
+        ),
+        (
+            "selectors.contract",
+            "contracts.read",
+            {
+                "type": "object",
+                "properties": {
+                    "_cid": {"type": "integer", "x-hf-parameter-family": "selectors.contract"},
+                    "_page": {"type": "integer", "x-hf-parameter-family": "filters.pagination"},
+                },
+            },
+            "_cid",
+        ),
+        (
+            "selectors.sigmarket",
+            "sigmarket.market.read",
+            {
+                "type": "object",
+                "properties": {
+                    "_smid": {"type": "integer", "x-hf-parameter-family": "selectors.sigmarket"},
+                    "_page": {"type": "integer", "x-hf-parameter-family": "filters.pagination"},
+                },
+            },
+            "_smid",
+        ),
+        (
+            "fields.me.advanced",
+            "me.read",
+            {
+                "type": "object",
+                "properties": {
+                    "_uid": {"type": "integer", "x-hf-parameter-family": "selectors.user"},
+                    "_stats": {"type": "boolean", "x-hf-parameter-family": "fields.me.advanced"},
+                },
+            },
+            "_stats",
+        ),
+        (
+            "fields.posts.body",
+            "posts.read",
+            {
+                "type": "object",
+                "properties": {
+                    "_tid": {"type": "integer", "x-hf-parameter-family": "selectors.thread"},
+                    "_body": {"type": "boolean", "x-hf-parameter-family": "fields.posts.body"},
+                },
+            },
+            "_body",
+        ),
+        (
+            "fields.bytes.amount",
+            "bytes.read",
+            {
+                "type": "object",
+                "properties": {
+                    "_uid": {"type": "integer", "x-hf-parameter-family": "selectors.bytes"},
+                    "_amount": {"type": "boolean", "x-hf-parameter-family": "fields.bytes.amount"},
+                },
+            },
+            "_amount",
+        ),
+    ],
+)
+def test_full_api_family_disables_prune_advanced_users_posts_and_bytes_fields(
+    tmp_path: Path,
+    disabled_family: str,
+    tool: str,
+    schema: dict[str, object],
+    removed_property: str,
+) -> None:
+    config_path = _write_config(
+        tmp_path,
+        f"""
+        profile: full_api
+        disabled_parameter_families:
+          - {disabled_family}
+        """,
+    )
+    settings = load_settings(config_path=config_path, env={})
+    policy = CapabilityPolicy(settings)
+
+    pruned = policy.prune_schema(tool, schema)
+
+    assert removed_property not in pruned.get("properties", {})
 
 
 def test_full_api_can_disable_capability_explicitly(tmp_path: Path) -> None:
@@ -242,3 +389,8 @@ def test_example_config_full_api_commentary_matches_runtime_presets() -> None:
 
     assert capability_rows == set(PRESET_CAPABILITIES["full_api"])
     assert parameter_rows == set(PRESET_PARAMETER_FAMILIES["full_api"])
+
+
+def test_full_api_profile_is_strict_subset_of_all_capabilities() -> None:
+    assert PRESET_CAPABILITIES["full_api"].issubset(ALL_CAPABILITIES)
+    assert PRESET_CAPABILITIES["full_api"] != ALL_CAPABILITIES

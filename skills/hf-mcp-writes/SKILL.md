@@ -1,6 +1,6 @@
 ---
 name: hf-mcp-writes
-description: Guarded write usage skill for hf-mcp separating concrete live-write helpers from documented placeholder rows
+description: Guarded write usage skill for hf-mcp covering concrete live-write helpers and explicit unsupported boundaries
 user-invocable: true
 context: full
 visibility: exported
@@ -9,13 +9,15 @@ owner: hackforums-council
 
 # HF MCP Writes
 
-Use this skill for hf-mcp write tasks so live-write guardrails stay explicit, concrete helper coverage stays truthful, and placeholder rows are not treated as callable operations.
+Use this skill for hf-mcp write tasks so live-write guardrails stay explicit,
+concrete helper coverage stays truthful, and unsupported families are not
+misread as callable operations.
 
 ## Trigger Conditions
 
 - The user asks to create content or submit a mutating Bytes action through `hf-mcp`.
 - The task needs concrete write helper selection and `confirm_live=true` handling.
-- The user asks whether a documented write row is currently callable.
+- The user asks whether a documented write family is currently callable.
 
 ## Inputs
 
@@ -25,9 +27,9 @@ Use this skill for hf-mcp write tasks so live-write guardrails stay explicit, co
 
 ## Procedure
 
-1. Separate concrete write helpers from placeholder coverage rows before any command drafting.
-   - Concrete today helpers: `threads.create`, `posts.reply`, `bytes.transfer`, `bytes.deposit`, `bytes.withdraw`, `bytes.bump`.
-   - Placeholder rows (not callable today): `contracts.write`, `sigmarket.write`, `admin.high_risk.write`.
+1. Separate concrete write helpers from unexposed write families before any command drafting.
+   - Concrete helpers: `threads.create`, `posts.reply`, `bytes.transfer`, `bytes.deposit`, `bytes.withdraw`, `bytes.bump`.
+   - Not exposed: `contracts.write` (blocked until operator-approved sandbox proof exists), Signature Market writes, and admin-only high-risk writes.
 
 2. Require explicit live-write confirmation on concrete helpers.
    - Concrete helpers require `confirm_live=true`.
@@ -36,7 +38,7 @@ Use this skill for hf-mcp write tasks so live-write guardrails stay explicit, co
 3. Draft JSON-first write arguments with minimal required fields.
    - `threads.create`: forum selector plus content (`fid`, `subject`, `message`, `confirm_live`; optional `message_format`).
    - `posts.reply`: thread selector plus content (`tid`, `message`, `confirm_live`; optional `message_format`).
-   - Bytes writes: target and amount details where required, plus `confirm_live`.
+   - Bytes writes: canonical keys (`target_uid`, `amount`, optional `note`) plus `confirm_live`.
 
 4. Use Markdown-to-MyCode conversion when it helps agents draft naturally.
    - `message_format` defaults to `mycode`, preserving existing behavior for ready-to-post MyCode.
@@ -49,9 +51,9 @@ Use this skill for hf-mcp write tasks so live-write guardrails stay explicit, co
    - Frame this as natural HF security/sanitization for API-written forum content, not as a surprising MCP transport bug.
    - For public update posts, prefer quote-light formats, YAML-ish examples, single-quoted examples where valid, screenshots, attachments, paste links, or an explicit note that the snippet is illustrative rather than copy-ready.
 
-6. Treat placeholder rows as documented scope continuity only.
-   - They are part of coverage tracking, but not concrete helper commitments today.
-   - Do not provide runnable examples that imply these rows are currently executable.
+6. Treat unsupported families as hard boundaries.
+   - They are not callable in the registered MCP tool surface today.
+   - Do not provide runnable examples that imply these families are currently executable.
 
 7. Treat draft scheduling fields as metadata only.
    - `scheduled_at` can exist in draft artifacts for operator workflow context.
@@ -67,24 +69,24 @@ Use this skill for hf-mcp write tasks so live-write guardrails stay explicit, co
 
 ## Verification
 
-- Confirm the requested helper is in the concrete-today list before preparing a live call.
+- Confirm the requested helper is in the concrete-helper list before preparing a live call.
 - Confirm `confirm_live=true` is explicitly present for concrete writes.
 - Confirm `message_format` is set intentionally: omit/use `mycode` for MyCode input, or use `markdown` for Markdown-to-MyCode conversion.
-- Confirm placeholder rows are labeled non-callable in all guidance.
+- Confirm unsupported families are labeled non-callable in all guidance.
 - Confirm any `scheduled_at` guidance is metadata-only with no implied scheduler.
 - Confirm no ungated autonomous posting behavior is implied.
 - Confirm any quote-heavy public post drafted through `hf-mcp` has an explicit strategy for HF API quote sanitization.
 
 ## Output / Handoff
 
-- A concrete helper decision or an explicit placeholder-row block decision.
+- A concrete helper decision or an explicit unsupported-boundary block decision.
 - A JSON-first argument outline with required guardrail fields.
 - Optional `message_format` guidance for MyCode vs Markdown input.
 - Any risk note that requires operator confirmation before proceeding.
 
 ## Boundaries
 
-- Do not claim placeholder rows are callable today.
+- Do not claim unsupported families are callable today.
 - Do not relax or omit `confirm_live=true` for concrete write helpers.
 - Do not normalize autonomous posting or unattended live-write loops.
 - Do not invent additional write helpers beyond the shipped documented set.

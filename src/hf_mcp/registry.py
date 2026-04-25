@@ -22,6 +22,10 @@ class ToolSpec:
     transport_kind: TransportKind
     parameter_families: tuple[str, ...]
 
+    @property
+    def name(self) -> str:
+        return self.tool_name
+
 
 @dataclass(frozen=True, slots=True)
 class _MatrixRow:
@@ -59,11 +63,10 @@ _EXPECTED_COVERAGE_FAMILIES = frozenset(
         "bytes.deposit",
         "bytes.withdraw",
         "bytes.bump",
-        "contracts.write",
-        "sigmarket.write",
-        "admin.high_risk.write",
     }
 )
+
+_PLACEHOLDER_ONLY_TOOLS: frozenset[str] = frozenset()
 
 _MATRIX_ROWS: tuple[_MatrixRow, ...] = (
     _MatrixRow(
@@ -256,33 +259,6 @@ _MATRIX_ROWS: tuple[_MatrixRow, ...] = (
         helper_path="bytes/bump",
         transport_kind="helper",
     ),
-    _MatrixRow(
-        tool_name="contracts.write",
-        coverage_family="contracts.write",
-        capability_family="contracts.write",
-        operation="write",
-        helper_path="contracts",
-        transport_kind="helper",
-        parameter_families=("selectors.contract", "writes.content", "confirm.live"),
-    ),
-    _MatrixRow(
-        tool_name="sigmarket.write",
-        coverage_family="sigmarket.write",
-        capability_family="sigmarket.write",
-        operation="write",
-        helper_path="sigmarket",
-        transport_kind="helper",
-        parameter_families=("selectors.sigmarket", "writes.content", "confirm.live"),
-    ),
-    _MatrixRow(
-        tool_name="admin.high_risk.write",
-        coverage_family="admin.high_risk.write",
-        capability_family="admin.high_risk.write",
-        operation="write",
-        helper_path="admin/high-risk/write",
-        transport_kind="helper",
-        parameter_families=("writes.content", "confirm.live"),
-    ),
 )
 
 
@@ -302,6 +278,10 @@ def _build_tool_spec(row: _MatrixRow) -> ToolSpec:
         transport_kind=row.transport_kind,
         parameter_families=_resolve_parameter_families(row),
     )
+
+
+def has_concrete_handler(tool_name: str) -> bool:
+    return tool_name not in _PLACEHOLDER_ONLY_TOOLS
 
 
 def mcp_tool_name(canonical_tool_name: str) -> str:
@@ -393,11 +373,12 @@ def get_documented_write_specs() -> tuple[ToolSpec, ...]:
         "bytes.deposit",
         "bytes.withdraw",
         "bytes.bump",
-        "contracts.write",
-        "sigmarket.write",
-        "admin.high_risk.write",
     }
-    return tuple(spec for spec in build_registry() if spec.coverage_family in write_families)
+    return tuple(
+        spec
+        for spec in build_registry()
+        if spec.coverage_family in write_families and has_concrete_handler(spec.tool_name)
+    )
 
 
 __all__ = [
@@ -407,6 +388,7 @@ __all__ = [
     "get_tool_spec",
     "get_core_read_specs",
     "get_extended_read_specs",
+    "has_concrete_handler",
     "get_local_formatting_specs",
     "mcp_tool_name",
 ]

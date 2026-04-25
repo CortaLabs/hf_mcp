@@ -13,11 +13,10 @@ if str(SRC_PATH) not in sys.path:
 
 from hf_mcp.capabilities import CapabilityPolicy
 from hf_mcp.config import HFMCPSettings
-from hf_mcp.registry import get_documented_write_specs, get_tool_spec
+from hf_mcp.registry import build_registry, get_documented_write_specs, get_tool_spec
 from hf_mcp.schemas import build_tool_schema
 from hf_mcp.formatting_engine import write_draft_artifact
 from hf_mcp.tools.write_documented import (
-    PENDING_LATER_LANE_WRITE_ROWS,
     build_write_handlers,
     bump_live,
     create_thread_live,
@@ -48,7 +47,7 @@ def _policy(*, enabled_capabilities: set[str], enabled_parameter_families: set[s
     )
 
 
-def test_write_specs_include_core_and_later_lane_rows() -> None:
+def test_write_specs_include_only_concrete_core_rows_for_absence_path() -> None:
     specs = get_documented_write_specs()
     assert {spec.tool_name for spec in specs} == {
         "threads.create",
@@ -57,10 +56,9 @@ def test_write_specs_include_core_and_later_lane_rows() -> None:
         "bytes.deposit",
         "bytes.withdraw",
         "bytes.bump",
-        "contracts.write",
-        "sigmarket.write",
-        "admin.high_risk.write",
     }
+    forbidden = {"contracts.write", "sigmarket.write", "admin.high_risk.write"}
+    assert forbidden.isdisjoint({spec.tool_name for spec in build_registry()})
 
 
 def test_build_write_handlers_registers_only_core_rows_allowed_by_policy() -> None:
@@ -144,17 +142,17 @@ def test_reply_and_bytes_write_helpers_shape_payloads_truthfully() -> None:
     transport = _CaptureTransport()
 
     reply_to_thread_live(transport=transport, tid=44, message="Hi", confirm_live=True)
-    send_live(transport=transport, target_uid=55, amount=100, confirm_live=True)
+    send_live(transport=transport, target_uid=55, amount=100, reason="tip", pid=99, confirm_live=True)
     deposit_live(transport=transport, amount=60, confirm_live=True)
     withdraw_live(transport=transport, amount=20, confirm_live=True)
     bump_live(transport=transport, tid=77, confirm_live=True)
 
     assert transport.calls == [
         {"asks": {"posts": {"_tid": 44, "_message": "Hi"}}, "helper": "posts"},
-        {"asks": {"bytes": {"_to_uid": 55, "_amount": 100}}, "helper": "bytes"},
-        {"asks": {"bytes": {"_amount": 60}}, "helper": "bytes/deposit"},
-        {"asks": {"bytes": {"_amount": 20}}, "helper": "bytes/withdraw"},
-        {"asks": {"bytes": {"_tid": 77}}, "helper": "bytes/bump"},
+        {"asks": {"bytes": {"_uid": 55, "_amount": 100, "_reason": "tip", "_pid": 99}}, "helper": "bytes"},
+        {"asks": {"bytes": {"_deposit": 60}}, "helper": "bytes/deposit"},
+        {"asks": {"bytes": {"_withdraw": 20}}, "helper": "bytes/withdraw"},
+        {"asks": {"bytes": {"_bump": 77}}, "helper": "bytes/bump"},
     ]
 
 
@@ -406,27 +404,6 @@ def test_write_preflight_allows_balanced_markdown_conversion_output() -> None:
     )
 
 
-def test_later_lane_write_rows_remain_explicitly_blocked_without_invented_calls() -> None:
-    assert set(PENDING_LATER_LANE_WRITE_ROWS) == {
-        "contracts.write",
-        "sigmarket.write",
-        "admin.high_risk.write",
-    }
-
-    for tool_name in PENDING_LATER_LANE_WRITE_ROWS:
-        spec = get_tool_spec(tool_name)
-        assert spec.operation == "write"
-        assert spec.transport_kind == "helper"
-        assert "confirm.live" in spec.parameter_families
-
-    policy = _policy(
-        enabled_capabilities={"contracts.write", "sigmarket.write", "admin.high_risk.write"},
-        enabled_parameter_families={"writes.content", "confirm.live", "selectors.contract", "selectors.sigmarket"},
-    )
-    handlers = build_write_handlers(policy, _CaptureTransport())
-    assert handlers == {}
-
-
 def test_schema_surface_kwargs_invoke_core_write_handlers_truthfully() -> None:
     policy = _policy(
         enabled_capabilities={
@@ -452,10 +429,10 @@ def test_schema_surface_kwargs_invoke_core_write_handlers_truthfully() -> None:
     assert transport.calls == [
         {"asks": {"threads": {"_fid": 101, "_subject": "Title", "_message": "Body"}}, "helper": "threads"},
         {"asks": {"posts": {"_tid": 202, "_message": "Reply"}}, "helper": "posts"},
-        {"asks": {"bytes": {"_to_uid": 303, "_amount": 4}}, "helper": "bytes"},
-        {"asks": {"bytes": {"_amount": 5}}, "helper": "bytes/deposit"},
-        {"asks": {"bytes": {"_amount": 6}}, "helper": "bytes/withdraw"},
-        {"asks": {"bytes": {"_tid": 707}}, "helper": "bytes/bump"},
+        {"asks": {"bytes": {"_uid": 303, "_amount": 4}}, "helper": "bytes"},
+        {"asks": {"bytes": {"_deposit": 5}}, "helper": "bytes/deposit"},
+        {"asks": {"bytes": {"_withdraw": 6}}, "helper": "bytes/withdraw"},
+        {"asks": {"bytes": {"_bump": 707}}, "helper": "bytes/bump"},
     ]
 
 
@@ -513,8 +490,8 @@ def test_handlers_accept_kwargs_generated_from_repaired_write_schemas() -> None:
     assert transport.calls == [
         {"asks": {"threads": {"_fid": 1001, "_subject": "T", "_message": "M"}}, "helper": "threads"},
         {"asks": {"posts": {"_tid": 1002, "_message": "R"}}, "helper": "posts"},
-        {"asks": {"bytes": {"_to_uid": 1003, "_amount": 10}}, "helper": "bytes"},
-        {"asks": {"bytes": {"_amount": 11}}, "helper": "bytes/deposit"},
-        {"asks": {"bytes": {"_amount": 12}}, "helper": "bytes/withdraw"},
-        {"asks": {"bytes": {"_tid": 1004}}, "helper": "bytes/bump"},
+        {"asks": {"bytes": {"_uid": 1003, "_amount": 10}}, "helper": "bytes"},
+        {"asks": {"bytes": {"_deposit": 11}}, "helper": "bytes/deposit"},
+        {"asks": {"bytes": {"_withdraw": 12}}, "helper": "bytes/withdraw"},
+        {"asks": {"bytes": {"_bump": 1004}}, "helper": "bytes/bump"},
     ]

@@ -79,6 +79,7 @@ Use this skill when work touches the Hack Forums API v2, including OAuth app set
 - Do not suggest putting `client_secret` or access tokens in front-end code, public repos, or shared logs.
 - Treat the docs at `https://apidocs.hackforums.net/` as current guidance for this repo, but note that they are unofficial and should be rechecked if behavior appears to drift.
 - For this project, do not normalize uncontrolled forum-posting automation. Live writes should stay gated and operator-controlled.
+- For this project, PM counters can be read through `me.read` when Advanced Info fields are available; direct PM content operations are unsupported.
 - Do not frame HF API quote sanitization as inherently broken; treat it as an expected safety boundary and design MCP copy/read behavior around it.
 
 ## References
