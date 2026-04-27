@@ -104,22 +104,31 @@ def test_forums_index_registers_without_transport_and_keeps_structured_content_p
 
 def test_forums_index_hf_flow_targets_forums_read_only_for_real_forums() -> None:
     handler = build_forum_index_handlers()["forums.index"]
-    result = handler()
-    flow = result["structuredContent"]["_hf_flow"]
+    flat_result = handler()
+    tree_result = handler(view="tree")
+    flow = flat_result["structuredContent"]["_hf_flow"]
+    tree_flow = tree_result["structuredContent"]["_hf_flow"]
 
     assert flow["version"] == 1
     assert flow["entry_tool"] == "forums.index"
     assert flow["breadcrumbs"] == ["forum_catalog", "forums.index"]
-    assert flow["entities"]["forum_ids"] == [48, 375]
+    assert 375 in flow["entities"]["forum_ids"]
+    assert 261 in flow["entities"]["forum_ids"]
     next_actions = flow["next_actions"]
     assert isinstance(next_actions, list)
     assert next_actions
     assert all(action["tool"] == "forums.read" for action in next_actions)
 
     action_fids = _extract_action_fids(next_actions)
-    assert action_fids == {48, 375}
-    assert 2 not in action_fids
-    assert 45 not in action_fids
+    assert 375 in action_fids
+    assert 261 in action_fids
+    assert 444 not in action_fids
+    assert 241 not in action_fids
+    assert 105 not in action_fids
+    assert 7 not in action_fids
+    assert 53 not in action_fids
+    assert tree_flow["entities"]["forum_ids"] == flow["entities"]["forum_ids"]
+    assert _extract_action_fids(tree_flow["next_actions"]) == action_fids
 
 
 def test_forums_index_raw_output_uses_local_catalog_resource_without_claiming_upstream_raw_payload() -> None:
@@ -144,10 +153,8 @@ def test_forums_index_include_inactive_controls_payload_and_actions() -> None:
 
     default_fids = {node["fid"] for node in default_result["structuredContent"]["nodes"]}
     include_inactive_fids = {node["fid"] for node in include_inactive_result["structuredContent"]["nodes"]}
-    assert 169 not in default_fids
-    assert 169 in include_inactive_fids
+    assert default_fids == include_inactive_fids
 
     default_action_fids = _extract_action_fids(default_result["structuredContent"]["_hf_flow"]["next_actions"])
     include_action_fids = _extract_action_fids(include_inactive_result["structuredContent"]["_hf_flow"]["next_actions"])
-    assert 169 not in default_action_fids
-    assert 169 in include_action_fids
+    assert default_action_fids == include_action_fids

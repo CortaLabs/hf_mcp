@@ -261,14 +261,18 @@ def _collect_entity_ids(
     if tool_name == "forums.index":
         nodes = normalized_payload.get("nodes")
         if isinstance(nodes, list):
-            for node in nodes:
+            def _walk_catalog_node(node: Mapping[str, Any]) -> None:
                 if not isinstance(node, Mapping):
-                    continue
-                if bool(node.get("is_category")):
-                    continue
+                    return
                 fid = _coerce_positive_id(node.get("fid"))
-                if fid is not None:
+                if fid is not None and not bool(node.get("is_category")):
                     forum_ids.add(fid)
+                for child_node in _iter_child_nodes(node):
+                    _walk_catalog_node(child_node)
+
+            for node in nodes:
+                if isinstance(node, Mapping):
+                    _walk_catalog_node(node)
 
     if tool_name == "forums.read":
         child_forum_ids = _collect_child_forum_ids(rows)

@@ -32,32 +32,49 @@ Request:
 Response text shown to the client:
 
 ```text
-forums.index loaded 3 forum(s) from local catalog.
-- fid=375, name=MCP Development
-- fid=4, name=General Discussion
-- fid=18, name=Coding
+forums.index loaded 41 node(s) in flat view (forums=36, categories=5, include_inactive=False).
 ```
 
 Structured sidecar (excerpt):
 
 ```json
 {
-  "forums_index": [
+  "nodes": [
     {
-      "fid": "375",
-      "name": "MCP Development",
-      "description": "Primary forum for API/MCP tooling threads"
+      "fid": 444,
+      "name": "Tech",
+      "active": true,
+      "is_category": true
+    },
+    {
+      "fid": 460,
+      "name": "Artificial Intelligence",
+      "active": true,
+      "is_category": false,
+      "parent_fid": 444,
+      "category_fid": 444
+    },
+    {
+      "fid": 375,
+      "name": "HF API",
+      "active": true,
+      "is_category": false,
+      "parent_fid": 151,
+      "category_fid": 444
     }
   ],
   "_hf_flow": {
     "entry_tool": "forums.index",
     "breadcrumbs": ["forum_catalog", "forums.index"],
     "next_actions": [
-      {"tool": "forums.read", "arguments": {"fid": 375}}
+      {"tool": "forums.read", "arguments": {"fid": 375}, "label": "Load forum 375"}
     ]
   }
 }
 ```
+
+For `view="tree"`, the same `_hf_flow.next_actions` are emitted from nested
+forum nodes, so category grouping does not break the next-tool handoff.
 
 ## Read output modes (`threads.read`)
 

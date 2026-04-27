@@ -52,8 +52,9 @@ def test_build_forum_index_payload_flat_and_tree_use_same_catalog() -> None:
 
     assert flat["view"] == "flat"
     assert tree["view"] == "tree"
-    assert len(flat["nodes"]) == 4
+    assert len(flat["nodes"]) == 41
     flat_fids = {node["fid"] for node in flat["nodes"]}
+    flat_names_by_fid = {node["fid"]: node["name"] for node in flat["nodes"]}
 
     tree_fids: set[int] = set()
 
@@ -64,13 +65,35 @@ def test_build_forum_index_payload_flat_and_tree_use_same_catalog() -> None:
 
     _collect(tree["nodes"])
     assert tree_fids == flat_fids
-    assert 169 not in tree_fids
+    assert flat_names_by_fid[444] == "Tech"
+    assert flat_names_by_fid[460] == "Artificial Intelligence"
+    assert flat_names_by_fid[375] == "HF API"
+    assert flat_names_by_fid[241] == "Money"
+    assert flat_names_by_fid[105] == "Marketplace"
+    assert flat_names_by_fid[167] == "Sports"
+    assert flat_names_by_fid[261] == "Pets and Animals"
+    assert 261 in tree_fids
 
 
-def test_build_forum_index_payload_include_inactive_true_retains_inactive_nodes() -> None:
+def test_build_forum_index_payload_include_inactive_true_retains_inactive_nodes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_catalog_payload(
+        monkeypatch,
+        {
+            "nodes": [
+                {"fid": 2, "name": "A", "is_category": True, "active": True},
+                {"fid": 3, "name": "B", "parent_fid": 2, "category_fid": 2, "active": False},
+            ]
+        },
+    )
+
+    default_payload = build_forum_index_payload(view="flat")
     payload = build_forum_index_payload(view="flat", include_inactive=True)
+    default_fids = {node["fid"] for node in default_payload["nodes"]}
     fids = {node["fid"] for node in payload["nodes"]}
-    assert 169 in fids
+    assert 3 not in default_fids
+    assert 3 in fids
 
 
 def test_load_forum_catalog_rejects_duplicate_fid(monkeypatch: pytest.MonkeyPatch) -> None:

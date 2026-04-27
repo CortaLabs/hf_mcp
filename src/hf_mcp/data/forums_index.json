@@ -1,38 +1,290 @@
 {
-  "catalog_version": "2026-04-25",
+  "catalog_version": "2026-04-27",
   "source": "hf-mcp curated package catalog",
+  "notes": [
+    "Maintained local root-discovery data for forums.index; this is not a live scrape."
+  ],
   "nodes": [
     {
-      "fid": 2,
+      "fid": 444,
+      "name": "Tech",
+      "is_category": true,
+      "active": true
+    },
+    {
+      "fid": 460,
+      "name": "Artificial Intelligence",
+      "parent_fid": 444,
+      "category_fid": 444,
+      "active": true
+    },
+    {
+      "fid": 431,
+      "name": "Artificial Intelligence Discussion",
+      "parent_fid": 460,
+      "category_fid": 444,
+      "active": true
+    },
+    {
+      "fid": 462,
+      "name": "AI Programming and Vibe Coding",
+      "parent_fid": 460,
+      "category_fid": 444,
+      "active": true
+    },
+    {
+      "fid": 464,
+      "name": "AI Tools, APIs & Platforms",
+      "parent_fid": 460,
+      "category_fid": 444,
+      "active": true
+    },
+    {
+      "fid": 461,
+      "name": "Prompt Engineering & Optimization",
+      "parent_fid": 460,
+      "category_fid": 444,
+      "active": true
+    },
+    {
+      "fid": 463,
+      "name": "AI for Marketing & Automation",
+      "parent_fid": 460,
+      "category_fid": 444,
+      "active": true
+    },
+    {
+      "fid": 465,
+      "name": "AI-Generated Art, Music & Video",
+      "parent_fid": 460,
+      "category_fid": 444,
+      "active": true
+    },
+    {
+      "fid": 151,
+      "name": "Coding",
+      "parent_fid": 444,
+      "category_fid": 444,
+      "active": true
+    },
+    {
+      "fid": 5,
+      "name": "Coders Lounge",
+      "parent_fid": 151,
+      "category_fid": 444,
+      "active": true
+    },
+    {
+      "fid": 117,
+      "name": "Mobile Development",
+      "parent_fid": 151,
+      "category_fid": 444,
+      "active": true
+    },
+    {
+      "fid": 375,
+      "name": "HF API",
+      "parent_fid": 151,
+      "category_fid": 444,
+      "active": true
+    },
+    {
+      "fid": 118,
+      "name": "Software Development",
+      "parent_fid": 151,
+      "category_fid": 444,
+      "active": true
+    },
+    {
+      "fid": 183,
+      "name": "Web Development",
+      "parent_fid": 151,
+      "category_fid": 444,
+      "active": true
+    },
+    {
+      "fid": 241,
+      "name": "Money",
+      "is_category": true,
+      "active": true
+    },
+    {
+      "fid": 380,
+      "name": "Cryptocurrency",
+      "parent_fid": 241,
+      "category_fid": 241,
+      "active": true
+    },
+    {
+      "fid": 155,
+      "name": "Member Contests",
+      "parent_fid": 241,
+      "category_fid": 241,
+      "active": true
+    },
+    {
+      "fid": 121,
+      "name": "Shopping Deals",
+      "parent_fid": 241,
+      "category_fid": 241,
+      "active": true
+    },
+    {
+      "fid": 281,
+      "name": "Markets, Finance, and Investing",
+      "parent_fid": 241,
+      "category_fid": 241,
+      "active": true
+    },
+    {
+      "fid": 105,
       "name": "Marketplace",
       "is_category": true,
       "active": true
     },
     {
-      "fid": 375,
-      "name": "Signature Sales",
-      "parent_fid": 2,
-      "category_fid": 2,
-      "active": true
-    },
-    {
-      "fid": 169,
-      "name": "Content Writing",
-      "parent_fid": 2,
-      "category_fid": 2,
-      "active": false
-    },
-    {
-      "fid": 45,
-      "name": "General",
+      "fid": 7,
+      "name": "General Topics",
       "is_category": true,
       "active": true
     },
     {
-      "fid": 48,
-      "name": "Introductions",
-      "parent_fid": 45,
-      "category_fid": 45,
+      "fid": 445,
+      "name": "World",
+      "parent_fid": 7,
+      "category_fid": 7,
+      "active": true
+    },
+    {
+      "fid": 25,
+      "name": "The Lounge",
+      "parent_fid": 445,
+      "category_fid": 7,
+      "active": true
+    },
+    {
+      "fid": 12,
+      "name": "Bragging Rights",
+      "parent_fid": 445,
+      "category_fid": 7,
+      "active": true
+    },
+    {
+      "fid": 89,
+      "name": "News and Happenings",
+      "parent_fid": 445,
+      "category_fid": 7,
+      "active": true
+    },
+    {
+      "fid": 260,
+      "name": "Education and Careers",
+      "parent_fid": 445,
+      "category_fid": 7,
+      "active": true
+    },
+    {
+      "fid": 446,
+      "name": "Entertainment",
+      "parent_fid": 7,
+      "category_fid": 7,
+      "active": true
+    },
+    {
+      "fid": 65,
+      "name": "Gaming",
+      "parent_fid": 446,
+      "category_fid": 7,
+      "active": true
+    },
+    {
+      "fid": 32,
+      "name": "Movies, TV, and Videos",
+      "parent_fid": 446,
+      "category_fid": 7,
+      "active": true
+    },
+    {
+      "fid": 167,
+      "name": "Sports",
+      "parent_fid": 446,
+      "category_fid": 7,
+      "active": true
+    },
+    {
+      "fid": 112,
+      "name": "Anime and Manga",
+      "parent_fid": 446,
+      "category_fid": 7,
+      "active": true
+    },
+    {
+      "fid": 37,
+      "name": "Music",
+      "parent_fid": 446,
+      "category_fid": 7,
+      "active": true
+    },
+    {
+      "fid": 385,
+      "name": "Cars, Bikes, and Motors",
+      "parent_fid": 446,
+      "category_fid": 7,
+      "active": true
+    },
+    {
+      "fid": 259,
+      "name": "Personal Life",
+      "parent_fid": 7,
+      "category_fid": 7,
+      "active": true
+    },
+    {
+      "fid": 262,
+      "name": "Health Wise",
+      "parent_fid": 259,
+      "category_fid": 7,
+      "active": true
+    },
+    {
+      "fid": 318,
+      "name": "Vices",
+      "parent_fid": 259,
+      "category_fid": 7,
+      "active": true
+    },
+    {
+      "fid": 261,
+      "name": "Pets and Animals",
+      "parent_fid": 259,
+      "category_fid": 7,
+      "active": true
+    },
+    {
+      "fid": 370,
+      "name": "Gambling",
+      "parent_fid": 259,
+      "category_fid": 7,
+      "active": true
+    },
+    {
+      "fid": 180,
+      "name": "Innuendo",
+      "parent_fid": 259,
+      "category_fid": 7,
+      "active": true
+    },
+    {
+      "fid": 354,
+      "name": "Food, Recipes, and Cooking",
+      "parent_fid": 259,
+      "category_fid": 7,
+      "active": true
+    },
+    {
+      "fid": 53,
+      "name": "Crews and Clans Private Forums",
+      "is_category": true,
       "active": true
     }
   ]

@@ -9,7 +9,7 @@ It is called [b]hf-mcp[/b], and the repo is here:
 
 [align=center][url=https://github.com/CortaLabs/hf_mcp]https://github.com/CortaLabs/hf_mcp[/url][/align]
 
-Current release line: [b]0.3.0[/b].
+Current release line: [b]0.3.1[/b].
 
 The short version: this lets an MCP-capable AI client talk to HF through structured API tools instead of scraping pages, guessing selectors, or trying to drive a browser like a confused intern.
 
