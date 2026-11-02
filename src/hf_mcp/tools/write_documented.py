@@ -132,7 +132,8 @@ def reply_to_thread_live(
             ),
         }
     }
-    response = transport.write(asks=asks, helper="posts")
+    # Use the canonical write endpoint once; never retry a remote mutation.
+    response = transport.write(asks=asks)
     return _attach_write_flow(
         tool_name="posts.reply",
         response=response,

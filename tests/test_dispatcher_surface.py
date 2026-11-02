@@ -57,17 +57,15 @@ class _StubTokenStore:
 
 
 class _StubReadTransport:
-    def read(self, *, asks: dict[str, Any], helper: str) -> dict[str, Any]:
-        del asks
-        if helper == "me":
+    def read(self, *, asks: dict[str, Any], helper: str | None = None) -> dict[str, Any]:
+        if helper is None and "me" in asks:
             return {"me": [{"uid": "5", "username": "forge"}]}
         if helper == "sigmarket/order":
             return {"sigmarket/order": [{"oid": "17", "uid": "5"}]}
         raise AssertionError(f"unexpected helper: {helper}")
 
-    def read_raw(self, *, asks: dict[str, Any], helper: str) -> dict[str, Any]:
-        del asks
-        if helper == "me":
+    def read_raw(self, *, asks: dict[str, Any], helper: str | None = None) -> dict[str, Any]:
+        if helper is None and "me" in asks:
             return {"me": [{"uid": "5", "username": "forge", "raw": True}]}
         if helper == "sigmarket/order":
             return {"sigmarket/order": [{"oid": "17", "uid": "5", "raw": True}]}
@@ -227,14 +225,12 @@ class _ProbeTokenStore:
         return TokenBundle(access_token="token", token_type="Bearer", scope=frozenset({"read"}))
 
 def _stub_read(*, asks, helper):
-    del asks
-    if helper != "me":
+    if helper is not None or "me" not in asks:
         raise RuntimeError(f"unexpected helper: {helper}")
     return {"me": [{"uid": "5", "username": "forge"}]}
 
 def _stub_read_raw(*, asks, helper):
-    del asks
-    if helper != "me":
+    if helper is not None or "me" not in asks:
         raise RuntimeError(f"unexpected helper: {helper}")
     return {"me": [{"uid": "5", "username": "forge", "raw": True}]}
 

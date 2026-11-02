@@ -15,6 +15,8 @@ from hf_mcp.capabilities import CapabilityPolicy
 from hf_mcp.config import HFMCPSettings
 from hf_mcp.registry import build_registry, get_documented_write_specs, get_tool_spec
 from hf_mcp.schemas import build_tool_schema
+from hf_mcp.token_store import TokenBundle
+from hf_mcp.transport import HFTransport
 from hf_mcp.formatting_engine import write_draft_artifact
 from hf_mcp.tools.write_documented import (
     build_write_handlers,
@@ -35,8 +37,9 @@ class _CaptureTransport:
 
     def write(self, *, asks: dict[str, Any], helper: str | None = None) -> dict[str, Any]:
         self.calls.append({"asks": asks, "helper": helper})
-        if helper is not None and helper in self._responses:
-            return dict(self._responses[helper])
+        response_key = helper or next(iter(asks))
+        if response_key in self._responses:
+            return dict(self._responses[response_key])
         return {"ok": True, "asks": asks, "helper": helper}
 
 
@@ -184,12 +187,40 @@ def test_reply_and_bytes_write_helpers_shape_payloads_truthfully() -> None:
     bump_live(transport=transport, tid=77, confirm_live=True)
 
     assert transport.calls == [
-        {"asks": {"posts": {"_tid": 44, "_message": "Hi"}}, "helper": "posts"},
+        {"asks": {"posts": {"_tid": 44, "_message": "Hi"}}, "helper": None},
         {"asks": {"bytes": {"_uid": 55, "_amount": 100, "_reason": "tip", "_pid": 99}}, "helper": "bytes"},
         {"asks": {"bytes": {"_deposit": 60}}, "helper": "bytes/deposit"},
         {"asks": {"bytes": {"_withdraw": 20}}, "helper": "bytes/withdraw"},
         {"asks": {"bytes": {"_bump": 77}}, "helper": "bytes/bump"},
     ]
+
+
+def test_reply_uses_single_generic_write_with_unchanged_asks(monkeypatch: pytest.MonkeyPatch) -> None:
+    class StubTokenStore:
+        def require_bundle(self) -> TokenBundle:
+            return TokenBundle(access_token="offline", token_type="Bearer", scope=frozenset())
+
+    calls: list[dict[str, Any]] = []
+
+    def fake_post(self: HFTransport, route: str, payload: dict[str, Any], headers: dict[str, str]) -> dict[str, Any]:
+        calls.append({"route": route, "payload": payload})
+        if route != "/write":
+            raise RuntimeError("HF helper route failed with HTTP 404")
+        return {"posts": {"pid": 9001, "tid": 44}}
+
+    monkeypatch.setattr(HFTransport, "_post_json", fake_post)
+    policy = _policy(
+        enabled_capabilities={"posts.reply"},
+        enabled_parameter_families={"selectors.thread", "writes.content", "confirm.live"},
+    )
+    handler = build_write_handlers(policy, HFTransport(StubTokenStore()))["posts.reply"]
+    with pytest.raises(PermissionError):
+        handler(tid=44, message="Offline reply", confirm_live=False)
+    assert calls == []
+    result = handler(tid=44, message="Offline reply", confirm_live=True)
+    assert calls == [{"route": "/write", "payload": {"asks": {"posts": {"_tid": 44, "_message": "Offline reply"}}}}]
+    assert result["posts"] == [{"pid": "9001", "tid": "44"}]
+    assert ("posts.read", (("tid", 44),)) in _flow_actions(result)
 
 
 def test_confirmed_stubbed_writes_attach_post_action_hf_flow_metadata() -> None:
@@ -277,7 +308,7 @@ def test_write_helpers_decode_html_entities_in_mycode_text() -> None:
                 "_message": '[code]{"posts":[{"pid":"62946370"}]}[/code]',
             }
         },
-        "helper": "posts",
+        "helper": None,
     }
 
 
@@ -325,7 +356,7 @@ def test_write_helpers_can_convert_markdown_messages_to_mycode() -> None:
                     "_message": "[quote]quoted[/quote]\n\n[code]{\"ok\":true}\n[/code]",
                 }
             },
-            "helper": "posts",
+            "helper": None,
         },
     ]
 
@@ -350,7 +381,7 @@ def test_reply_can_publish_cached_preflight_draft_by_id_without_resending_messag
                     "_message": "[b]Approved[/b]\n\n[list]\n[*] cached draft body\n[/list]",
                 }
             },
-            "helper": "posts",
+            "helper": None,
         }
     ]
 
@@ -515,7 +546,7 @@ def test_schema_surface_kwargs_invoke_core_write_handlers_truthfully() -> None:
 
     assert transport.calls == [
         {"asks": {"threads": {"_fid": 101, "_subject": "Title", "_message": "Body"}}, "helper": "threads"},
-        {"asks": {"posts": {"_tid": 202, "_message": "Reply"}}, "helper": "posts"},
+        {"asks": {"posts": {"_tid": 202, "_message": "Reply"}}, "helper": None},
         {"asks": {"bytes": {"_uid": 303, "_amount": 4}}, "helper": "bytes"},
         {"asks": {"bytes": {"_deposit": 5}}, "helper": "bytes/deposit"},
         {"asks": {"bytes": {"_withdraw": 6}}, "helper": "bytes/withdraw"},
@@ -576,7 +607,7 @@ def test_handlers_accept_kwargs_generated_from_repaired_write_schemas() -> None:
 
     assert transport.calls == [
         {"asks": {"threads": {"_fid": 1001, "_subject": "T", "_message": "M"}}, "helper": "threads"},
-        {"asks": {"posts": {"_tid": 1002, "_message": "R"}}, "helper": "posts"},
+        {"asks": {"posts": {"_tid": 1002, "_message": "R"}}, "helper": None},
         {"asks": {"bytes": {"_uid": 1003, "_amount": 10}}, "helper": "bytes"},
         {"asks": {"bytes": {"_deposit": 11}}, "helper": "bytes/deposit"},
         {"asks": {"bytes": {"_withdraw": 12}}, "helper": "bytes/withdraw"},
