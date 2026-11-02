@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.1
+
+- Require at least 100 Bytes for deposit and withdrawal schemas while preserving the 1-Byte transfer minimum.
+- Keep `hf.doctor` as a local catalog fact with a closed empty argument schema and neutral object output metadata; it is not a callable diagnostic tool.
+
 ## 0.4.0
 
 - Unify ToolSpec locality and parameter facts, derive hints and metadata, and add local `hf.doctor` catalog facts without exposing a callable diagnostic tool yet.
