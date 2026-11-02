@@ -6,6 +6,7 @@ import os
 import selectors
 import subprocess
 import sys
+import threading
 from pathlib import Path
 
 import pytest
@@ -76,6 +77,19 @@ def _assert_no_nested_hf_envelope_text(content: list[dict[str, object]]) -> None
             and isinstance(parsed.get("content"), list)
             and isinstance(parsed.get("structuredContent"), dict)
         ), "nested HF result envelope found in text content"
+
+
+def _start_child_stderr_drain(process: subprocess.Popen[bytes]) -> tuple[threading.Thread, list[bytes]]:
+    assert process.stderr is not None
+    lines: list[bytes] = []
+
+    def _drain() -> None:
+        while line := process.stderr.readline():
+            lines.append(line)
+
+    thread = threading.Thread(target=_drain, daemon=True)
+    thread.start()
+    return thread, lines
 
 # No config file, live token store, credentials or network client is consulted.
 SERVER = '''
@@ -379,6 +393,7 @@ def test_normal_stdio_read_surface_and_pagination_on_actual_wire(modern: bool) -
         cwd=PRODUCT_ROOT,
     ) as process:
         assert process.stdin is not None and process.stdout is not None
+        stderr_thread, stderr_lines = _start_child_stderr_drain(process)
         sequence = 0
 
         def send(method: str, params: dict, *, notification: bool = False) -> dict:
@@ -532,8 +547,9 @@ def test_normal_stdio_read_surface_and_pagination_on_actual_wire(modern: bool) -
             except subprocess.TimeoutExpired:
                 process.terminate()
                 process.wait(timeout=5)
-        assert process.stderr is not None
-        stderr = process.stderr.read().decode("utf-8", errors="replace")
+            stderr_thread.join(timeout=5)
+        assert not stderr_thread.is_alive()
+        stderr = b"".join(stderr_lines).decode("utf-8", errors="replace")
         assert "Traceback" not in stderr
         assert "UNTRUSTED-MESSAGE-DO-NOT-ECHO" not in stderr
 
@@ -590,6 +606,7 @@ def test_write_and_composition_schema_matrix_on_actual_stdio(
         cwd=PRODUCT_ROOT,
     ) as process:
         assert process.stdin is not None and process.stdout is not None
+        stderr_thread, stderr_lines = _start_child_stderr_drain(process)
         sequence = 0
 
         def send(method: str, params: dict) -> dict:
@@ -827,7 +844,9 @@ def test_write_and_composition_schema_matrix_on_actual_stdio(
             except subprocess.TimeoutExpired:
                 process.terminate()
                 process.wait(timeout=5)
+            stderr_thread.join(timeout=5)
+        assert not stderr_thread.is_alive()
         assert process.stderr is not None
-        stderr = process.stderr.read().decode("utf-8", errors="replace")
+        stderr = b"".join(stderr_lines).decode("utf-8", errors="replace")
         assert "Traceback" not in stderr
         assert "UNTRUSTED-MESSAGE-DO-NOT-ECHO" not in stderr

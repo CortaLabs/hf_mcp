@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "hf-mcp"
-version = "0.4.2"
+version = "0.4.6"
 description = "Standalone Hack Forums MCP launch surface"
 keywords = ["hackforums", "mcp", "model-context-protocol"]
 classifiers = [
@@ -21,6 +21,22 @@ license = "MIT"
 license-files = ["LICENSE"]
 requires-python = ">=3.11"
 dependencies = ["PyYAML>=6.0", "jsonschema>=4.20.0", "referencing>=0.30.0", "mcp>=2.3.0,<3"]
+
+[project.optional-dependencies]
+dev = [
+  "build==1.4.0",
+  "jsonschema==4.26.0",
+  "mypy==2.4.1",
+  "packaging==26.3",
+  "pytest==9.2.0",
+  "pytest-randomly==4.1.0",
+  "pytest-socket==0.8.0",
+  "pytest-xdist==3.8.0",
+  "ruff==0.15.22",
+  "setuptools==84.2.1",
+  "twine==7.0.0",
+  "wheel==0.48.0",
+]
 
 [project.scripts]
 hf-mcp = "hf_mcp.cli:main"
@@ -43,7 +59,16 @@ hf_mcp = ["data/*.json"]
 "skills/hf-mcp-writes" = ["skills/hf-mcp-writes/SKILL.md"]
 "skills/hf-mycode" = ["skills/hf-mycode/SKILL.md"]
 
+[tool.ruff]
+target-version = "py311"
+src = ["src"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["hf_mcp"]
+
 [tool.pytest.ini_options]
+addopts = "--disable-socket --allow-unix-socket"
+strict_markers = true
 markers = [
   "core: fast hermetic default-lane tests",
   "regression: permanent behavior regression tests",
