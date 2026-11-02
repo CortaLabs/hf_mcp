@@ -45,9 +45,9 @@ hf_mcp = ["data/*.json"]
 
 [tool.pytest.ini_options]
 markers = [
-  "core: fast hermetic default-lane coverage",
-  "regression: permanent behavior regression guard",
-  "formatting: formatting and local draft tool coverage",
-  "registry: canonical tool registry and metadata coverage",
-  "build: package build and release metadata coverage",
+  "core: fast hermetic default-lane tests",
+  "regression: permanent behavior regression tests",
+  "formatting: formatting and local draft tool tests",
+  "registry: canonical tool registry and metadata tests",
+  "build: package build and export-boundary tests",
 ]

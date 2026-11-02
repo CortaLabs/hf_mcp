@@ -4,6 +4,11 @@
 
 - Unify ToolSpec locality and parameter facts, derive hints and metadata, and add local `hf.doctor` catalog facts without exposing a callable diagnostic tool yet.
 
+## 0.3.5
+
+- Restrict the PyPI publisher workflow to explicit manual dispatches.
+- Make export-boundary checks resolve from a standalone product checkout while preserving the manifest's product-prefixed allowlist.
+
 ## 0.3.4
 
 - Route `me.read`, `users.read`, and `bratings.read` through generic `POST /api/v2/read` instead of helper URLs returning HTTP 404, including raw output mode.

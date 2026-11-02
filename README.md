@@ -4,6 +4,9 @@
 
 Current release line: `0.4.0`.
 
+The PyPI publisher workflow runs only on an explicit manual dispatch. Export
+boundary checks also resolve files from a standalone `hf-mcp` product checkout.
+
 Version 0.4.0 records canonical tool facts and derives locality metadata and
 behavior hints from the registry. It adds `hf.doctor` as a local catalog fact;
 this does not expose a callable diagnostic tool.

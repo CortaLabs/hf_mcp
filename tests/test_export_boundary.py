@@ -3,13 +3,21 @@ from __future__ import annotations
 from pathlib import Path
 import tomllib
 
+import pytest
+import yaml
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
-EXPORT_MANIFEST_PATH = REPO_ROOT / "products/hf_mcp/export_manifest.toml"
-SDIST_MANIFEST_PATH = REPO_ROOT / "products/hf_mcp/MANIFEST.in"
-PYPROJECT_PATH = REPO_ROOT / "products/hf_mcp/pyproject.toml"
-CONFIGURATION_DOC_PATH = REPO_ROOT / "products/hf_mcp/docs/configuration.md"
-EXPORT_BOUNDARY_DOC_PATH = REPO_ROOT / "products/hf_mcp/docs/export_boundary.md"
+
+def _product_root(test_file: Path) -> Path:
+    return test_file.resolve().parents[1]
+
+
+PRODUCT_ROOT = _product_root(Path(__file__))
+EXPORT_MANIFEST_PATH = PRODUCT_ROOT / "export_manifest.toml"
+SDIST_MANIFEST_PATH = PRODUCT_ROOT / "MANIFEST.in"
+PYPROJECT_PATH = PRODUCT_ROOT / "pyproject.toml"
+CONFIGURATION_DOC_PATH = PRODUCT_ROOT / "docs/configuration.md"
+EXPORT_BOUNDARY_DOC_PATH = PRODUCT_ROOT / "docs/export_boundary.md"
+PUBLISH_WORKFLOW_PATH = PRODUCT_ROOT / ".github/workflows/publish-hf-mcp-pypi.yml"
 ALLOWED_PREFIX = "products/hf_mcp/"
 YAML_EXAMPLE = "products/hf_mcp/config.example.yaml"
 TOML_EXAMPLE = "products/hf_mcp/config.example.toml"
@@ -37,6 +45,13 @@ def _validate_allowlist(entries: list[str]) -> None:
         assert ".." not in entry, f"Allowlist entry contains parent traversal: {entry}"
 
 
+def _allowlist_product_path(entry: str) -> Path:
+    assert entry.startswith(ALLOWED_PREFIX), f"Allowlist entry escapes product subtree: {entry}"
+    return PRODUCT_ROOT / entry.removeprefix(ALLOWED_PREFIX)
+
+
+@pytest.mark.core
+@pytest.mark.build
 def test_export_manifest_is_product_subtree_only() -> None:
     manifest = tomllib.loads(EXPORT_MANIFEST_PATH.read_text(encoding="utf-8"))
     allowlist = manifest["allowlist"]
@@ -50,11 +65,48 @@ def test_export_manifest_is_product_subtree_only() -> None:
     assert TOML_EXAMPLE not in allowlist
 
 
+@pytest.mark.core
+@pytest.mark.build
 def test_public_runtime_example_is_yaml_only() -> None:
-    assert (REPO_ROOT / YAML_EXAMPLE).exists()
-    assert not (REPO_ROOT / TOML_EXAMPLE).exists()
+    assert _allowlist_product_path(YAML_EXAMPLE).exists()
+    assert not _allowlist_product_path(TOML_EXAMPLE).exists()
 
 
+@pytest.mark.core
+@pytest.mark.build
+@pytest.mark.regression
+def test_export_root_resolves_from_standalone_product_checkout(tmp_path: Path) -> None:
+    product_root = tmp_path / "standalone-hf-mcp"
+    tests_dir = product_root / "tests"
+    tests_dir.mkdir(parents=True)
+    test_file = tests_dir / "test_export_boundary.py"
+    test_file.touch()
+
+    assert _product_root(test_file) == product_root
+
+
+@pytest.mark.core
+@pytest.mark.build
+@pytest.mark.regression
+def test_publisher_trigger_containment() -> None:
+    workflow = yaml.load(PUBLISH_WORKFLOW_PATH.read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
+    triggers = workflow["on"]
+    event_cases = (
+        ("source push", "push", False),
+        ("docs push", "push", False),
+        ("ordinary branch push", "push", False),
+        ("tag push", "push", False),
+        ("fork pull request", "pull_request", False),
+        ("manual workflow dispatch", "workflow_dispatch", True),
+    )
+
+    assert set(triggers) == {"workflow_dispatch"}
+    for description, event_name, expected_match in event_cases:
+        assert (event_name in triggers) is expected_match, description
+
+
+@pytest.mark.core
+@pytest.mark.build
 def test_docs_define_yaml_env_and_token_path_responsibilities() -> None:
     configuration_doc = CONFIGURATION_DOC_PATH.read_text(encoding="utf-8")
     export_boundary_doc = EXPORT_BOUNDARY_DOC_PATH.read_text(encoding="utf-8")
@@ -70,9 +122,11 @@ def test_docs_define_yaml_env_and_token_path_responsibilities() -> None:
     assert "Token-store location must be an absolute path outside the tracked repository" in export_boundary_doc
 
 
+@pytest.mark.core
+@pytest.mark.build
 def test_live_write_boundary_language_is_published_in_docs_and_config() -> None:
     export_boundary_doc = EXPORT_BOUNDARY_DOC_PATH.read_text(encoding="utf-8")
-    config_yaml = (REPO_ROOT / YAML_EXAMPLE).read_text(encoding="utf-8")
+    config_yaml = _allowlist_product_path(YAML_EXAMPLE).read_text(encoding="utf-8")
 
     required_boundary_markers = [
         "posts.reply",
@@ -90,6 +144,8 @@ def test_live_write_boundary_language_is_published_in_docs_and_config() -> None:
     assert "placeholder writes remain out of scope in this wave" in config_yaml
 
 
+@pytest.mark.core
+@pytest.mark.build
 def test_export_manifest_rejects_root_level_assets() -> None:
     bad_allowlist = [
         "products/hf_mcp/README.md",
@@ -103,6 +159,8 @@ def test_export_manifest_rejects_root_level_assets() -> None:
     raise AssertionError("Expected root-level asset to fail export boundary validation")
 
 
+@pytest.mark.core
+@pytest.mark.build
 def test_pyproject_release_contract_and_metadata_boundary() -> None:
     pyproject = tomllib.loads(PYPROJECT_PATH.read_text(encoding="utf-8"))
     project = pyproject["project"]
@@ -119,6 +177,8 @@ def test_pyproject_release_contract_and_metadata_boundary() -> None:
         assert forbidden not in pyproject_text, f"Forbidden reference in pyproject metadata: {forbidden}"
 
 
+@pytest.mark.core
+@pytest.mark.build
 def test_sdist_manifest_is_explicit_and_package_local() -> None:
     manifest_text = SDIST_MANIFEST_PATH.read_text(encoding="utf-8")
     lines = [line.strip() for line in manifest_text.splitlines() if line.strip() and not line.strip().startswith("#")]
