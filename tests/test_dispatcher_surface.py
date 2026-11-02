@@ -20,7 +20,7 @@ from hf_mcp.config import HFMCPSettings, PRESET_CAPABILITIES, PRESET_PARAMETER_F
 from hf_mcp.dispatcher import RuntimeBundle, register_tools
 from hf_mcp.metadata import get_tool_specs
 from hf_mcp.registry import get_documented_write_specs, mcp_tool_name
-from hf_mcp.server import _FastMCPToolAdapter
+from hf_mcp.server import _MCPServerToolAdapter
 from hf_mcp.server import create_server, serve_stdio
 from hf_mcp.token_store import TokenBundle
 from hf_mcp.tools.read_core import build_core_read_handlers
@@ -180,7 +180,7 @@ def test_fastmcp_adapter_converts_hf_envelope_dict_to_protocol_call_tool_result(
     }
 
     fake_app = _FakeApp()
-    adapter = _FastMCPToolAdapter(fake_app)
+    adapter = _MCPServerToolAdapter(fake_app)
     adapter.register_tool(
         name="me.read",
         description="Read me",
@@ -199,9 +199,9 @@ def test_fastmcp_adapter_converts_hf_envelope_dict_to_protocol_call_tool_result(
     assert fake_app._handler is not None
     normalized = fake_app._handler()
     assert isinstance(normalized, mcp_types.CallToolResult)
-    assert normalized.structuredContent["me"] == [{"uid": "5"}]
-    assert normalized.structuredContent["_hf_flow"]["version"] == 1
-    assert isinstance(normalized.structuredContent["_hf_flow"]["next_actions"], list)
+    assert normalized.structured_content["me"] == [{"uid": "5"}]
+    assert normalized.structured_content["_hf_flow"]["version"] == 1
+    assert isinstance(normalized.structured_content["_hf_flow"]["next_actions"], list)
     assert len(normalized.content) == 2
     assert isinstance(normalized.content[0], mcp_types.TextContent)
     assert isinstance(normalized.content[1], mcp_types.EmbeddedResource)
@@ -217,10 +217,10 @@ import sys
 from hf_mcp.capabilities import CapabilityPolicy
 from hf_mcp.config import HFMCPSettings
 from hf_mcp.dispatcher import RuntimeBundle, register_tools
-from hf_mcp.server import _FastMCPToolAdapter
+from hf_mcp.server import _MCPServerToolAdapter
 from hf_mcp.token_store import TokenBundle
 from hf_mcp.transport import HFTransport
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 class _ProbeTokenStore:
     def require_bundle(self):
@@ -248,8 +248,8 @@ settings = HFMCPSettings(
     enabled_parameter_families=frozenset({"fields.me.basic", "selectors.user"}),
 )
 policy = CapabilityPolicy(settings)
-app = FastMCP(name="hf-mcp-probe")
-adapter = _FastMCPToolAdapter(app)
+app = MCPServer(name="hf-mcp-probe")
+adapter = _MCPServerToolAdapter(app)
 register_tools(adapter, policy, RuntimeBundle(transport=transport))
 app.run(transport="stdio")
 """
@@ -272,8 +272,8 @@ app.run(transport="stdio")
                     "me_read",
                     {"output_mode": "raw", "include_raw_payload": True},
                 )
-        assert result.structuredContent is not None
-        assert result.structuredContent["me"][0]["uid"] == "5"
+        assert result.structured_content is not None
+        assert result.structured_content["me"][0]["uid"] == "5"
         assert any(getattr(item, "type", None) == "resource" for item in result.content)
         _assert_rejects_nested_envelope_json_text(result)
 
@@ -288,10 +288,10 @@ def test_runtime_stdio_tool_list_has_unique_input_schema_titles_for_extended_rea
 from hf_mcp.capabilities import CapabilityPolicy
 from hf_mcp.config import HFMCPSettings, PRESET_PARAMETER_FAMILIES
 from hf_mcp.dispatcher import RuntimeBundle, register_tools
-from hf_mcp.server import _FastMCPToolAdapter
+from hf_mcp.server import _MCPServerToolAdapter
 from hf_mcp.token_store import TokenBundle
 from hf_mcp.transport import HFTransport
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 class _ProbeTokenStore:
     def require_bundle(self):
@@ -312,8 +312,8 @@ settings = HFMCPSettings(
     enabled_parameter_families=PRESET_PARAMETER_FAMILIES["full_api"],
 )
 policy = CapabilityPolicy(settings)
-app = FastMCP(name="hf-mcp-probe")
-adapter = _FastMCPToolAdapter(app)
+app = MCPServer(name="hf-mcp-probe")
+adapter = _MCPServerToolAdapter(app)
 register_tools(adapter, policy, RuntimeBundle(transport=transport))
 app.run(transport="stdio")
 """
@@ -335,7 +335,7 @@ app.run(transport="stdio")
                 result = await session.list_tools()
 
         titles = {
-            tool.name: (tool.inputSchema or {}).get("title")
+            tool.name: (tool.input_schema or {}).get("title")
             for tool in result.tools
         }
         assert titles["bytes_read"] == "bytes_read_handlerArguments"
@@ -1068,7 +1068,7 @@ def test_serve_stdio_publishes_dispatcher_contract_for_live_runtime(
             self.run_calls.append(transport)
 
     monkeypatch.setattr("hf_mcp.server.resolve_runtime_bundle", lambda _: _runtime_bundle())
-    monkeypatch.setattr("hf_mcp.server._load_fastmcp_class", lambda: _FakeFastMCP)
+    monkeypatch.setattr("hf_mcp.server._load_mcpserver_class", lambda: _FakeFastMCP)
 
     expected_server = create_server(settings)
     serve_stdio(settings)
@@ -1103,8 +1103,9 @@ def test_serve_stdio_publishes_dispatcher_contract_for_live_runtime(
 
         published_annotations = published["annotations"]
         if hasattr(published_annotations, "model_dump"):
-            published_annotations = published_annotations.model_dump(exclude_none=True)
-        assert published_annotations == expected_tool.annotations
+            published_annotations = published_annotations.model_dump(by_alias=True, exclude_none=True)
+        assert published_annotations == {key: value for key, value in expected_tool.annotations.items() if key != "_meta"}
+        assert published["meta"] == expected_tool.annotations.get("_meta")
         assert published["output_schema"] == expected_tool.output_schema
 
     assert mcp_tool_name("contracts.write") not in app.registered_tools
@@ -1247,7 +1248,7 @@ def test_serve_stdio_runs_stdio_runtime_once_without_restart_loop(
             run_calls.append(transport)
 
     monkeypatch.setattr("hf_mcp.server.resolve_runtime_bundle", lambda _: _runtime_bundle())
-    monkeypatch.setattr("hf_mcp.server._load_fastmcp_class", lambda: _FakeFastMCP)
+    monkeypatch.setattr("hf_mcp.server._load_mcpserver_class", lambda: _FakeFastMCP)
 
     serve_stdio(settings)
 
@@ -1290,7 +1291,7 @@ def test_serve_stdio_does_not_retry_when_stdio_is_closed(
             raise ValueError("I/O operation on closed file")
 
     monkeypatch.setattr("hf_mcp.server.resolve_runtime_bundle", lambda _: _runtime_bundle())
-    monkeypatch.setattr("hf_mcp.server._load_fastmcp_class", lambda: _FakeFastMCP)
+    monkeypatch.setattr("hf_mcp.server._load_mcpserver_class", lambda: _FakeFastMCP)
 
     with pytest.raises(ValueError, match="closed file"):
         serve_stdio(settings)
