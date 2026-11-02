@@ -120,9 +120,12 @@ def _assert_not_placeholder_handler(handler: Any) -> None:
 
 @pytest.mark.core
 @pytest.mark.registry
-def test_sdk_adapter_uses_defensive_original_schema_before_argument_coercion() -> None:
+def test_sdk_adapter_uses_defensive_original_schema_before_argument_coercion(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from mcp.server.mcpserver import MCPServer
     from pydantic import ValidationError
+    import jsonschema
 
     schema: dict[str, Any] = {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -130,8 +133,10 @@ def test_sdk_adapter_uses_defensive_original_schema_before_argument_coercion() -
         "type": "object",
         "$defs": {"choice": {"type": "string", "enum": ["allowed", "blocked"]}},
         "properties": {
+            "selector_a": {"type": "string", "default": "A"},
+            "selector_b": {"type": "string", "default": "B"},
             "choice": {"$ref": "#/$defs/choice"},
-            "count": {"type": "integer", "minimum": 1, "maximum": 3},
+            "count": {"type": "integer"},
             "items": {
                 "type": "array",
                 "items": {
@@ -141,6 +146,14 @@ def test_sdk_adapter_uses_defensive_original_schema_before_argument_coercion() -
                     "additionalProperties": False,
                 },
             },
+            "details": {
+                "type": "object",
+                "properties": {"label": {"type": "string", "minLength": 1}},
+                "required": ["label"],
+                "additionalProperties": False,
+            },
+            "array_numbers": {"type": "array", "items": {"type": "integer", "minimum": 1}},
+            "text": {"type": "string", "minLength": 1},
             "flag": {"type": "boolean"},
             "mode": {"type": "string"},
             "nullable": {"type": ["string", "null"]},
@@ -148,14 +161,14 @@ def test_sdk_adapter_uses_defensive_original_schema_before_argument_coercion() -
             "defaulted": {"type": "array", "items": {"type": "string"}, "default": ["safe"]},
             "confirmed": {"type": "boolean", "const": True},
         },
-        "required": ["confirmed"],
+        "required": ["confirmed", "count", "items", "details", "array_numbers", "text"],
         "additionalProperties": False,
-        "anyOf": [{"required": ["choice"]}, {"required": ["count"]}],
+        "anyOf": [{"required": ["selector_a"]}, {"required": ["selector_b"]}],
         "oneOf": [
             {"required": ["flag"]},
             {"required": ["flag", "mode"], "properties": {"mode": {"const": "x"}}},
         ],
-        "allOf": [{"properties": {"count": {"minimum": 1}}}],
+        "allOf": [{"properties": {"count": {"minimum": 1, "maximum": 3}}}],
         "not": {"properties": {"choice": {"const": "blocked"}}, "required": ["choice"]},
         "x-hf-probe": {"complete": True},
     }
@@ -163,10 +176,15 @@ def test_sdk_adapter_uses_defensive_original_schema_before_argument_coercion() -
 
     def handler(
         *,
+        selector_a: str,
+        selector_b: str,
         choice: str | None = None,
-        count: int | None = None,
-        items: list[dict[str, str]] | None = None,
-        flag: bool | None = None,
+        count: int,
+        items: list[dict[str, str]],
+        details: dict[str, str],
+        array_numbers: list[int],
+        text: str,
+        flag: bool,
         mode: str | None = None,
         nullable: str | None = None,
         timestamp: str | None = None,
@@ -174,9 +192,14 @@ def test_sdk_adapter_uses_defensive_original_schema_before_argument_coercion() -
         confirmed: bool,
     ) -> dict[str, Any]:
         result = {
+            "selector_a": selector_a,
+            "selector_b": selector_b,
             "choice": choice,
             "count": count,
             "items": items,
+            "details": details,
+            "array_numbers": array_numbers,
+            "text": text,
             "flag": flag,
             "mode": mode,
             "nullable": nullable,
@@ -187,6 +210,17 @@ def test_sdk_adapter_uses_defensive_original_schema_before_argument_coercion() -
         calls.append(result)
         return result
 
+    compiled_tool_schemas = 0
+    draft_validator = jsonschema.Draft202012Validator
+
+    def _count_validator_construction(schema_to_compile: Any, *args: Any, **kwargs: Any) -> Any:
+        nonlocal compiled_tool_schemas
+        if isinstance(schema_to_compile, dict) and schema_to_compile.get("title") == "Caller-owned title":
+            compiled_tool_schemas += 1
+        return draft_validator(schema_to_compile, *args, **kwargs)
+
+    _count_validator_construction.check_schema = draft_validator.check_schema
+    monkeypatch.setattr(jsonschema, "Draft202012Validator", _count_validator_construction)
     app = MCPServer(name="hf-mcp-adapter-probe")
     adapter = _MCPServerToolAdapter(app)
     adapter.register_tool(
@@ -197,6 +231,7 @@ def test_sdk_adapter_uses_defensive_original_schema_before_argument_coercion() -
         handler=handler,
     )
     schema["$defs"]["choice"]["enum"] = ["caller-mutated"]
+    schema["properties"]["selector_a"]["default"] = "caller-mutated"
     schema["properties"]["defaulted"]["default"].append("caller-mutated")
     schema["x-hf-probe"]["complete"] = False
 
@@ -205,63 +240,95 @@ def test_sdk_adapter_uses_defensive_original_schema_before_argument_coercion() -
     published_schema = tool.parameters
     assert published_schema["title"] == "Caller-owned title"
     assert published_schema["$defs"]["choice"]["enum"] == ["allowed", "blocked"]
+    assert published_schema["properties"]["selector_a"]["default"] == "A"
     assert published_schema["x-hf-probe"] == {"complete": True}
     assert published_schema["properties"]["timestamp"]["format"] == "date-time"
     validator = tool.fn_metadata._input_validator
     assert validator is not None
 
-    arguments = {
+    valid_arguments = {
+        "selector_a": "explicit-a",
+        "selector_b": "explicit-b",
         "choice": "allowed",
         "count": 1,
         "items": [{"code": "valid"}],
+        "details": {"label": "valid"},
+        "array_numbers": [1],
+        "text": "valid",
         "flag": True,
         "nullable": None,
         "timestamp": "not-validated-as-a-date-time-annotation",
         "confirmed": True,
     }
-    validated = tool.fn_metadata.validate_arguments(arguments)
-    assert validated == {**arguments, "defaulted": ["safe"]}
+    validated = tool.fn_metadata.validate_arguments(valid_arguments)
+    assert validated == {**valid_arguments, "defaulted": ["safe"]}
     assert type(validated["count"]) is int
+    assert compiled_tool_schemas == 1
     assert tool.fn_metadata._input_validator is validator
 
-    invalid_arguments = (
-        {},
-        {"choice": "blocked"},
-        {"choice": "allowed", "count": True},
-        {"choice": "allowed", "count": "1"},
-        {"choice": "allowed", "count": 1.5},
-        {"choice": "allowed", "count": 1, "items": [{"code": "UPPER"}]},
-        {"choice": "allowed", "count": 1, "items": [{"code": "ok", "extra": 1}]},
-        {"choice": "allowed", "count": 1, "unknown": "secret-value"},
-        {"choice": "allowed", "flag": True, "mode": "x"},
-        {"choice": "allowed", "flag": True, "confirmed": False},
-        {"choice": "allowed", "flag": True, "confirmed": 1},
-        {"choice": "allowed", "flag": True, "confirmed": "true"},
-        {"choice": "allowed", "flag": True},
-        {"choice": None},
+    without_selector_a = {**valid_arguments}
+    without_selector_a.pop("selector_a")
+    defaulted_selector = tool.fn_metadata.validate_arguments(without_selector_a)
+    assert defaulted_selector["selector_a"] == "A"
+    without_selectors = {
+        key: value
+        for key, value in valid_arguments.items()
+        if key not in {"selector_a", "selector_b"}
+    }
+    invalid_cases = (
+        ("boolean is not an integer", {**valid_arguments, "count": True}, "type", "$.count"),
+        ("numeric strings are not integers", {**valid_arguments, "count": "1"}, "type", "$.count"),
+        ("fractional integers reject", {**valid_arguments, "count": 1.5}, "type", "$.count"),
+        ("allOf minimum", {**valid_arguments, "count": 0}, "minimum", "$.count"),
+        ("allOf maximum", {**valid_arguments, "count": 4}, "maximum", "$.count"),
+        ("enum rejects", {**valid_arguments, "choice": "unlisted-choice"}, "enum", "$.choice"),
+        ("not rejects", {**valid_arguments, "choice": "blocked"}, "not", "$"),
+        ("oneOf rejects double match", {**valid_arguments, "mode": "x"}, "oneOf", "$"),
+        ("nested pattern", {**valid_arguments, "items": [{"code": "UPPER"}]}, "pattern", "$.items[0].code"),
+        ("nested closed object", {**valid_arguments, "items": [{"code": "valid", "extra": 1}]}, "additionalProperties", "$.items[0]"),
+        ("encoded object string", {**valid_arguments, "details": "{}"}, "type", "$.details"),
+        ("encoded array string", {**valid_arguments, "array_numbers": "[1]"}, "type", "$.array_numbers"),
+        ("array item bool", {**valid_arguments, "array_numbers": [True]}, "type", "$.array_numbers[0]"),
+        ("nonnullable null", {**valid_arguments, "text": None}, "type", "$.text"),
+        ("additional root property", {**valid_arguments, "unknown": "secret-value"}, "additionalProperties", "$"),
+        ("const false", {**valid_arguments, "confirmed": False}, "const", "$.confirmed"),
+        ("const numeric", {**valid_arguments, "confirmed": 1}, "type", "$.confirmed"),
+        ("const string", {**valid_arguments, "confirmed": "true"}, "type", "$.confirmed"),
+        ("missing required confirmation", {key: value for key, value in valid_arguments.items() if key != "confirmed"}, "required", "$"),
+        ("selector defaults cannot satisfy anyOf", without_selectors, "anyOf", "$"),
     )
-    for invalid in invalid_arguments:
-        with pytest.raises(ValidationError):
+    for case_name, invalid, constraint, path in invalid_cases:
+        with pytest.raises(ValidationError) as error:
             tool.fn_metadata.validate_arguments(invalid)
+        error_text = str(error.value)
+        assert constraint in error_text, case_name
+        assert path in error_text, case_name
+        assert "secret-value" not in error_text
     with pytest.raises(ValidationError):
         tool.fn_metadata.validate_arguments(["must-be-an-object"])
-
-    with pytest.raises(ValidationError) as error:
-        tool.fn_metadata.validate_arguments({"choice": "allowed", "unknown": "secret-value"})
-    assert "secret-value" not in str(error.value)
-    assert "additionalProperties" in str(error.value)
+    assert compiled_tool_schemas == 1
     assert calls == []
 
-    async def invoke() -> Any:
-        return await tool.fn_metadata.call_fn(tool.fn, tool.is_async, validated)
+    async def invoke(arguments_to_call: dict[str, Any]) -> Any:
+        raw_validated = tool.fn_metadata.validate_arguments(arguments_to_call)
+        return await tool.fn_metadata.call_fn(tool.fn, tool.is_async, raw_validated)
 
-    result = anyio.run(invoke)
+    result = anyio.run(invoke, without_selector_a)
     assert result["count"] == 1
+    assert result["selector_a"] == "A"
     assert result["nullable"] is None
     assert result["timestamp"] == "not-validated-as-a-date-time-annotation"
     assert result["defaulted"] == ["safe"]
     assert result["confirmed"] is True
-    assert calls == [result]
+    result["defaulted"].append("call-mutated")
+    repeat_validation = tool.fn_metadata.validate_arguments(without_selector_a)
+    assert repeat_validation["defaulted"] == ["safe"]
+
+    float_result = anyio.run(invoke, {**valid_arguments, "count": 1.0})
+    assert type(float_result["count"]) is float
+    assert float_result["count"] == 1.0
+    assert calls == [result, float_result]
+    assert compiled_tool_schemas == 1
 
 
 @pytest.mark.core
@@ -522,8 +589,14 @@ def test_fastmcp_adapter_converts_hf_envelope_dict_to_protocol_call_tool_result(
     assert isinstance(normalized.structured_content["_hf_flow"]["next_actions"], list)
     assert len(normalized.content) == 2
     assert isinstance(normalized.content[0], mcp_types.TextContent)
+    assert normalized.content[0].text == "me.read returned 1 row(s)."
     assert isinstance(normalized.content[1], mcp_types.EmbeddedResource)
-    assert str(normalized.content[1].resource.uri) == "hf-mcp://raw/me.read"
+    raw_resource = normalized.content[1].resource.model_dump(by_alias=True, exclude_none=True)
+    assert raw_resource == {
+        "uri": "hf-mcp://raw/me.read",
+        "mimeType": "application/json",
+        "text": "{\"me\":[{\"uid\":\"5\"}]}",
+    }
 
 
 def test_runtime_stdio_client_session_returns_protocol_structured_content_and_raw_resource() -> None:
