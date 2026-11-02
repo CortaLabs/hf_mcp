@@ -186,7 +186,7 @@ def test_pyproject_release_contract_and_metadata_boundary() -> None:
 
     assert "setuptools>=77.0.3" in pyproject["build-system"]["requires"]
     assert project["name"] == "hf-mcp"
-    assert project["version"] == "0.4.5"
+    assert project["version"] == "0.6.1"
     assert isinstance(project["version"], str) and project["version"].strip()
     assert project["scripts"]["hf-mcp"] == "hf_mcp.cli:main"
     assert project["keywords"] == ["hackforums", "mcp", "model-context-protocol"]
@@ -221,7 +221,7 @@ def test_release_build_derives_version_and_preserves_executable_entrypoint() -> 
     )
 
     assert "tomllib.loads" in build_script
-    assert 'version = "0.4.5"' not in build_script
+    assert 'version = "0.6.1"' not in build_script
     assert '"$SCRIPT_DIR/.."' not in build_script
     assert os.access(PRODUCT_ROOT / "scripts" / "build_release_dists.sh", os.X_OK)
 
@@ -600,18 +600,12 @@ def test_installed_smoke_cli_records_controlled_failure(
         [
             sys.executable,
             str(PRODUCT_ROOT / "scripts" / "smoke_installed.py"),
-            "--artifact-dir",
-            str(artifact_dir),
-            "--work-dir",
-            str(work_dir),
-            "--wheelhouse",
-            str(wheelhouse),
-            "--source-revision",
-            "a" * 40,
-            "--expected-version",
-            "0.4.5",
-            "--receipt",
-            str(receipt),
+            "--artifact-dir", str(artifact_dir),
+            "--work-dir", str(work_dir),
+            "--wheelhouse", str(wheelhouse),
+            "--source-revision", "a" * 40,
+            "--expected-version", "0.4.5",
+            "--receipt", str(receipt),
         ],
         cwd=tmp_path,
         env=child_env,
@@ -722,18 +716,12 @@ def test_smoke_failure_receipt_binds_safe_check_exit_and_argv(
         [
             sys.executable,
             str(PRODUCT_ROOT / "scripts" / "smoke_installed.py"),
-            "--artifact-dir",
-            str(artifact_dir),
-            "--work-dir",
-            str(work_dir),
-            "--wheelhouse",
-            str(wheelhouse),
-            "--source-revision",
-            "a" * 40,
-            "--expected-version",
-            "0.4.5",
-            "--receipt",
-            str(receipt),
+            "--artifact-dir", str(artifact_dir),
+            "--work-dir", str(work_dir),
+            "--wheelhouse", str(wheelhouse),
+            "--source-revision", "a" * 40,
+            "--expected-version", "0.4.5",
+            "--receipt", str(receipt),
         ],
         cwd=tmp_path,
         env=child_env,
@@ -758,5 +746,8 @@ def test_release_metadata_describes_build_smoke_scope() -> None:
     changelog = (PRODUCT_ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
     readme = (PRODUCT_ROOT / "README.md").read_text(encoding="utf-8")
 
+    assert "## 0.6.1" in changelog
+    assert "## 0.6.0" in changelog
+    assert "## 0.4.6" in changelog
     assert "## 0.4.5" in changelog
-    assert "Current release line: `0.4.5`." in readme
+    assert "Current release line: `0.6.1`." in readme

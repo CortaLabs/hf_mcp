@@ -2,15 +2,34 @@
 
 `hf-mcp` is a standalone MCP server package for the Hack Forums API v2.
 
-Current release line: `0.4.5`.
+Current release line: `0.6.1`.
 
 The PyPI publisher workflow runs only on an explicit manual dispatch. Export
 boundary checks also resolve files from a standalone `hf-mcp` product checkout.
 
-Version 0.4.1 tightens the published schemas for Bytes deposits and withdrawals
-and keeps `hf.doctor` as a local catalog fact. This does not expose a callable
-diagnostic tool. The 0.4.0 release recorded canonical tool facts and derived
-locality metadata and behavior hints from the registry.
+Version 0.6.1 keeps offline source builds aligned with the declared backend
+requirements and includes the linked MyCode reference in installed skill data.
+
+Version 0.6.0 adds purpose-specific descriptions to the registered MCP tools,
+using the canonical tool registry while preserving names, schemas, and access
+policy. The descriptions identify local effects such as formatting preflight
+and draft management, and distinguish live write requests from local work.
+
+Version 0.4.6 combines complete Draft 2020-12 input-schema publication and
+validation before SDK argument parsing with pinned development tooling and
+offline child-process checks. Local schema references resolve only within the
+supplied schema. Invalid values such as numeric strings, booleans used as
+integers, and unknown fields are rejected; omitted optional values keep their
+existing defaults.
+
+Version 0.4.4 pinned the development, test, and build tools and added isolated
+source checks for the export boundary. Version 0.4.2 publishes and enforces the
+complete Draft 2020-12 input schema while preserving original JSON types; it
+declared `jsonschema>=4.20.0` and `referencing>=0.30.0` as direct runtime
+dependencies. The 0.4.1 release tightened the published schemas for Bytes
+deposits and withdrawals and kept `hf.doctor` as a local catalog fact without
+exposing a callable diagnostic tool. The 0.4.0 release recorded canonical tool
+facts and derived locality metadata and behavior hints from the registry.
 
 ## Install
 

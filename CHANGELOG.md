@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.6.1
+
+- Align offline sdist rebuilds with declared backend requirements and include the linked
+  MyCode reference in installed skill data.
+
+## 0.6.0
+
+- Advertise purpose-specific MCP tool descriptions from the canonical registry while preserving tool names, schemas, and access policy.
+
+## 0.4.6
+
+- Preserve complete Draft 2020-12 input-schema publication and validation before SDK argument parsing or handler invocation, including local-only reference resolution.
+- Combine the original-schema runtime dependencies with the pinned development and offline source-test tooling.
+
 ## 0.4.5
 
 - Build audited wheel and sdist artifacts from an isolated staged product copy without deleting source-tree build state.
@@ -8,6 +22,11 @@
 ## 0.4.4
 
 - Pin development, test, and build tools in the `dev` extra and add offline source checks with isolated HF test state.
+
+## 0.4.2
+
+- Publish and validate complete Draft 2020-12 tool input schemas before SDK parsing or handler invocation, preserving original JSON types and optional-argument behavior.
+- Declare `jsonschema>=4.20.0` and `referencing>=0.30.0` as direct runtime dependencies for original-schema validation and local reference resolution.
 
 ## 0.4.1
 

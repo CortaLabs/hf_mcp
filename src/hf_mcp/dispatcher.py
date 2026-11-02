@@ -8,7 +8,7 @@ from .annotations import build_annotations
 from .capabilities import CapabilityPolicy
 from .config import DEFAULT_DRAFT_DIR, HFMCPSettings
 from .metadata import get_tool_specs
-from .registry import mcp_tool_name
+from .registry import get_tool_spec, mcp_tool_name
 from .schemas import build_tool_output_schema, build_tool_schema
 from .token_store import load_token_store
 from .tools.drafts import build_draft_handlers
@@ -43,12 +43,7 @@ def _require_runtime_secrets(settings: HFMCPSettings) -> None:
 
 
 def _tool_description(tool_name: str, operation: str) -> str:
-    locality = (
-        "local"
-        if tool_name in {"formatting.preflight", "forums.index"} or tool_name.startswith("drafts.")
-        else "remote"
-    )
-    return f"Hack Forums {locality} {operation} tool for {tool_name}."
+    return get_tool_spec(tool_name).description
 
 
 def _shape_live_input_schema(tool_name: str, input_schema: dict[str, object], handler: Any) -> dict[str, object]:
