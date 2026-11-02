@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.1
+
+- Align offline sdist rebuilds with declared backend requirements and include the linked
+  MyCode reference in installed skill data.
+
 ## 0.6.0
 
 - Advertise purpose-specific MCP tool descriptions from the canonical registry while preserving tool names, schemas, and access policy.
@@ -8,6 +13,11 @@
 
 - Preserve complete Draft 2020-12 input-schema publication and validation before SDK argument parsing or handler invocation, including local-only reference resolution.
 - Combine the original-schema runtime dependencies with the pinned development and offline source-test tooling.
+
+## 0.4.5
+
+- Build audited wheel and sdist artifacts from an isolated staged product copy without deleting source-tree build state.
+- Add an offline installed-artifact smoke path for fresh wheel and sdist-derived installs.
 
 ## 0.4.4
 
