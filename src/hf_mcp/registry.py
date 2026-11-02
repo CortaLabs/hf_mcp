@@ -4,10 +4,9 @@ from dataclasses import dataclass
 import re
 from typing import Literal
 
-from .capabilities import CAPABILITY_PARAMETER_FAMILIES
-
 Operation = Literal["read", "write"]
 TransportKind = Literal["generic", "helper"]
+Locality = Literal["local", "remote"]
 
 _MCP_TOOL_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
 
@@ -21,6 +20,7 @@ class ToolSpec:
     helper_path: str | None
     transport_kind: TransportKind
     parameter_families: tuple[str, ...]
+    locality: Locality = "remote"
 
     @property
     def name(self) -> str:
@@ -35,7 +35,8 @@ class _MatrixRow:
     operation: Operation
     helper_path: str | None
     transport_kind: TransportKind
-    parameter_families: tuple[str, ...] | None = None
+    parameter_families: tuple[str, ...] = ()
+    locality: Locality = "remote"
 
 
 _EXPECTED_COVERAGE_FAMILIES = frozenset(
@@ -64,6 +65,7 @@ _EXPECTED_COVERAGE_FAMILIES = frozenset(
         "bytes.deposit",
         "bytes.withdraw",
         "bytes.bump",
+        "hf.doctor",
     }
 )
 
@@ -77,6 +79,7 @@ _MATRIX_ROWS: tuple[_MatrixRow, ...] = (
         operation="read",
         helper_path="me",
         transport_kind="helper",
+        parameter_families=("fields.me.advanced", "fields.me.basic", "selectors.user"),
     ),
     _MatrixRow(
         tool_name="users.read",
@@ -85,6 +88,7 @@ _MATRIX_ROWS: tuple[_MatrixRow, ...] = (
         operation="read",
         helper_path="users",
         transport_kind="helper",
+        parameter_families=("fields.users.profile", "filters.pagination", "selectors.user"),
     ),
     _MatrixRow(
         tool_name="forums.index",
@@ -94,6 +98,7 @@ _MATRIX_ROWS: tuple[_MatrixRow, ...] = (
         helper_path=None,
         transport_kind="generic",
         parameter_families=(),
+        locality="local",
     ),
     _MatrixRow(
         tool_name="forums.read",
@@ -102,6 +107,7 @@ _MATRIX_ROWS: tuple[_MatrixRow, ...] = (
         operation="read",
         helper_path="forums",
         transport_kind="helper",
+        parameter_families=("filters.pagination", "selectors.forum"),
     ),
     _MatrixRow(
         tool_name="threads.read",
@@ -110,6 +116,7 @@ _MATRIX_ROWS: tuple[_MatrixRow, ...] = (
         operation="read",
         helper_path="threads",
         transport_kind="helper",
+        parameter_families=("filters.pagination", "selectors.forum", "selectors.thread"),
     ),
     _MatrixRow(
         tool_name="posts.read",
@@ -118,6 +125,7 @@ _MATRIX_ROWS: tuple[_MatrixRow, ...] = (
         operation="read",
         helper_path="posts",
         transport_kind="helper",
+        parameter_families=("fields.posts.body", "filters.pagination", "selectors.post", "selectors.thread"),
     ),
     _MatrixRow(
         tool_name="bytes.read",
@@ -126,6 +134,7 @@ _MATRIX_ROWS: tuple[_MatrixRow, ...] = (
         operation="read",
         helper_path="bytes",
         transport_kind="helper",
+        parameter_families=("fields.bytes.amount", "selectors.bytes"),
     ),
     _MatrixRow(
         tool_name="contracts.read",
@@ -134,6 +143,7 @@ _MATRIX_ROWS: tuple[_MatrixRow, ...] = (
         operation="read",
         helper_path="contracts",
         transport_kind="helper",
+        parameter_families=("filters.pagination", "selectors.contract"),
     ),
     _MatrixRow(
         tool_name="disputes.read",
@@ -142,6 +152,7 @@ _MATRIX_ROWS: tuple[_MatrixRow, ...] = (
         operation="read",
         helper_path="disputes",
         transport_kind="helper",
+        parameter_families=("filters.pagination", "selectors.dispute"),
     ),
     _MatrixRow(
         tool_name="bratings.read",
@@ -150,6 +161,7 @@ _MATRIX_ROWS: tuple[_MatrixRow, ...] = (
         operation="read",
         helper_path="bratings",
         transport_kind="helper",
+        parameter_families=("filters.pagination", "selectors.user"),
     ),
     _MatrixRow(
         tool_name="sigmarket.market.read",
@@ -158,6 +170,7 @@ _MATRIX_ROWS: tuple[_MatrixRow, ...] = (
         operation="read",
         helper_path="sigmarket/market",
         transport_kind="helper",
+        parameter_families=("filters.pagination", "selectors.sigmarket"),
     ),
     _MatrixRow(
         tool_name="sigmarket.order.read",
@@ -166,6 +179,7 @@ _MATRIX_ROWS: tuple[_MatrixRow, ...] = (
         operation="read",
         helper_path="sigmarket/order",
         transport_kind="helper",
+        parameter_families=("filters.pagination", "selectors.sigmarket"),
     ),
     _MatrixRow(
         tool_name="admin.high_risk.read",
@@ -184,6 +198,7 @@ _MATRIX_ROWS: tuple[_MatrixRow, ...] = (
         helper_path=None,
         transport_kind="generic",
         parameter_families=("formatting.content",),
+        locality="local",
     ),
     _MatrixRow(
         tool_name="drafts.list",
@@ -193,6 +208,7 @@ _MATRIX_ROWS: tuple[_MatrixRow, ...] = (
         helper_path=None,
         transport_kind="generic",
         parameter_families=("drafts.filters",),
+        locality="local",
     ),
     _MatrixRow(
         tool_name="drafts.read",
@@ -202,6 +218,7 @@ _MATRIX_ROWS: tuple[_MatrixRow, ...] = (
         helper_path=None,
         transport_kind="generic",
         parameter_families=("drafts.selector",),
+        locality="local",
     ),
     _MatrixRow(
         tool_name="drafts.update",
@@ -211,6 +228,7 @@ _MATRIX_ROWS: tuple[_MatrixRow, ...] = (
         helper_path=None,
         transport_kind="generic",
         parameter_families=("drafts.selector", "drafts.metadata"),
+        locality="local",
     ),
     _MatrixRow(
         tool_name="drafts.delete",
@@ -220,6 +238,7 @@ _MATRIX_ROWS: tuple[_MatrixRow, ...] = (
         helper_path=None,
         transport_kind="generic",
         parameter_families=("drafts.selector", "drafts.confirm_delete"),
+        locality="local",
     ),
     _MatrixRow(
         tool_name="threads.create",
@@ -228,6 +247,7 @@ _MATRIX_ROWS: tuple[_MatrixRow, ...] = (
         operation="write",
         helper_path="threads",
         transport_kind="helper",
+        parameter_families=("confirm.live", "selectors.forum", "writes.content"),
     ),
     _MatrixRow(
         tool_name="posts.reply",
@@ -236,6 +256,7 @@ _MATRIX_ROWS: tuple[_MatrixRow, ...] = (
         operation="write",
         helper_path="posts",
         transport_kind="helper",
+        parameter_families=("confirm.live", "selectors.thread", "writes.content"),
     ),
     _MatrixRow(
         tool_name="bytes.transfer",
@@ -244,6 +265,7 @@ _MATRIX_ROWS: tuple[_MatrixRow, ...] = (
         operation="write",
         helper_path="bytes",
         transport_kind="helper",
+        parameter_families=("confirm.live", "selectors.bytes", "writes.bytes"),
     ),
     _MatrixRow(
         tool_name="bytes.deposit",
@@ -252,6 +274,7 @@ _MATRIX_ROWS: tuple[_MatrixRow, ...] = (
         operation="write",
         helper_path="bytes/deposit",
         transport_kind="helper",
+        parameter_families=("confirm.live", "selectors.bytes", "writes.bytes"),
     ),
     _MatrixRow(
         tool_name="bytes.withdraw",
@@ -260,6 +283,7 @@ _MATRIX_ROWS: tuple[_MatrixRow, ...] = (
         operation="write",
         helper_path="bytes/withdraw",
         transport_kind="helper",
+        parameter_families=("confirm.live", "selectors.bytes", "writes.bytes"),
     ),
     _MatrixRow(
         tool_name="bytes.bump",
@@ -268,14 +292,23 @@ _MATRIX_ROWS: tuple[_MatrixRow, ...] = (
         operation="write",
         helper_path="bytes/bump",
         transport_kind="helper",
+        parameter_families=("confirm.live", "selectors.bytes", "writes.bytes"),
+    ),
+    _MatrixRow(
+        tool_name="hf.doctor",
+        coverage_family="hf.doctor",
+        capability_family="hf.doctor",
+        operation="read",
+        helper_path=None,
+        transport_kind="generic",
+        parameter_families=(),
+        locality="local",
     ),
 )
 
 
 def _resolve_parameter_families(row: _MatrixRow) -> tuple[str, ...]:
-    if row.parameter_families is not None:
-        return tuple(dict.fromkeys(row.parameter_families))
-    return tuple(sorted(CAPABILITY_PARAMETER_FAMILIES.get(row.capability_family, frozenset())))
+    return tuple(sorted(set(row.parameter_families)))
 
 
 def _build_tool_spec(row: _MatrixRow) -> ToolSpec:
@@ -287,6 +320,7 @@ def _build_tool_spec(row: _MatrixRow) -> ToolSpec:
         helper_path=row.helper_path,
         transport_kind=row.transport_kind,
         parameter_families=_resolve_parameter_families(row),
+        locality=row.locality,
     )
 
 

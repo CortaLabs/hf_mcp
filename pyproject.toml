@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "hf-mcp"
-version = "0.3.4"
+version = "0.4.0"
 description = "Standalone Hack Forums MCP launch surface"
 keywords = ["hackforums", "mcp", "model-context-protocol"]
 classifiers = [
@@ -42,3 +42,12 @@ hf_mcp = ["data/*.json"]
 "skills/hf-mcp-reads" = ["skills/hf-mcp-reads/SKILL.md"]
 "skills/hf-mcp-writes" = ["skills/hf-mcp-writes/SKILL.md"]
 "skills/hf-mycode" = ["skills/hf-mycode/SKILL.md"]
+
+[tool.pytest.ini_options]
+markers = [
+  "core: fast hermetic default-lane coverage",
+  "regression: permanent behavior regression guard",
+  "formatting: formatting and local draft tool coverage",
+  "registry: canonical tool registry and metadata coverage",
+  "build: package build and release metadata coverage",
+]

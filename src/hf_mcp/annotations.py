@@ -5,9 +5,9 @@ from .registry import ToolSpec
 
 
 def build_annotations(spec: ToolSpec) -> dict[str, object]:
-    is_local_tool = spec.tool_name == "formatting.preflight" or spec.tool_name.startswith("drafts.")
+    is_local_tool = spec.locality == "local"
     is_read = spec.operation == "read"
-    is_read_only = spec.tool_name in {"drafts.list", "drafts.read"} or (is_read and not is_local_tool)
+    is_read_only = is_read and spec.tool_name != "formatting.preflight"
     is_destructive = spec.tool_name == "drafts.delete" or (not is_local_tool and not is_read)
     return {
         "readOnlyHint": is_read_only,
