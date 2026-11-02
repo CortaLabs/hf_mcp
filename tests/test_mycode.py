@@ -12,6 +12,8 @@ if str(SRC_PATH) not in sys.path:
     sys.path.insert(0, str(SRC_PATH))
 
 from hf_mcp.mycode import (
+    ConversionFinding,
+    analyze_conversion,
     decode_double_quote_entities,
     format_body_text,
     format_write_text,
@@ -331,3 +333,165 @@ def test_markdown_terminates_on_malformed_input() -> None:
     unclosed_link = "[label](https://example.org/*leave this literal*"
     assert markdown_to_mycode(unclosed_link) == unclosed_link
     assert markdown_to_mycode("*" * 3000 + "unfinished") == "*" * 3000 + "unfinished"
+
+
+def test_conversion_analysis_supported_basics() -> None:
+    assert analyze_conversion("**bold** and [docs](https://example.test)", "markdown") == ()
+    assert analyze_conversion("[b]bold[/b] &quot; &#34; &#x22;", "mycode") == ()
+    assert markdown_to_mycode("**bold**") == "[b]bold[/b]"
+    assert format_write_text("**bold**", "markdown") == markdown_to_mycode("**bold**")
+    destination_a = "[docs](https://a.example.test)"
+    destination_b = "[docs](https://b.example.test)"
+    payload_a = "```text\nfirst payload\n```"
+    payload_b = "```text\nsecond payload\n```"
+    assert analyze_conversion(destination_a, "markdown") == ()
+    assert analyze_conversion(destination_b, "markdown") == ()
+    assert markdown_to_mycode(destination_a) != markdown_to_mycode(destination_b)
+    assert markdown_to_mycode(payload_a) != markdown_to_mycode(payload_b)
+    assert analyze_conversion("--- inline text", "markdown") == ()
+
+
+def test_conversion_analysis_unsupported_families() -> None:
+    cases = {
+        "nested_list": "- parent\n  - child",
+        "ordered_list": "1. first\n2. second",
+        "task_list": "- [ ] todo\n- [x] done",
+        "heading": "# heading",
+        "table": "| a | b |\n| - | - |",
+        "horizontal_rule": "---",
+        "link_title": '[docs](https://example.test \"title\")',
+        "unsupported_fence": "~~~python\nprint(1)\n~~~",
+        "unmatched_markdown_delimiter": "unfinished **bold",
+    }
+    for code, source in cases.items():
+        findings = analyze_conversion(source, "markdown")
+        assert any(finding.code == code and finding.kind == "unsupported" for finding in findings), code
+        assert markdown_to_mycode(source) == format_write_text(source, "markdown")
+
+    assert analyze_conversion("*ok*tail", "markdown") == ()
+    assert markdown_to_mycode("*ok*tail") == "[i]ok[/i]tail"
+    assert analyze_conversion("\\*literal", "markdown") == ()
+    assert markdown_to_mycode("\\*literal") == "*literal"
+    destination = "[x](https://x.test/a_*tail)"
+    assert analyze_conversion(destination, "markdown") == ()
+    assert markdown_to_mycode(destination) == "[url=https://x.test/a_*tail]x[/url]"
+
+    titled_image = '![alt](https://x.test "title")'
+    image_findings = analyze_conversion(titled_image, "markdown")
+    assert {finding.code for finding in image_findings} == {"link_title"}
+    nested_code = "- parent\n  - `code`"
+    assert markdown_to_mycode(nested_code) == nested_code
+    nested_findings = analyze_conversion(nested_code, "markdown")
+    assert {finding.code for finding in nested_findings} == {"nested_list"}
+    nested_image = "- parent\n  - ![alt](url)"
+    assert markdown_to_mycode(nested_image) == nested_image
+    assert {finding.code for finding in analyze_conversion(nested_image, "markdown")} == {
+        "nested_list"
+    }
+
+    bare_url = "https://example.org/*keep*"
+    assert markdown_to_mycode(bare_url) == bare_url
+    assert analyze_conversion(bare_url, "markdown") == ()
+
+    markdown_spoiler = "[spoiler]secret[/spoiler]"
+    spoiler_finding = next(
+        finding
+        for finding in analyze_conversion(markdown_spoiler, "markdown")
+        if finding.code == "spoiler_plaintext_projection"
+    )
+    assert spoiler_finding.stage == "readable"
+    assert markdown_spoiler[spoiler_finding.start:spoiler_finding.end] == markdown_spoiler
+    markdown_unknown = "[mystery]text[/mystery]"
+    unknown_finding = next(
+        finding
+        for finding in analyze_conversion(markdown_unknown, "markdown")
+        if finding.code == "unknown_mycode_tag"
+    )
+    assert unknown_finding.stage == "readable"
+    assert markdown_unknown[unknown_finding.start:unknown_finding.end] == "[mystery]"
+
+
+def test_conversion_analysis_loss_families() -> None:
+    cases = (
+        ("image_alt_loss", "![description](https://example.test/image.png)"),
+        ("inline_code_block_conversion", "Use `literal` here"),
+        ("fence_language_loss", "```python\nprint(1)\n```"),
+    )
+    for code, source in cases:
+        assert any(
+            finding.code == code and finding.kind == "loss"
+            for finding in analyze_conversion(source, "markdown")
+        )
+    assert not any(
+        finding.code == "image_alt_loss"
+        for finding in analyze_conversion("![](https://example.test/image.png)", "markdown")
+    )
+    spoiler = analyze_conversion("[spoiler=title]secret[/spoiler]", "mycode")
+    assert any(
+        finding.code == "spoiler_plaintext_projection"
+        and finding.kind == "loss"
+        and finding.stage == "readable"
+        for finding in spoiler
+    )
+    assert not any(
+        finding.code == "unknown_mycode_tag"
+        for finding in analyze_conversion("[spoiler=title]secret[/spoiler]", "mycode")
+    )
+    assert any(
+        finding.code == "unknown_mycode_tag"
+        for finding in analyze_conversion("[unknown]keep[/unknown]", "mycode")
+    )
+
+
+def test_conversion_analysis_source_spans() -> None:
+    source = "雪\n# heading"
+    finding = next(
+        finding for finding in analyze_conversion(source, "markdown") if finding.code == "heading"
+    )
+    assert (finding.start, finding.end) == (2, len(source))
+    assert source[finding.start:finding.end] == "# heading"
+    assert (finding.start, finding.end) == (2, 11)
+
+    span_cases = (
+        ("image_alt_loss", "雪 ![alt](image.png)", "![alt](image.png)", "markdown"),
+        ("inline_code_block_conversion", "Use `literal`", "`literal`", "markdown"),
+        ("fence_language_loss", "```python\nbody\n```", "python", "markdown"),
+        ("link_title", '[docs](url \"title\")', '[docs](url \"title\")', "markdown"),
+        ("spoiler_plaintext_projection", "雪[spoiler]x[/spoiler]", "[spoiler]x[/spoiler]", "mycode"),
+        ("unknown_mycode_tag", "[unknown]x[/unknown]", "[unknown]", "mycode"),
+    )
+    for code, value, expected_span, message_format in span_cases:
+        match = next(
+            item for item in analyze_conversion(value, message_format) if item.code == code
+        )
+        assert value[match.start:match.end] == expected_span, code
+
+
+def test_conversion_analysis_ignores_protected_content() -> None:
+    source = "```\n# not a heading\n- [ ] not a task\n``` and `**literal**`"
+    markdown_findings = analyze_conversion(source, "markdown")
+    assert {finding.code for finding in markdown_findings} == {"inline_code_block_conversion"}
+    assert not any(f.code in {"heading", "task_list"} for f in markdown_findings)
+    mycode = "[code][unknown][spoiler]literal[/spoiler][/unknown][/code]"
+    assert analyze_conversion(mycode, "mycode") == ()
+    assert analyze_conversion("\\# not a heading\n\\- [ ] literal", "markdown") == ()
+
+
+def test_conversion_analysis_is_deterministic() -> None:
+    source = "![alt](x)\n# heading\n# heading"
+    findings = analyze_conversion(source, "markdown")
+    assert findings == analyze_conversion(source, "markdown")
+    assert findings == tuple(sorted(findings, key=lambda f: (f.start, f.end, f.stage, f.code)))
+    assert len(findings) == len(set(findings))
+    assert sum(finding.code == "heading" for finding in findings) == 2
+    assert ConversionFinding.__dataclass_params__.frozen
+    assert hasattr(ConversionFinding, "__slots__")
+
+
+def test_conversion_analysis_does_not_attest_uri_safety() -> None:
+    source = "[click](javascript:alert(1))"
+    findings = analyze_conversion(source, "markdown")
+    assert findings == ()
+    assert tuple(ConversionFinding.__dataclass_fields__) == (
+        "code", "kind", "stage", "start", "end"
+    )

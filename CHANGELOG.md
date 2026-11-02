@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.0
+
+- Add pure `analyze_conversion` findings for known unsupported Markdown and
+  lossy format projections, with deterministic source character spans.
+- Keep conversion findings separate from syntax validation, URI safety, and
+  Hack Forums public-rendering claims; preserve existing string-returning APIs.
+
 ## 0.4.3
 
 - Preserve complete balanced Markdown link and image destinations while converting nested emphasis and flat top-level unordered lists.
