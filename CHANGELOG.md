@@ -1,8 +1,18 @@
 # Changelog
 
+## 0.4.6
+
+- Preserve complete Draft 2020-12 input-schema publication and validation before SDK argument parsing or handler invocation, including local-only reference resolution.
+- Combine the original-schema runtime dependencies with the pinned development and offline source-test tooling.
+
 ## 0.4.4
 
 - Pin development, test, and build tools in the `dev` extra and add offline source checks with isolated HF test state.
+
+## 0.4.2
+
+- Publish and validate complete Draft 2020-12 tool input schemas before SDK parsing or handler invocation, preserving original JSON types and optional-argument behavior.
+- Declare `jsonschema>=4.20.0` and `referencing>=0.30.0` as direct runtime dependencies for original-schema validation and local reference resolution.
 
 ## 0.4.1
 
