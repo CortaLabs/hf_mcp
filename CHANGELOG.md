@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.4
+
+- Route `me.read`, `users.read`, and `bratings.read` through generic `POST /api/v2/read` instead of helper URLs returning HTTP 404, including raw output mode.
+- Route `posts.reply` through generic `POST /api/v2/write` once, preserving the existing asks payload and live-write confirmation guard.
+- Add regression coverage for account and b-rating output modes and guarded reply request routing; preserve existing forum, thread, and post reads and MCP 2 discovery.
+- Verify repaired account and b-rating reads with existing authentication. Reply routing and payload were verified offline only; no live write or announcement retry was performed for this repair.
+
 ## 0.3.3
 
 - Document `full_api` as the default ChatGPT profile for all supported tools, with a custom read-only profile as an optional restriction.

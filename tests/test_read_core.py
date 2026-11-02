@@ -54,6 +54,37 @@ class _CaptureServer:
         }
 
 
+@pytest.mark.parametrize("tool_name", ["me.read", "users.read"])
+@pytest.mark.parametrize("output_mode", ["structured", "raw"])
+def test_account_reads_use_generic_route_in_all_output_modes(
+    monkeypatch: pytest.MonkeyPatch, tool_name: str, output_mode: str,
+) -> None:
+    calls: list[dict[str, Any]] = []
+    resource = tool_name.split(".")[0]
+
+    def fake_post(self: HFTransport, route: str, payload: dict[str, Any], headers: dict[str, str]) -> dict[str, Any]:
+        calls.append({"route": route, "payload": payload})
+        if route != "/read":
+            raise RuntimeError("HF helper route failed with HTTP 404")
+        return {resource: {"uid": 5, "username": "reader"}}
+
+    monkeypatch.setattr(HFTransport, "_post_json", fake_post)
+    policy = _policy(
+        enabled_capabilities={tool_name},
+        enabled_parameter_families=set(CAPABILITY_PARAMETER_FAMILIES[tool_name]),
+    )
+    handlers = build_core_read_handlers(policy, HFTransport(_StubTokenStore()))
+    kwargs = {"uid": 5} if tool_name == "users.read" else {}
+    result = handlers[tool_name](output_mode=output_mode, **kwargs)
+    assert len(calls) == 1
+    assert calls[0]["payload"]["asks"][resource]["uid"] is True
+    assert calls[0]["payload"]["asks"][resource].get("_uid") == (5 if kwargs else None)
+    assert result["structuredContent"][resource][0]["uid"] == "5"
+    if output_mode == "raw":
+        raw = json.loads(result["content"][1]["resource"]["text"])
+        assert raw[resource]["uid"] == 5
+
+
 class _StubTokenStore:
     def require_bundle(self) -> TokenBundle:
         return TokenBundle(access_token="token", token_type="Bearer", scope=frozenset())
@@ -206,7 +237,7 @@ def test_me_handler_reads_authenticated_profile_without_uid_selector(
 
     result = handlers["me.read"](include_basic_fields=None, include_advanced_fields=True)
 
-    assert captured["route"] == "/read/me"
+    assert captured["route"] == "/read"
     me_asks = captured["payload"]["asks"]["me"]
     assert "_uid" not in me_asks
     assert me_asks["uid"] is True
@@ -256,7 +287,7 @@ def test_get_profile_omits_uid_selector_when_called_directly(monkeypatch: pytest
     transport = HFTransport(token_store=_StubTokenStore(), base_url="https://example.test")
     result = get_profile(transport=transport)
 
-    assert captured["route"] == "/read/me"
+    assert captured["route"] == "/read"
     assert captured["payload"]["asks"]["me"] == {
         "uid": True,
         "username": True,
@@ -306,7 +337,7 @@ def test_get_profile_includes_advanced_fields_only_when_opted_in_and_allowed(
     result = get_profile(transport=transport, include_advanced_fields=True, allow_advanced_fields=True)
 
     me_asks = captured["payload"]["asks"]["me"]
-    assert captured["route"] == "/read/me"
+    assert captured["route"] == "/read"
     assert me_asks["uid"] is True
     assert me_asks["username"] is True
     assert me_asks["usergroup"] is True
@@ -385,7 +416,7 @@ def test_get_user_defaults_optional_values_and_requests_profile_bundle(
     result = get_user(transport=transport, uid=5, page=None, per_page=None, include_profile_fields=True)
 
     user_asks = captured["payload"]["asks"]["users"]
-    assert captured["route"] == "/read/users"
+    assert captured["route"] == "/read"
     assert user_asks["_uid"] == 5
     assert user_asks["_page"] == 1
     assert user_asks["_perpage"] == 30

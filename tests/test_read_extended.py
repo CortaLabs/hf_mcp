@@ -32,6 +32,37 @@ from hf_mcp.tools.read_extended import (
 from hf_mcp.transport import HFTransport
 
 
+@pytest.mark.parametrize("output_mode", ["structured", "raw"])
+def test_bratings_handler_uses_generic_route_in_all_output_modes(
+    monkeypatch: pytest.MonkeyPatch, output_mode: str,
+) -> None:
+    calls: list[dict[str, Any]] = []
+
+    def fake_post(self: HFTransport, route: str, payload: dict[str, Any], headers: dict[str, str]) -> dict[str, Any]:
+        calls.append({"route": route, "payload": payload})
+        if route != "/read":
+            raise RuntimeError("HF helper route failed with HTTP 404")
+        return {"bratings": [{"crid": 7, "contractid": 8}]}
+
+    monkeypatch.setattr(HFTransport, "_post_json", fake_post)
+    policy = _policy(
+        enabled_capabilities={"bratings.read"},
+        enabled_parameter_families=set(CAPABILITY_PARAMETER_FAMILIES["bratings.read"]),
+    )
+    handlers = build_extended_read_handlers(policy, HFTransport(_StubTokenStore()))
+    result = handlers["bratings.read"](uid=5, page=2, per_page=3, output_mode=output_mode)
+    assert len(calls) == 1
+    asks = calls[0]["payload"]["asks"]["bratings"]
+    assert asks["_uid"] == 5
+    assert asks["_page"] == 2
+    assert asks["_perpage"] == 3
+    assert asks["contract"] is True
+    assert result["structuredContent"]["bratings"][0]["crid"] == (7 if output_mode == "raw" else "7")
+    if output_mode == "raw":
+        raw = json.loads(result["content"][1]["resource"]["text"])
+        assert raw["bratings"][0]["crid"] == 7
+
+
 class _StubTokenStore:
     def require_bundle(self) -> TokenBundle:
         return TokenBundle(access_token="token", token_type="Bearer", scope=frozenset())
@@ -649,7 +680,7 @@ def test_list_bratings_uses_conservative_starter_bundle_and_preserves_mapping_ro
     transport = HFTransport(token_store=_StubTokenStore(), base_url="https://example.test")
     result = list_bratings(transport=transport, uid=202, page=2, per_page=3)
 
-    assert captured["route"] == "/read/bratings"
+    assert captured["route"] == "/read"
     assert captured["payload"]["asks"]["bratings"] == {
         "_page": 2,
         "_perpage": 3,
@@ -699,7 +730,7 @@ def test_list_bratings_supports_canonical_selectors_and_optional_expansions(
         include_to=True,
     )
 
-    assert captured["route"] == "/read/bratings"
+    assert captured["route"] == "/read"
     asks = captured["payload"]["asks"]["bratings"]
     assert asks["_crid"] == 77
     assert asks["_cid"] == 12
