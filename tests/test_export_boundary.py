@@ -184,6 +184,7 @@ def test_pyproject_release_contract_and_metadata_boundary() -> None:
     pyproject = tomllib.loads(PYPROJECT_PATH.read_text(encoding="utf-8"))
     project = pyproject["project"]
 
+    assert "setuptools>=77.0.3" in pyproject["build-system"]["requires"]
     assert project["name"] == "hf-mcp"
     assert project["version"] == "0.4.5"
     assert isinstance(project["version"], str) and project["version"].strip()
@@ -521,7 +522,11 @@ def _make_controlled_release_archives(
     sdist_path = artifact_dir / "hf-mcp-0.4.5.tar.gz"
     sdist_files = {
         "README.md": b"README\n",
-        "pyproject.toml": b"[project]\nname='hf-mcp'\nversion='0.4.5'\n",
+        "pyproject.toml": (
+            b'[build-system]\nrequires = ["setuptools>=77.0.3", "wheel"]\n'
+            b'build-backend = "setuptools.build_meta"\n'
+            b'[project]\nname = "hf-mcp"\nversion = "0.4.5"\n'
+        ),
         "MANIFEST.in": b"",
         "config.example.yaml": b"profile: custom\n",
         "export_manifest.toml": b"",
@@ -595,12 +600,18 @@ def test_installed_smoke_cli_records_controlled_failure(
         [
             sys.executable,
             str(PRODUCT_ROOT / "scripts" / "smoke_installed.py"),
-            "--artifact-dir", str(artifact_dir),
-            "--work-dir", str(work_dir),
-            "--wheelhouse", str(wheelhouse),
-            "--source-revision", "a" * 40,
-            "--expected-version", "0.4.5",
-            "--receipt", str(receipt),
+            "--artifact-dir",
+            str(artifact_dir),
+            "--work-dir",
+            str(work_dir),
+            "--wheelhouse",
+            str(wheelhouse),
+            "--source-revision",
+            "a" * 40,
+            "--expected-version",
+            "0.4.5",
+            "--receipt",
+            str(receipt),
         ],
         cwd=tmp_path,
         env=child_env,
@@ -634,6 +645,30 @@ def test_sdist_smoke_extractor_materializes_only_the_validated_project(
     assert (source_root / "pyproject.toml").is_file()
     assert (source_root / "src" / "hf_mcp" / "__init__.py").is_file()
     assert not (tmp_path / "escape.txt").exists()
+
+
+@pytest.mark.core
+@pytest.mark.build
+@pytest.mark.regression
+def test_sdist_backend_bootstrap_rejects_stale_setuptools() -> None:
+    smoke = runpy.run_path(str(PRODUCT_ROOT / "scripts" / "smoke_installed.py"))
+    requirements = smoke["_build_system_requirements"](PRODUCT_ROOT)
+    install_args = smoke["_build_requirement_install_args"](
+        Path("/offline-wheelhouse"), requirements
+    )
+
+    assert "--upgrade" in install_args
+    assert "setuptools>=77.0.3" in install_args
+    assert all(requirement in install_args for requirement in requirements)
+    assert smoke["_build_requirement_failures"](
+        requirements, {"setuptools": "65.5.0", "wheel": "0.48.0"}
+    ) == ["setuptools>=77.0.3 (installed 65.5.0)"]
+    assert (
+        smoke["_build_requirement_failures"](
+            requirements, {"setuptools": "77.0.3", "wheel": "0.48.0"}
+        )
+        == []
+    )
 
 
 @pytest.mark.core
@@ -687,12 +722,18 @@ def test_smoke_failure_receipt_binds_safe_check_exit_and_argv(
         [
             sys.executable,
             str(PRODUCT_ROOT / "scripts" / "smoke_installed.py"),
-            "--artifact-dir", str(artifact_dir),
-            "--work-dir", str(work_dir),
-            "--wheelhouse", str(wheelhouse),
-            "--source-revision", "a" * 40,
-            "--expected-version", "0.4.5",
-            "--receipt", str(receipt),
+            "--artifact-dir",
+            str(artifact_dir),
+            "--work-dir",
+            str(work_dir),
+            "--wheelhouse",
+            str(wheelhouse),
+            "--source-revision",
+            "a" * 40,
+            "--expected-version",
+            "0.4.5",
+            "--receipt",
+            str(receipt),
         ],
         cwd=tmp_path,
         env=child_env,
@@ -704,7 +745,7 @@ def test_smoke_failure_receipt_binds_safe_check_exit_and_argv(
     failure_receipt = json.loads(receipt.read_text(encoding="utf-8"))
     failed_check = failure_receipt["failed_check"]
     assert result.returncode != 0
-    assert failure_receipt["failed_step"] == "sdist_build_dependencies"
+    assert failure_receipt["failed_step"] == "sdist_build_tool"
     assert failed_check["result"] == "fail"
     assert failed_check["exit_code"] != 0
     assert len(failed_check["argv_sha256"]) == 64

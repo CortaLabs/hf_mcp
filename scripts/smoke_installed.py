@@ -13,12 +13,16 @@ import socket
 import subprocess
 import sys
 import tarfile
+import tomllib
 import venv
 from datetime import UTC, datetime
 from importlib import metadata
 from pathlib import Path, PurePosixPath
 from typing import Any
 from zipfile import ZipFile
+
+from packaging.requirements import Requirement
+from packaging.version import Version
 
 VERSION_PATTERN = re.compile(r"^\d+\.\d+\.\d+(?:[a-zA-Z0-9.+-]*)$")
 REVISION_PATTERN = re.compile(r"^(?:[a-fA-F0-9]{40}|[a-fA-F0-9]{64})$")
@@ -48,6 +52,31 @@ socket.socket.connect = _blocked
 socket.socket.connect_ex = _blocked
 socket.socket.sendto = _blocked
 socket.create_connection = _blocked
+"""
+
+_BUILD_REQUIREMENT_PROBE = """\
+import importlib.metadata as metadata
+import json
+import sys
+from importlib.metadata import PackageNotFoundError
+from packaging.requirements import Requirement
+from packaging.version import Version
+
+requirements = json.loads(sys.argv[1])
+versions = {}
+failures = []
+for raw_requirement in requirements:
+    requirement = Requirement(raw_requirement)
+    try:
+        version = metadata.version(requirement.name)
+    except PackageNotFoundError:
+        version = None
+    versions[requirement.name] = version
+    if version is None or Version(version) not in requirement.specifier:
+        failures.append(f"{raw_requirement} (installed {version or 'missing'})")
+if failures:
+    raise SystemExit("unsatisfied build-system requirements: " + ", ".join(failures))
+print(json.dumps(versions, sort_keys=True))
 """
 
 _INSTALLED_PROBE = r'''from __future__ import annotations
@@ -588,6 +617,10 @@ def _guarded_module(python: Path, module: str, arguments: list[str]) -> list[str
     return [str(python), "-I", "-c", wrapper, *arguments]
 
 
+def _guarded_code(python: Path, source: str, arguments: list[str]) -> list[str]:
+    return [str(python), "-I", "-c", _NETWORK_GUARD + "\n" + source, *arguments]
+
+
 def _probe_command(python: Path, probe_path: Path) -> list[str]:
     return [str(python), "-I", str(probe_path)]
 
@@ -616,6 +649,58 @@ def _offline_env(home: Path, expected_version: str, state: Path) -> dict[str, st
         "PIP_CONFIG_FILE": os.devnull,
         "PYTHONUNBUFFERED": "1",
     }
+
+
+def _build_system_requirements(source_root: Path) -> list[str]:
+    try:
+        project = tomllib.loads(
+            (source_root / "pyproject.toml").read_text(encoding="utf-8")
+        )
+    except (OSError, tomllib.TOMLDecodeError) as exc:
+        raise SmokeFailure(
+            "sdist_build_requirements", "staged pyproject.toml is unreadable"
+        ) from exc
+    build_system = project.get("build-system")
+    requirements = (
+        build_system.get("requires") if isinstance(build_system, dict) else None
+    )
+    if (
+        not isinstance(requirements, list)
+        or not requirements
+        or not all(
+            isinstance(requirement, str) and requirement.strip()
+            for requirement in requirements
+        )
+    ):
+        raise SmokeFailure(
+            "sdist_build_requirements", "staged build-system.requires is invalid"
+        )
+    return requirements
+
+
+def _build_requirement_install_args(
+    wheelhouse: Path, requirements: list[str]
+) -> list[str]:
+    return [
+        "install",
+        "--no-index",
+        "--find-links",
+        str(wheelhouse),
+        "--upgrade",
+        *requirements,
+    ]
+
+
+def _build_requirement_failures(
+    requirements: list[str], installed_versions: dict[str, str | None]
+) -> list[str]:
+    failures = []
+    for raw_requirement in requirements:
+        requirement = Requirement(raw_requirement)
+        version = installed_versions.get(requirement.name)
+        if version is None or Version(version) not in requirement.specifier:
+            failures.append(f"{raw_requirement} (installed {version or 'missing'})")
+    return failures
 
 
 def _smoke(args: argparse.Namespace) -> dict[str, Any]:
@@ -661,6 +746,7 @@ def _smoke(args: argparse.Namespace) -> dict[str, Any]:
 
     sdist_wheelhouse = work / "sdist-wheelhouse"
     sdist_wheelhouse.mkdir()
+    build_requirements = _build_system_requirements(sdist_source)
     build_env = _offline_env(
         work / "build-home", args.expected_version, work / "build-state"
     )
@@ -671,9 +757,9 @@ def _smoke(args: argparse.Namespace) -> dict[str, Any]:
         / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
     )
     venv.EnvBuilder(with_pip=True, clear=False).create(build_python.parent.parent)
-    for name, module, module_args in (
+    build_setup = (
         (
-            "sdist_build_dependencies",
+            "sdist_build_tool",
             "pip",
             [
                 "install",
@@ -681,12 +767,56 @@ def _smoke(args: argparse.Namespace) -> dict[str, Any]:
                 "--find-links",
                 str(paths["wheelhouse"]),
                 "build",
-                "setuptools",
-                "wheel",
             ],
         ),
         (
-            "sdist_rebuild",
+            "sdist_build_dependencies",
+            "pip",
+            _build_requirement_install_args(paths["wheelhouse"], build_requirements),
+        ),
+    )
+    for name, module, module_args in build_setup:
+        _run(
+            name,
+            _guarded_module(build_python, module, module_args),
+            cwd=work,
+            env=build_env,
+            records=records,
+        )
+
+    requirement_probe = _run(
+        "sdist_build_requirements",
+        _guarded_code(
+            build_python,
+            _BUILD_REQUIREMENT_PROBE,
+            [json.dumps(build_requirements)],
+        ),
+        cwd=work,
+        env=build_env,
+        records=records,
+    )
+    try:
+        build_backend_versions = json.loads(
+            requirement_probe.stdout.strip().splitlines()[-1]
+        )
+    except (json.JSONDecodeError, IndexError) as exc:
+        raise SmokeFailure(
+            "sdist_build_requirements", "backend version probe returned no result"
+        ) from exc
+    build_requirement_failures = _build_requirement_failures(
+        build_requirements, build_backend_versions
+    )
+    if build_requirement_failures:
+        raise SmokeFailure(
+            "sdist_build_requirements",
+            "declared build requirements are unsatisfied: "
+            + ", ".join(build_requirement_failures),
+        )
+
+    _run(
+        "sdist_rebuild",
+        _guarded_module(
+            build_python,
             "build",
             [
                 "--wheel",
@@ -696,14 +826,10 @@ def _smoke(args: argparse.Namespace) -> dict[str, Any]:
                 str(sdist_source),
             ],
         ),
-    ):
-        _run(
-            name,
-            _guarded_module(build_python, module, module_args),
-            cwd=work,
-            env=build_env,
-            records=records,
-        )
+        cwd=work,
+        env=build_env,
+        records=records,
+    )
     rebuilt = sorted(sdist_wheelhouse.glob("*.whl"))
     if len(rebuilt) != 1:
         raise SmokeFailure("sdist_rebuild", "sdist must produce exactly one wheel")
@@ -798,6 +924,8 @@ def _smoke(args: argparse.Namespace) -> dict[str, Any]:
             name: metadata.version(name)
             for name in ("build", "pip", "setuptools", "wheel")
         },
+        "sdist_build_system_requires": build_requirements,
+        "sdist_build_backend_versions": build_backend_versions,
         "artifacts": artifact_receipts,
         "rebuilt_wheel": {
             "name": rebuilt[0].name,
