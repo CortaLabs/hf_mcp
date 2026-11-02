@@ -141,7 +141,7 @@ def test_dispatcher_output_excludes_disabled_core_read_capability() -> None:
     assert mcp_tool_name("forums.read") not in server.tools
 
 
-def test_list_posts_delegates_to_transport_helper_and_returns_normalized_output(
+def test_list_posts_delegates_to_generic_transport_and_returns_normalized_output(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     captured: dict[str, Any] = {}
@@ -169,7 +169,7 @@ def test_list_posts_delegates_to_transport_helper_and_returns_normalized_output(
         include_post_body=True,
     )
 
-    assert captured["route"] == "/read/posts"
+    assert captured["route"] == "/read"
     assert captured["payload"]["asks"]["posts"]["_tid"] == 123
     assert captured["payload"]["asks"]["posts"]["_pid"] == 7
     assert captured["payload"]["asks"]["posts"]["_page"] == 2
@@ -454,7 +454,7 @@ def test_list_threads_defaults_optional_values_and_requests_record_fields(
     result = list_threads(transport=transport, fid=375, page=None, per_page=None)
 
     thread_asks = captured["payload"]["asks"]["threads"]
-    assert captured["route"] == "/read/threads"
+    assert captured["route"] == "/read"
     assert thread_asks["_fid"] == 375
     assert "_tid" not in thread_asks
     assert thread_asks["_page"] == 1
@@ -515,7 +515,7 @@ def test_list_threads_supports_tid_and_uid_selectors_with_exact_hf_keys(
     list_threads(transport=transport, tid=123, uid=5, page=None, per_page=None)
 
     thread_asks = captured["payload"]["asks"]["threads"]
-    assert captured["route"] == "/read/threads"
+    assert captured["route"] == "/read"
     assert "_fid" not in thread_asks
     assert thread_asks["_tid"] == 123
     assert thread_asks["_uid"] == 5
@@ -559,7 +559,7 @@ def test_list_forums_defaults_optional_values_and_requests_forum_card_fields(
     result = list_forums(transport=transport, fid=375, page=None, per_page=None)
 
     forum_asks = captured["payload"]["asks"]["forums"]
-    assert captured["route"] == "/read/forums"
+    assert captured["route"] == "/read"
     assert forum_asks["_fid"] == 375
     assert forum_asks["_page"] == 1
     assert forum_asks["_perpage"] == 30
@@ -604,7 +604,7 @@ def test_list_posts_defaults_optional_values_and_requests_record_fields(
     )
 
     post_asks = captured["payload"]["asks"]["posts"]
-    assert captured["route"] == "/read/posts"
+    assert captured["route"] == "/read"
     assert post_asks["_tid"] == 123
     assert "_pid" not in post_asks
     assert post_asks["_page"] == 1
@@ -662,7 +662,7 @@ def test_list_posts_supports_uid_selector_without_tid(
     list_posts(transport=transport, uid=5, page=None, per_page=None, include_post_body=None)
 
     post_asks = captured["payload"]["asks"]["posts"]
-    assert captured["route"] == "/read/posts"
+    assert captured["route"] == "/read"
     assert "_pid" not in post_asks
     assert "_tid" not in post_asks
     assert post_asks["_uid"] == 5
@@ -692,7 +692,7 @@ def test_list_posts_supports_pid_selector_without_tid_or_uid(
     list_posts(transport=transport, pid=88, page=None, per_page=None, include_post_body=False)
 
     post_asks = captured["payload"]["asks"]["posts"]
-    assert captured["route"] == "/read/posts"
+    assert captured["route"] == "/read"
     assert post_asks["_pid"] == 88
     assert "_tid" not in post_asks
     assert "_uid" not in post_asks
@@ -736,7 +736,7 @@ def test_list_posts_include_post_body_false_removes_only_message(
     )
 
     post_asks = captured["payload"]["asks"]["posts"]
-    assert captured["route"] == "/read/posts"
+    assert captured["route"] == "/read"
     assert post_asks["_tid"] == 123
     assert "_pid" not in post_asks
     assert post_asks["_page"] == 1
@@ -945,8 +945,8 @@ def test_registered_posts_handler_supports_output_modes_and_raw_payload_attachme
 
     assert len(captured["read"]) == 2
     assert len(captured["read_raw"]) == 2
-    assert all(call["helper"] == "posts" for call in captured["read"])
-    assert all(call["helper"] == "posts" for call in captured["read_raw"])
+    assert all(call["helper"] is None for call in captured["read"])
+    assert all(call["helper"] is None for call in captured["read_raw"])
 
 
 def test_core_read_flow_chain_adds_hf_flow_and_preserves_endpoint_root_payloads(
@@ -959,9 +959,8 @@ def test_core_read_flow_chain_adds_hf_flow_and_preserves_endpoint_root_payloads(
     }
 
     def _fake_read(self: HFTransport, asks: dict[str, Any], helper: str | None = None) -> dict[str, Any]:
-        del asks
-        assert helper in payload_by_helper
-        return payload_by_helper[helper]
+        assert helper is None
+        return payload_by_helper[next(iter(asks))]
 
     monkeypatch.setattr(HFTransport, "read", _fake_read)
 

@@ -3,13 +3,15 @@ from __future__ import annotations
 import inspect
 from dataclasses import dataclass
 from importlib import import_module
-from typing import Any
+from typing import Annotated, Any
+
+from pydantic import ConfigDict, Field, RootModel
 
 from .capabilities import CapabilityPolicy
 from .config import HFMCPSettings, load_settings
 from .dispatcher import register_tools, resolve_runtime_bundle
 
-_RUNTIME_MODULE = "mcp.server.fastmcp"
+_RUNTIME_MODULE = "mcp.server.mcpserver"
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,7 +49,7 @@ class HFServer:
         )
 
 
-class _FastMCPToolAdapter:
+class _MCPServerToolAdapter:
     def __init__(self, app: Any) -> None:
         self._app = app
         self._supports_output_schema = _supports_add_tool_keyword(app, "output_schema")
@@ -62,7 +64,7 @@ class _FastMCPToolAdapter:
         handler: Any,
         output_schema: dict[str, object] | None = None,
     ) -> None:
-        wrapped_handler = _with_schema_signature(name, handler, input_schema)
+        wrapped_handler = _with_schema_signature(name, handler, input_schema, output_schema)
         fastmcp_annotations = _build_fastmcp_annotations(annotations)
         add_tool_kwargs: dict[str, object] = {
             "name": name,
@@ -71,6 +73,10 @@ class _FastMCPToolAdapter:
         }
         if self._supports_output_schema:
             add_tool_kwargs["output_schema"] = output_schema
+        # SDK2 protocol annotations contain standard hints only. HF extensions
+        # belong to the supported tool-level metadata seam (wire: Tool._meta).
+        if _supports_add_tool_keyword(self._app, "meta"):
+            add_tool_kwargs["meta"] = annotations.get("_meta")
         self._app.add_tool(
             wrapped_handler,
             **add_tool_kwargs,
@@ -116,10 +122,14 @@ def _schema_annotation(parameter_schema: object) -> object:
 
     if schema_type == "string":
         return str
-    if schema_type == "integer":
-        return int
-    if schema_type == "number":
-        return float
+    if schema_type in {"integer", "number"}:
+        numeric_type = int if schema_type == "integer" else float
+        constraints = {
+            target: parameter_schema[source]
+            for source, target in (("minimum", "ge"), ("maximum", "le"))
+            if source in parameter_schema
+        }
+        return Annotated[numeric_type, Field(**constraints)] if constraints else numeric_type
     if schema_type == "boolean":
         return bool
     if schema_type == "array":
@@ -172,8 +182,22 @@ def _tool_handler_name(tool_name: str) -> str:
     return f"{tool_name.replace('.', '_').replace('-', '_')}_handler"
 
 
-def _with_schema_signature(tool_name: str, handler: Any, input_schema: dict[str, object]) -> Any:
+def _with_schema_signature(
+    tool_name: str,
+    handler: Any,
+    input_schema: dict[str, object],
+    output_schema: dict[str, object] | None = None,
+) -> Any:
     signature = _signature_from_schema(handler, input_schema)
+    if output_schema is not None:
+        # MCPServer supports Annotated[CallToolResult, OutputModel]. Keep the
+        # existing open object contract without compiling a parallel schema.
+        class _StructuredOutput(RootModel[dict[str, Any]]):
+            model_config = ConfigDict(json_schema_extra=output_schema)
+
+        module = import_module("mcp.types")
+        result_type = getattr(module, "CallToolResult")
+        signature = signature.replace(return_annotation=Annotated[result_type, _StructuredOutput])
 
     def _wrapped_handler(**kwargs: Any) -> Any:
         return _normalize_handler_result(handler(**kwargs))
@@ -189,7 +213,7 @@ def _with_schema_signature(tool_name: str, handler: Any, input_schema: dict[str,
         for parameter in signature.parameters.values()
         if parameter.annotation is not inspect.Parameter.empty
     }
-    _wrapped_handler.__annotations__["return"] = object
+    _wrapped_handler.__annotations__["return"] = signature.return_annotation
     return _wrapped_handler
 
 
@@ -286,7 +310,7 @@ def _build_fastmcp_annotations(annotations: dict[str, object]) -> Any:
     return tool_annotations_class(**annotations)
 
 
-def _load_fastmcp_class() -> Any:
+def _load_mcpserver_class() -> Any:
     try:
         module = import_module(_RUNTIME_MODULE)
     except ModuleNotFoundError as exc:
@@ -295,7 +319,7 @@ def _load_fastmcp_class() -> Any:
             "for hf-mcp before launching the server."
         ) from exc
 
-    fastmcp_class = getattr(module, "FastMCP", None)
+    fastmcp_class = getattr(module, "MCPServer", None)
     if fastmcp_class is None:
         raise RuntimeError(
             "Missing runtime dependency 'mcp'. Install required runtime dependencies "
@@ -317,9 +341,9 @@ def serve_stdio(settings: HFMCPSettings | None = None) -> None:
     resolved_settings = settings if settings is not None else load_settings(config_path=None)
     policy = CapabilityPolicy(resolved_settings)
     runtime = resolve_runtime_bundle(resolved_settings)
-    fastmcp_class = _load_fastmcp_class()
+    fastmcp_class = _load_mcpserver_class()
     app = fastmcp_class(name="hf-mcp")
-    register_tools(_FastMCPToolAdapter(app), policy, runtime)
+    register_tools(_MCPServerToolAdapter(app), policy, runtime)
     app.run(transport="stdio")
 
 
