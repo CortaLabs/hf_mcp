@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.4
+
+- Pin development, test, and build tools in the `dev` extra and add offline source checks with isolated HF test state.
+
 ## 0.4.1
 
 - Require at least 100 Bytes for deposit and withdrawal schemas while preserving the 1-Byte transfer minimum.

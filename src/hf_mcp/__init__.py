@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from functools import lru_cache
-from importlib.metadata import PackageNotFoundError, version as distribution_version
-from pathlib import Path
 import tomllib
+from functools import lru_cache
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as distribution_version
+from pathlib import Path
 
 __all__ = ["__version__"]
 
