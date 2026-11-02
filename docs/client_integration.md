@@ -1,6 +1,6 @@
 # Client Integration
 
-This guide focuses on desktop MCP client launch patterns for `hf-mcp` across Linux/macOS, Windows, and Windows-to-WSL setups.
+This guide focuses on desktop MCP client launch patterns for `hf-mcp` across Linux/macOS, Windows, and Windows-to-WSL setups. For ChatGPT's private tunnel flow, see [`chatgpt_tunnel.md`](chatgpt_tunnel.md).
 
 ## Core launch forms
 
@@ -51,22 +51,22 @@ Some desktop clients run on Windows while you want `hf-mcp` to execute inside WS
 Path-neutral pattern:
 
 ```powershell
-wsl.exe -d <DistroName> --cd /home/<linux-user>/<project-path> /home/<linux-user>/<python-path>/python -m hf_mcp serve
+wsl.exe -d <DistroName> --cd /opt/hf-mcp /opt/hf-mcp-venv/bin/python -m hf_mcp serve
 ```
 
-Example in the operator's Claude Desktop style (adjust distro/path/env for your own machine):
+Path-neutral Windows-to-WSL invocation (adjust distro and paths for your machine):
 
 ```powershell
-wsl.exe -d Ubuntu-24.04 --cd /home/austin/projects/apps/hackforums_council/products/hf_mcp /home/austin/miniconda3/envs/uap/bin/python -m hf_mcp serve
+wsl.exe -d <DistroName> --cd /opt/hf-mcp /opt/hf-mcp-venv/bin/python -m hf_mcp serve
 ```
 
 Notes:
 
-- Distro name, Linux home path, and interpreter path differ per user.
+- Distro name, HF MCP installation path, and interpreter path vary by setup; replace the `/opt/...` examples with local paths.
 - Desktop clients differ in how they launch shells/commands; use the exact invocation shape your client expects.
 - Keep secrets in environment/config files, not inline in desktop client JSON.
 
-## Claude Desktop style MCP config shape
+## Separate MCP client configurations
 
 Illustrative JSON snippet (adjust command args for your environment):
 
@@ -82,6 +82,16 @@ Illustrative JSON snippet (adjust command args for your environment):
 ```
 
 Windows-to-WSL variant often sets `command` to `wsl.exe` and passes distro/working-directory/interpreter in `args`.
+
+Keep each consumer's MCP configuration separate. If a client supports an
+explicit `--config` argument, give that client its own `hf-mcp` YAML path and
+preserve the policies already configured for other agents. Do not replace an
+agent's config to add ChatGPT. The ChatGPT guide uses `full_api` by default in
+its dedicated config to expose all currently supported tools; the package's
+general fallback profile is `reader`. A smaller four-tool `custom` read profile
+is optional. Do not use the CLI `--profile` override with the custom capability
+selection: the override replaces its YAML overlays. The tunnel guide includes
+both configurations.
 
 ## Write-safety reminders for client integrations
 

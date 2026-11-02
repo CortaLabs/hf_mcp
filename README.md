@@ -2,7 +2,7 @@
 
 `hf-mcp` is a standalone MCP server package for the Hack Forums API v2.
 
-Current release line: `0.3.1`.
+Current release line: `0.3.3`.
 
 ## Install
 
@@ -29,6 +29,15 @@ Desktop client wiring is first-class and documented in
 - virtualenv/conda launch forms
 - native Windows Python launch
 - Windows desktop client to WSL bridge examples (including Claude Desktop style)
+
+## ChatGPT through a private tunnel
+
+For the current ChatGPT Plugins custom MCP flow and an outbound-only OpenAI
+Secure MCP Tunnel, see [`docs/chatgpt_tunnel.md`](docs/chatgpt_tunnel.md). The
+ChatGPT connection uses `full_api` by default to expose all 24 currently
+supported tools. A four-tool read-only profile is documented as an optional
+restriction. Keep ChatGPT's config separate from other agents' settings; local
+readiness and end-to-end ChatGPT acceptance are different checks.
 
 ## Default local paths
 
@@ -161,6 +170,7 @@ python -m hf_mcp serve
 - [`docs/configuration.md`](docs/configuration.md)
 - [`docs/auth_bootstrap.md`](docs/auth_bootstrap.md)
 - [`docs/client_integration.md`](docs/client_integration.md)
+- [`docs/chatgpt_tunnel.md`](docs/chatgpt_tunnel.md)
 - [`docs/tool_overview.md`](docs/tool_overview.md)
 - [`docs/coverage_matrix.md`](docs/coverage_matrix.md)
 - [`docs/examples.md`](docs/examples.md)
