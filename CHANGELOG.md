@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.6
+
+- Preserve exact raw-body and MyCode write input, protected code/PHP payloads, and literal entity spellings.
+- Keep spoiler titles and boundaries explicit in readable projections; retain unknown, unclosed, and crossed markup.
+- Describe readable conversion as plaintext and supported-subset projection without claiming Hack Forums public quote fidelity.
+
 ## 0.3.4
 
 - Route `me.read`, `users.read`, and `bratings.read` through generic `POST /api/v2/read` instead of helper URLs returning HTTP 404, including raw output mode.
