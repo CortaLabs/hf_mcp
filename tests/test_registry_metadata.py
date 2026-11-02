@@ -1,24 +1,22 @@
 from __future__ import annotations
 
-from dataclasses import FrozenInstanceError
-from pathlib import Path
 import subprocess
 import sys
 import textwrap
+from dataclasses import FrozenInstanceError
+from pathlib import Path
 
 import pytest
 
-PRODUCT_ROOT = Path(__file__).resolve().parents[1]
-SRC_PATH = PRODUCT_ROOT / "src"
-if str(SRC_PATH) not in sys.path:
-    sys.path.insert(0, str(SRC_PATH))
-
+import hf_mcp.registry as registry_module
 from hf_mcp.annotations import build_annotations
 from hf_mcp.capabilities import CapabilityPolicy
-from hf_mcp.config import HFMCPSettings
+from hf_mcp.config import PRESET_CAPABILITIES, PRESET_PARAMETER_FAMILIES, HFMCPSettings
 from hf_mcp.metadata import build_tool_meta, get_tool_specs
 from hf_mcp.registry import ToolSpec, build_registry, get_tool_spec, mcp_tool_name
-import hf_mcp.registry as registry_module
+
+PRODUCT_ROOT = Path(__file__).resolve().parents[1]
+SRC_PATH = PRODUCT_ROOT / "src"
 
 pytestmark = [pytest.mark.core, pytest.mark.registry]
 
@@ -69,6 +67,15 @@ def test_registry_preserves_existing_facts_and_adds_doctor() -> None:
             spec.locality,
         ) == (capability, coverage, operation, helper, transport, families, locality)
         assert mcp_tool_name(spec.tool_name) == spec.tool_name.replace(".", "_")
+        assert spec.description.strip()
+
+
+def test_tool_spec_description_is_read_only_and_does_not_change_constructor() -> None:
+    spec = get_tool_spec("formatting.preflight")
+    assert "local draft" in spec.description.lower()
+    assert "preflight" in spec.description.lower()
+    with pytest.raises((FrozenInstanceError, AttributeError, TypeError)):
+        spec.description = "changed"  # type: ignore[misc]
 
 
 def test_tool_spec_keeps_seven_argument_compatibility_and_is_frozen_slotted() -> None:
@@ -182,3 +189,130 @@ def test_registry_import_is_independent_of_policy_and_handler_modules() -> None:
         check=False,
     )
     assert result.returncode == 0, result.stderr
+
+
+def test_sdk_tools_list_uses_registry_descriptions_without_runtime_effects(
+    isolated_child_context,
+) -> None:
+    import anyio
+    from mcp import ClientSession
+    from mcp.client.stdio import StdioServerParameters, stdio_client
+
+    server_probe = textwrap.dedent(
+        """
+        import os
+        import socket
+        from pathlib import Path
+
+        import pytest_socket
+        from pytest_socket import SocketBlockedError
+
+        guard_path = Path(os.environ["PYTHONPATH"].split(os.pathsep)[0]).resolve()
+        import sitecustomize
+        assert Path(sitecustomize.__file__).resolve() == guard_path / "sitecustomize.py"
+
+        blocked_families = []
+        for family in (socket.AF_INET, socket.AF_INET6):
+            try:
+                socket.socket(family, socket.SOCK_STREAM)
+            except SocketBlockedError:
+                blocked_families.append(True)
+            else:
+                blocked_families.append(False)
+        assert all(blocked_families), "startup guard must deny IPv4 and IPv6 sockets"
+        socket.socket = socket.SocketType
+        pytest_socket.disable_socket(allow_unix_socket=True)
+        original_socketpair = socket.socketpair
+
+        def unix_socketpair(family=None, socket_type=socket.SOCK_STREAM, proto=0):
+            if family not in (None, socket.AF_UNIX):
+                raise SocketBlockedError("Only the AF_UNIX stdio socketpair is permitted")
+            return original_socketpair(socket.AF_UNIX, socket_type, proto)
+
+        socket.socketpair = unix_socketpair
+
+        from hf_mcp.capabilities import CapabilityPolicy
+        from hf_mcp.config import HFMCPSettings, PRESET_CAPABILITIES, PRESET_PARAMETER_FAMILIES
+        from hf_mcp import dispatcher
+        from hf_mcp.dispatcher import RuntimeBundle, register_tools
+        from hf_mcp.server import _MCPServerToolAdapter
+        from hf_mcp.transport import HFTransport
+        from mcp.server.mcpserver import MCPServer
+        from hf_mcp.tools import drafts as draft_tools
+        from hf_mcp.tools import formatting as formatting_tools
+
+        class SyntheticTokenStore:
+            pass
+
+        def unexpected_effect(**kwargs):
+            raise AssertionError("tools/list must not access auth, transport, or draft state")
+
+        dispatcher.load_token_store = unexpected_effect
+        formatting_tools.preflight_formatting = unexpected_effect
+        for function_name in ("list_drafts", "read_draft", "update_draft", "delete_draft"):
+            setattr(draft_tools, function_name, unexpected_effect)
+
+        profile = os.environ["HF_MCP_PROFILE"]
+        assert not any(
+            os.environ.get(name)
+            for name in ("HF_MCP_CLIENT_ID", "HF_MCP_CLIENT_SECRET")
+        )
+        settings = HFMCPSettings(
+            profile=profile,
+            enabled_capabilities=PRESET_CAPABILITIES[profile],
+            enabled_parameter_families=PRESET_PARAMETER_FAMILIES[profile],
+            draft_dir=Path(os.environ["HF_MCP_DRAFT_DIR"]),
+        )
+        transport = HFTransport(token_store=SyntheticTokenStore(), base_url="https://example.test")
+        transport.read = unexpected_effect
+        transport.read_raw = unexpected_effect
+        transport.write = unexpected_effect
+        app = MCPServer(name="hf-mcp-description-probe")
+        register_tools(
+            _MCPServerToolAdapter(app),
+            CapabilityPolicy(settings),
+            RuntimeBundle(transport=transport, settings=settings),
+        )
+        app.run(transport="stdio")
+        """
+    )
+
+    async def _run_profile(profile: str) -> None:
+        env = isolated_child_context.environment()
+        env["HF_MCP_PROFILE"] = profile
+        draft_dir = isolated_child_context.state.draft_dir
+        params = StdioServerParameters(
+            command=sys.executable,
+            args=["-c", server_probe],
+            env=env,
+            cwd=str(PRODUCT_ROOT),
+        )
+        async with stdio_client(params) as (read_stream, write_stream):
+            async with ClientSession(read_stream, write_stream) as session:
+                await session.initialize()
+                listed = await session.list_tools()
+
+        expected_specs = get_tool_specs(
+            CapabilityPolicy(
+                HFMCPSettings(
+                    profile=profile,
+                    enabled_capabilities=PRESET_CAPABILITIES[profile],
+                    enabled_parameter_families=PRESET_PARAMETER_FAMILIES[profile],
+                )
+            )
+        )
+        expected = {mcp_tool_name(spec.tool_name): spec.description for spec in expected_specs}
+        actual = {tool.name: tool.description for tool in listed.tools}
+        assert actual == expected
+        assert all(description and len(description) > 40 for description in actual.values())
+        if profile == "full_api":
+            assert len(actual) == 24
+            assert "hf_doctor" not in actual
+        assert list(draft_dir.iterdir()) == []
+
+    async def _run() -> None:
+        for profile in ("reader", "full_api"):
+            await _run_profile(profile)
+        assert not isolated_child_context.state.token_path.exists()
+
+    anyio.run(_run)

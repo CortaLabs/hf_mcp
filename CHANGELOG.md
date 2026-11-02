@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.6.0
+
+- Advertise purpose-specific MCP tool descriptions from the canonical registry while preserving tool names, schemas, and access policy.
+
 ## 0.4.6
 
 - Preserve complete Draft 2020-12 input-schema publication and validation before SDK argument parsing or handler invocation, including local-only reference resolution.
