@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import socket
 import subprocess
 import sys
@@ -15,7 +16,7 @@ import tarfile
 import venv
 from datetime import UTC, datetime
 from importlib import metadata
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 from zipfile import ZipFile
 
@@ -210,9 +211,16 @@ print(json.dumps({"origin": str(origin), "site_packages": str(site_packages), "v
 
 
 class SmokeFailure(RuntimeError):
-    def __init__(self, step: str, message: str) -> None:
+    def __init__(
+        self,
+        step: str,
+        message: str,
+        *,
+        check_record: dict[str, Any] | None = None,
+    ) -> None:
         super().__init__(message)
         self.step = step
+        self.check_record = check_record
 
 
 def _sha256(path: Path) -> str:
@@ -281,15 +289,45 @@ def _validate_paths(args: argparse.Namespace) -> dict[str, Path]:
     return paths
 
 
+def _archive_parts(name: str, *, directory: bool = False) -> tuple[str, ...]:
+    normalized = name.replace("\\", "/")
+    if normalized.startswith("/"):
+        raise SmokeFailure("archive_audit", "absolute archive member path is forbidden")
+    raw_parts = normalized.split("/")
+    if directory and raw_parts and raw_parts[-1] == "":
+        raw_parts.pop()
+    if (
+        not raw_parts
+        or any(part in {"", ".", ".."} for part in raw_parts)
+        or raw_parts[0].endswith(":")
+    ):
+        raise SmokeFailure("archive_audit", "unsafe archive member path is forbidden")
+    return tuple(PurePosixPath(normalized).parts)
+
+
 def _archive_names(artifacts: dict[str, Path]) -> tuple[list[str], list[str]]:
+    sdist_names: list[str] = []
     with tarfile.open(artifacts["sdist"], "r:gz") as archive:
-        sdist_names = [
-            member.name.replace("\\", "/")
-            for member in archive.getmembers()
-            if member.isfile()
-        ]
+        for member in archive.getmembers():
+            _archive_parts(member.name, directory=member.isdir())
+            if (
+                member.issym()
+                or member.islnk()
+                or not (member.isfile() or member.isdir())
+            ):
+                raise SmokeFailure(
+                    "archive_audit",
+                    "sdist must contain only regular files and directories",
+                )
+            if member.isfile():
+                sdist_names.append(member.name.replace("\\", "/"))
+    wheel_names: list[str] = []
     with ZipFile(artifacts["wheel"]) as archive:
-        wheel_names = [name.replace("\\", "/") for name in archive.namelist()]
+        for wheel_member in archive.infolist():
+            _archive_parts(wheel_member.filename, directory=wheel_member.is_dir())
+            if wheel_member.is_dir():
+                continue
+            wheel_names.append(wheel_member.filename.replace("\\", "/"))
     for archive_path, names in (
         (artifacts["sdist"], sdist_names),
         (artifacts["wheel"], wheel_names),
@@ -304,6 +342,79 @@ def _archive_names(artifacts: dict[str, Path]) -> tuple[list[str], list[str]]:
                     f"forbidden archive member found in {archive_path.name}",
                 )
     return sdist_names, wheel_names
+
+
+def _extract_sdist(sdist: Path, destination: Path, version: str) -> Path:
+    if destination.exists() or destination.is_symlink():
+        raise SmokeFailure(
+            "archive_extract", "sdist extraction directory must be fresh"
+        )
+    destination.mkdir(parents=True)
+    extraction_root = destination.resolve(strict=True)
+    seen: set[tuple[str, ...]] = set()
+    root_name: str | None = None
+    with tarfile.open(sdist, "r:gz") as archive:
+        members = archive.getmembers()
+        package_info = next(
+            (
+                member
+                for member in members
+                if member.isfile() and member.name.endswith("/PKG-INFO")
+            ),
+            None,
+        )
+        if package_info is None:
+            raise SmokeFailure("archive_extract", "sdist package metadata is missing")
+        root_parts = _archive_parts(package_info.name)
+        root_name = root_parts[0]
+        if version not in root_name:
+            raise SmokeFailure("archive_extract", "sdist root version is inconsistent")
+
+        for member in members:
+            parts = _archive_parts(member.name, directory=member.isdir())
+            if parts in seen:
+                raise SmokeFailure(
+                    "archive_extract", "sdist contains duplicate member paths"
+                )
+            seen.add(parts)
+            if parts[0] != root_name:
+                raise SmokeFailure(
+                    "archive_extract", "sdist contains multiple root directories"
+                )
+            if (
+                member.issym()
+                or member.islnk()
+                or not (member.isfile() or member.isdir())
+            ):
+                raise SmokeFailure(
+                    "archive_extract",
+                    "sdist must contain only regular files and directories",
+                )
+            target = destination.joinpath(*parts)
+            resolved_target = target.resolve(strict=False)
+            if not resolved_target.is_relative_to(extraction_root):
+                raise SmokeFailure(
+                    "archive_extract", "sdist member escapes extraction directory"
+                )
+            if member.isdir():
+                target.mkdir(parents=True, exist_ok=True)
+                continue
+            target.parent.mkdir(parents=True, exist_ok=True)
+            source = archive.extractfile(member)
+            if source is None:
+                raise SmokeFailure("archive_extract", "sdist member could not be read")
+            try:
+                with source, target.open("xb") as output:
+                    shutil.copyfileobj(source, output)
+            except OSError as exc:
+                raise SmokeFailure(
+                    "archive_extract", "sdist member could not be written"
+                ) from exc
+
+    source_root = destination / root_name
+    if not source_root.is_dir() or not (source_root / "pyproject.toml").is_file():
+        raise SmokeFailure("archive_extract", "extracted sdist is not a Python project")
+    return source_root
 
 
 def _check_payload(
@@ -412,6 +523,19 @@ def _check_payload(
             )
 
 
+def _safe_diagnostic(stderr: str) -> str:
+    detail = "\n".join(line.strip() for line in stderr.splitlines() if line.strip())
+    detail = re.sub(r"\x1b\[[0-9;]*m", "", detail)
+    detail = re.sub(
+        r"(?i)\b(authorization|client_secret|password|secret|token)\b\s*[:=]\s*[^\s,;]+",
+        r"\1=<redacted>",
+        detail,
+    )
+    detail = re.sub(r"(?i)\bBearer\s+[^\s,;]+", "Bearer <redacted>", detail)
+    detail = re.sub(r"(?<![\w:])/(?:[^\s/:]+/)*[^\s/:]*", "<path>", detail)
+    return " | ".join(detail.splitlines()[-3:])[:400]
+
+
 def _run(
     name: str,
     argv: list[str],
@@ -430,17 +554,21 @@ def _run(
         check=False,
         timeout=timeout,
     )
-    records.append(
-        {
-            "name": name,
-            "argv": _redact_argv(argv),
-            "argv_sha256": hashlib.sha256("\0".join(argv).encode()).hexdigest(),
-            "exit_code": result.returncode,
-            "result": "pass" if result.returncode == 0 else "fail",
-        }
-    )
+    check_record = {
+        "name": name,
+        "argv": _redact_argv(argv),
+        "argv_sha256": hashlib.sha256("\0".join(argv).encode()).hexdigest(),
+        "exit_code": result.returncode,
+        "result": "pass" if result.returncode == 0 else "fail",
+        "diagnostic": _safe_diagnostic(result.stderr) if result.returncode else None,
+    }
+    records.append(check_record)
     if result.returncode:
-        raise SmokeFailure(name, f"check failed: {name}")
+        detail = check_record["diagnostic"]
+        message = f"check failed: {name}"
+        if detail:
+            message += f": {detail}"
+        raise SmokeFailure(name, message, check_record=check_record)
     return result
 
 
@@ -518,6 +646,9 @@ def _smoke(args: argparse.Namespace) -> dict[str, Any]:
     work = paths["work_dir"]
     records: list[dict[str, Any]] = []
     install_records: list[dict[str, Any]] = []
+    sdist_source = _extract_sdist(
+        artifacts["sdist"], work / "sdist-source", args.expected_version
+    )
     probe_path = work / "installed_probe.py"
     probe_path.write_text(_INSTALLED_PROBE, encoding="utf-8")
     artifact_receipts: dict[str, dict[str, Any]] = {}
@@ -562,7 +693,7 @@ def _smoke(args: argparse.Namespace) -> dict[str, Any]:
                 "--no-isolation",
                 "--outdir",
                 str(sdist_wheelhouse),
-                str(artifacts["sdist"]),
+                str(sdist_source),
             ],
         ),
     ):
@@ -754,6 +885,7 @@ def main() -> int:
             else None,
             "failed_step": failed_step,
             "diagnostic": diagnostic,
+            "failed_check": exc.check_record if isinstance(exc, SmokeFailure) else None,
         }
         path = Path(args.receipt)
         product_root = Path(__file__).resolve().parents[1]

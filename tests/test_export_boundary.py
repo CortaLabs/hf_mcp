@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 import json
 import os
+import runpy
 import socket
 import subprocess
 import sys
@@ -542,11 +543,18 @@ def _make_controlled_release_archives(
         sdist_files.pop("src/hf_mcp/data/forums_index.json")
     if failure_mode != "skill_reference":
         sdist_files["skills/hf-mycode/references/MYCODE_REFERENCE.md"] = b"reference\n"
+    if failure_mode == "unsafe_tar":
+        sdist_files["../escape.txt"] = b"outside\n"
     with tarfile.open(sdist_path, "w:gz") as archive:
         for name, content in sdist_files.items():
             info = tarfile.TarInfo(f"hf-mcp-0.4.5/{name}")
             info.size = len(content)
             archive.addfile(info, io.BytesIO(content))
+        if failure_mode == "symlink_tar":
+            link = tarfile.TarInfo("hf-mcp-0.4.5/skills/outside")
+            link.type = tarfile.SYMTYPE
+            link.linkname = "../../outside"
+            archive.addfile(link)
     wheelhouse = tmp_path / "wheelhouse"
     wheelhouse.mkdir()
     (wheelhouse / "provisioned.whl").touch()
@@ -563,6 +571,8 @@ def _make_controlled_release_archives(
         ("version", "version_audit"),
         ("resource", "resource_audit"),
         ("skill_reference", "resource_audit"),
+        ("unsafe_tar", "archive_audit"),
+        ("symlink_tar", "archive_audit"),
         ("stale_filename", "version_audit"),
         ("duplicate", "artifact_inventory"),
         ("unsafe_work", "arguments"),
@@ -604,6 +614,101 @@ def test_installed_smoke_cli_records_controlled_failure(
     assert failure_receipt["status"] == "failed"
     assert failure_receipt["failed_step"] == expected_step
     assert str(Path.home()) not in result.stdout + result.stderr
+
+
+@pytest.mark.core
+@pytest.mark.build
+@pytest.mark.regression
+def test_sdist_smoke_extractor_materializes_only_the_validated_project(
+    tmp_path: Path,
+) -> None:
+    artifact_dir, _, _ = _make_controlled_release_archives(tmp_path)
+    smoke = runpy.run_path(str(PRODUCT_ROOT / "scripts" / "smoke_installed.py"))
+    source_root = smoke["_extract_sdist"](
+        artifact_dir / "hf-mcp-0.4.5.tar.gz",
+        tmp_path / "extracted",
+        "0.4.5",
+    )
+
+    assert source_root.is_dir()
+    assert (source_root / "pyproject.toml").is_file()
+    assert (source_root / "src" / "hf_mcp" / "__init__.py").is_file()
+    assert not (tmp_path / "escape.txt").exists()
+
+
+@pytest.mark.core
+@pytest.mark.build
+@pytest.mark.regression
+def test_failed_subprocess_diagnostics_redact_paths_and_secret_text(
+    tmp_path: Path,
+) -> None:
+    smoke = runpy.run_path(str(PRODUCT_ROOT / "scripts" / "smoke_installed.py"))
+    records = []
+    child_code = (
+        "import sys; "
+        f"print({str(tmp_path)!r} + ' not a directory token=smoke-secret', file=sys.stderr); "
+        "print('stdout-poison-marker'); raise SystemExit(4)"
+    )
+
+    with pytest.raises(smoke["SmokeFailure"]) as failure:
+        smoke["_run"](
+            "controlled_failure",
+            [sys.executable, "-I", "-c", child_code],
+            cwd=tmp_path,
+            env={"PATH": os.defpath},
+            records=records,
+        )
+
+    detail = str(failure.value)
+    assert "not a directory" in detail
+    assert str(tmp_path) not in detail
+    assert "smoke-secret" not in detail
+    assert "stdout-poison-marker" not in detail
+    assert records[0]["exit_code"] == 4
+    assert records[0]["result"] == "fail"
+    assert records[0]["diagnostic"] == detail.removeprefix(
+        "check failed: controlled_failure: "
+    )
+
+
+@pytest.mark.core
+@pytest.mark.build
+@pytest.mark.regression
+def test_smoke_failure_receipt_binds_safe_check_exit_and_argv(
+    tmp_path: Path, isolated_child_context
+) -> None:
+    artifact_dir, wheelhouse, _ = _make_controlled_release_archives(tmp_path)
+    work_dir = tmp_path / "work"
+    receipt = tmp_path / "receipt.json"
+    child_env = isolated_child_context.environment()
+    child_env.pop("PYTHONPATH", None)
+    child_env.pop("HF_BUILD_SRC", None)
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(PRODUCT_ROOT / "scripts" / "smoke_installed.py"),
+            "--artifact-dir", str(artifact_dir),
+            "--work-dir", str(work_dir),
+            "--wheelhouse", str(wheelhouse),
+            "--source-revision", "a" * 40,
+            "--expected-version", "0.4.5",
+            "--receipt", str(receipt),
+        ],
+        cwd=tmp_path,
+        env=child_env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    failure_receipt = json.loads(receipt.read_text(encoding="utf-8"))
+    failed_check = failure_receipt["failed_check"]
+    assert result.returncode != 0
+    assert failure_receipt["failed_step"] == "sdist_build_dependencies"
+    assert failed_check["result"] == "fail"
+    assert failed_check["exit_code"] != 0
+    assert len(failed_check["argv_sha256"]) == 64
+    assert str(tmp_path) not in json.dumps(failure_receipt) + result.stderr
 
 
 @pytest.mark.core
