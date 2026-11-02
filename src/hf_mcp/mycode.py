@@ -319,7 +319,9 @@ def _convert_markdown_to_mycode(value: str) -> _ConversionResult:
             code = "ordered_list"
         protected_source_ranges.append((start, end, code))
 
-    for start, end, code in reversed(protected_source_ranges):
+    for start, end, code in sorted(
+        protected_source_ranges, key=lambda item: item[0], reverse=True
+    ):
         finding(code, start, end)
         protect_range(start, end, mapped.text[start:end])
 
@@ -379,7 +381,19 @@ def _convert_markdown_to_mycode(value: str) -> _ConversionResult:
                 readable_protected_spans.append(mapped.source_span(opening + 1, label_end))
             rendered = f"[img]{destination}[/img]"
         else:
-            rendered = f"[url={destination}]{_convert_markdown_inline(label)}[/url]"
+            label_mapped = _MappedText(
+                label,
+                mapped.source_spans[opening + 1:label_end].copy(),
+            )
+
+            def record_unmatched(start: int, end: int) -> None:
+                finding("unmatched_markdown_delimiter", start, end)
+
+            converted_label = _convert_markdown_inline(
+                label_mapped,
+                on_unmatched=record_unmatched,
+            )
+            rendered = f"[url={destination}]{converted_label}[/url]"
         protect_range(start, end, rendered)
 
     for match in reversed(list(_MARKDOWN_BARE_URL_PATTERN.finditer(mapped.text))):
@@ -559,25 +573,6 @@ def _markdown_destination_end(text: str, opening: int) -> int | None:
     return None
 
 
-def _protect_markdown_escapes(text: str, placeholder_prefix: str, protected: list[str]) -> str:
-    output: list[str] = []
-    cursor = 0
-    for start, end, escaped_character in _markdown_escape_runs(text):
-        output.append(text[cursor:start])
-        run_length = end - start
-        output.append("\\" * (run_length // 2))
-        if escaped_character is not None:
-            protected.append(text[escaped_character])
-            output.append(f"{placeholder_prefix}{len(protected) - 1}\x00")
-            cursor = escaped_character + 1
-        else:
-            if run_length % 2:
-                output.append("\\")
-            cursor = end
-    output.append(text[cursor:])
-    return "".join(output)
-
-
 def _markdown_escape_runs(text: str) -> Iterator[tuple[int, int, int | None]]:
     index = 0
     while index < len(text):
@@ -596,11 +591,34 @@ def _markdown_escape_runs(text: str) -> Iterator[tuple[int, int, int | None]]:
         index = escaped_character + 1 if escaped_character is not None else end
 
 
-def _convert_markdown_inline(value: str) -> str:
+def _convert_markdown_inline(
+    mapped: _MappedText,
+    *,
+    on_unmatched: Callable[[int, int], None] | None = None,
+) -> str:
     protected: list[str] = []
-    prefix = _markdown_placeholder_prefix(value)
-    text = _protect_markdown_escapes(value, prefix, protected)
-    text = _convert_markdown_emphasis(text)
+    prefix = _markdown_placeholder_prefix(mapped.text)
+    for start, end, escaped_character in reversed(list(_markdown_escape_runs(mapped.text))):
+        run_length = end - start
+        replacement = "\\" * (run_length // 2)
+        if escaped_character is not None:
+            protected.append(mapped.text[escaped_character])
+            replacement += f"{prefix}{len(protected) - 1}\x00"
+            end = escaped_character + 1
+        elif run_length % 2:
+            replacement += "\\"
+        mapped.replace(start, end, replacement)
+
+    if on_unmatched is None:
+        text = _convert_markdown_emphasis(mapped.text)
+    else:
+        def record_source_span(start: int, end: int) -> None:
+            on_unmatched(*mapped.source_span(start, end))
+
+        text = _convert_markdown_emphasis(
+            mapped.text,
+            on_unmatched=record_source_span,
+        )
     for index, replacement in enumerate(protected):
         text = text.replace(f"{prefix}{index}\x00", replacement)
     return text

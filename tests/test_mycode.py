@@ -525,3 +525,54 @@ def test_conversion_analysis_shares_composed_protection_decisions() -> None:
     findings = analyze_conversion(code_destination, "markdown")
     assert tuple(f.code for f in findings) == ("inline_code_block_conversion",)
     assert (findings[0].start, findings[0].end) == (4, 9)
+
+
+def test_conversion_analysis_orders_protection_spans_by_source() -> None:
+    source = "- parent\n  - child\n\n# heading"
+
+    assert markdown_to_mycode(source) == source
+    findings = analyze_conversion(source, "markdown")
+    assert tuple(
+        (finding.code, finding.start, finding.end, source[finding.start:finding.end])
+        for finding in findings
+    ) == (
+        ("nested_list", 0, 19, "- parent\n  - child\n"),
+        ("heading", 20, 29, "# heading"),
+    )
+
+    long_parent = "parent " * 20
+    long_source = f"- {long_parent}\n  - child\n\n# **heading**"
+    assert markdown_to_mycode(long_source) == long_source.replace("parent \n", "parent\n")
+    long_findings = analyze_conversion(long_source, "markdown")
+    assert tuple(
+        (
+            finding.code,
+            finding.start,
+            finding.end,
+            long_source[finding.start:finding.end],
+        )
+        for finding in long_findings
+    ) == (
+        ("nested_list", 0, len(f"- {long_parent}\n  - child\n"), f"- {long_parent}\n  - child\n"),
+        (
+            "heading",
+            long_source.index("# **heading**"),
+            len(long_source),
+            "# **heading**",
+        ),
+    )
+
+
+def test_conversion_analysis_reports_unmatched_link_label_delimiters() -> None:
+    malformed = "preface [**broken](url)"
+
+    assert markdown_to_mycode(malformed) == "preface [url=url]**broken[/url]"
+    findings = analyze_conversion(malformed, "markdown")
+    assert tuple(
+        (finding.code, finding.start, finding.end, malformed[finding.start:finding.end])
+        for finding in findings
+    ) == (("unmatched_markdown_delimiter", 9, 11, "**"),)
+
+    supported = "preface [**bold**](url)"
+    assert markdown_to_mycode(supported) == "preface [url=url][b]bold[/b][/url]"
+    assert analyze_conversion(supported, "markdown") == ()
