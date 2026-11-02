@@ -4,6 +4,9 @@
 
 Current release line: `0.3.6`.
 
+The PyPI publisher workflow runs only on an explicit manual dispatch. Export
+boundary checks also resolve files from a standalone `hf-mcp` product checkout.
+
 Version 0.3.6 preserves raw and MyCode write input exactly. Readable projections
 preserve code and PHP payloads and literal entity spellings, show spoiler titles
 and boundaries as plaintext, and retain malformed markup. This conversion

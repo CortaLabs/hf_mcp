@@ -6,6 +6,11 @@
 - Keep spoiler titles and boundaries explicit in readable projections; retain unknown, unclosed, and crossed markup.
 - Describe readable conversion as plaintext and supported-subset projection without claiming Hack Forums public quote fidelity.
 
+## 0.3.5
+
+- Restrict the PyPI publisher workflow to explicit manual dispatches.
+- Make export-boundary checks resolve from a standalone product checkout while preserving the manifest's product-prefixed allowlist.
+
 ## 0.3.4
 
 - Route `me.read`, `users.read`, and `bratings.read` through generic `POST /api/v2/read` instead of helper URLs returning HTTP 404, including raw output mode.

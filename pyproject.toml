@@ -45,9 +45,9 @@ hf_mcp = ["data/*.json"]
 
 [tool.pytest.ini_options]
 markers = [
-  "core: fast hermetic contract tests",
-  "regression: permanent regression guards",
-  "formatting: MyCode formatting behavior",
-  "registry: registry behavior",
-  "build: package build and distribution behavior",
+  "core: fast hermetic tests",
+  "regression: permanent bug guard",
+  "formatting: formatting subsystem tests",
+  "registry: registry subsystem tests",
+  "build: build and export boundary tests",
 ]
