@@ -169,13 +169,19 @@ def offline_post(route, payload, headers):
     root = next(iter(asks))
     assert root in {"forums", "threads", "posts"}
     calls.append(root)
-    return {root: [{"fid": 123, "tid": 456, "pid": 789, "subject": "Offline fixture"}]}
+    row = {"fid": 123, "tid": 456, "pid": 789, "subject": "Offline fixture"}
+    if root == "posts":
+        assert asks["posts"].get("message") is True
+        row["message"] = "[b]Post body[/b]"
+    elif root == "threads":
+        row["firstpost"] = {"pid": 789, "message": "[b]Thread body[/b]"}
+    return {root: [row]}
 transport = HFTransport(token_store=OfflineTokens(), base_url="https://example.invalid")
 transport._post_json = offline_post
 settings = HFMCPSettings(
     profile="custom",
-    enabled_capabilities=frozenset({"forums.index", "forums.read", "threads.read", "posts.read", "formatting.preflight"}),
-    enabled_parameter_families=frozenset({"selectors.forum", "selectors.thread", "selectors.post", "filters.pagination", "fields.posts.body", "formatting.content"}),
+    enabled_capabilities=frozenset({"forums.index", "forums.read", "threads.read", "posts.read"}),
+    enabled_parameter_families=frozenset({"selectors.forum", "selectors.thread", "selectors.post", "filters.pagination", "fields.posts.body"}),
 )
 server.resolve_runtime_bundle = lambda _: RuntimeBundle(transport=transport, settings=settings)
 assert "[b]portable[/b]" in markdown_to_mycode("**portable**")
@@ -210,19 +216,31 @@ def run_stdio(variant):
             assert initialized["protocolVersion"] == "2025-11-25"
             send("notifications/initialized", {}, notification=True)
         tools = {tool["name"] for tool in send("tools/list", {})["tools"]}
-        assert {"forums_read", "threads_read", "posts_read", "formatting_preflight"} <= tools
+        assert tools == {"forums_index", "forums_read", "threads_read", "posts_read"}
         for name, arguments in (
             ("forums_read", {"fid": 123}),
-            ("threads_read", {"fid": 123}),
-            ("posts_read", {"tid": 456}),
+            ("threads_read", {"fid": 123, "body_format": "markdown"}),
+            (
+                "posts_read",
+                {
+                    "tid": 456,
+                    "include_post_body": True,
+                    "body_format": "markdown",
+                },
+            ),
         ):
             read_result = send("tools/call", {"name": name, "arguments": arguments})
             assert not read_result.get("isError", False)
             assert isinstance(read_result.get("structuredContent"), dict)
             assert "Offline fixture" in json.dumps(read_result["structuredContent"])
-        format_result = send("tools/call", {"name": "formatting_preflight", "arguments": {"message": "**portable**", "message_format": "markdown"}})
-        assert not format_result.get("isError", False)
-        assert "[b]portable[/b]" in json.dumps(format_result.get("structuredContent", {}))
+            if name == "threads_read":
+                assert read_result["structuredContent"]["threads"][0]["firstpost"][
+                    "message"
+                ] == "**Thread body**"
+            elif name == "posts_read":
+                assert read_result["structuredContent"]["posts"][0]["message"] == "**Post body**"
+        formatted = markdown_to_mycode("**portable**")
+        assert "[b]portable[/b]" in formatted
         return {"wire": variant, "tools": len(tools), "read": "pass", "formatter": "pass"}
     finally:
         process.stdin.close()
@@ -552,16 +570,21 @@ def _check_payload(
             )
 
 
+def _redact_text(value: str) -> str:
+    value = re.sub(
+        r"(?i)\b(authorization|client_secret|password|secret|token)\b\s*[:=]\s*[^\s,;]+",
+        r"\1=<redacted>",
+        value,
+    )
+    value = re.sub(r"(?i)\bBearer\s+[^\s,;]+", "Bearer <redacted>", value)
+    value = re.sub(r"(?<![\w:])/(?:[^\s/'\";,]+/)*[^\s/'\";,]+", "<path>", value)
+    return value
+
+
 def _safe_diagnostic(stderr: str) -> str:
     detail = "\n".join(line.strip() for line in stderr.splitlines() if line.strip())
     detail = re.sub(r"\x1b\[[0-9;]*m", "", detail)
-    detail = re.sub(
-        r"(?i)\b(authorization|client_secret|password|secret|token)\b\s*[:=]\s*[^\s,;]+",
-        r"\1=<redacted>",
-        detail,
-    )
-    detail = re.sub(r"(?i)\bBearer\s+[^\s,;]+", "Bearer <redacted>", detail)
-    detail = re.sub(r"(?<![\w:])/(?:[^\s/:]+/)*[^\s/:]*", "<path>", detail)
+    detail = _redact_text(detail)
     return " | ".join(detail.splitlines()[-3:])[:400]
 
 
@@ -601,8 +624,65 @@ def _run(
     return result
 
 
+def _filesystem_snapshot(roots: tuple[Path, ...]) -> dict[str, tuple[str, str]]:
+    snapshot = {}
+    for index, root in enumerate(roots):
+        if root.is_symlink() or not root.is_dir():
+            raise SmokeFailure(
+                "state_snapshot", "synthetic state directory is unavailable"
+            )
+        for path in sorted(root.rglob("*")):
+            relative = f"{index}/{path.relative_to(root).as_posix()}"
+            if path.is_symlink():
+                snapshot[relative] = ("symlink", os.readlink(path))
+            elif path.is_dir():
+                snapshot[relative] = ("directory", "")
+            elif path.is_file():
+                snapshot[relative] = ("file", _sha256(path))
+            else:
+                snapshot[relative] = ("other", "")
+    return snapshot
+
+
+def _run_state_guarded_probe(
+    name: str,
+    argv: list[str],
+    *,
+    cwd: Path,
+    env: dict[str, str],
+    records: list[dict[str, Any]],
+    state_roots: tuple[Path, ...],
+) -> subprocess.CompletedProcess[str]:
+    before = _filesystem_snapshot(state_roots)
+    result = _run(name, argv, cwd=cwd, env=env, records=records, timeout=120)
+    after = _filesystem_snapshot(state_roots)
+    changed = before != after
+    check_record = {
+        "name": f"{name}_state_preservation",
+        "argv": _redact_argv(argv),
+        "argv_sha256": hashlib.sha256("\0".join(argv).encode()).hexdigest(),
+        "exit_code": 1 if changed else 0,
+        "result": "fail" if changed else "pass",
+        "diagnostic": (
+            "installed probe changed synthetic config/token/draft filesystem state"
+            if changed
+            else None
+        ),
+    }
+    records.append(check_record)
+    if changed:
+        raise SmokeFailure(
+            "state_leak",
+            "installed probe changed synthetic config/token/draft filesystem state",
+            check_record=check_record,
+        )
+    return result
+
+
 def _redact_argv(argv: list[str]) -> list[str]:
-    return [Path(item).name if item.startswith("/") else item for item in argv]
+    return [
+        Path(item).name if item.startswith("/") else _redact_text(item) for item in argv
+    ]
 
 
 def _guarded_module(python: Path, module: str, arguments: list[str]) -> list[str]:
@@ -626,10 +706,12 @@ def _probe_command(python: Path, probe_path: Path) -> list[str]:
 
 
 def _offline_env(home: Path, expected_version: str, state: Path) -> dict[str, str]:
+    home.mkdir(parents=True, exist_ok=True)
     config = state / "config.yaml"
     token = state / "token.json"
     drafts = state / "drafts"
     drafts.mkdir(parents=True, exist_ok=True)
+    (home / ".config" / "hf_mcp" / "drafts").mkdir(parents=True, exist_ok=True)
     config.write_text(
         "profile: custom\nenabled_capabilities: [forums.index, forums.read, threads.read, posts.read]\nenabled_parameter_families: [selectors.forum, selectors.thread, selectors.post, filters.pagination, fields.posts.body]\n",
         encoding="utf-8",
@@ -886,13 +968,13 @@ def _smoke(args: argparse.Namespace) -> dict[str, Any]:
             env=env,
             records=records,
         )
-        probe_result = _run(
+        probe_result = _run_state_guarded_probe(
             f"{env_name}_installed_probe",
             _probe_command(python, probe_path),
             cwd=work,
             env=env,
             records=records,
-            timeout=120,
+            state_roots=(state, work / f"{env_name}-home"),
         )
         try:
             probe = json.loads(probe_result.stdout.strip().splitlines()[-1])
@@ -949,6 +1031,32 @@ def _arguments() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def _failure_receipt_document(
+    args: argparse.Namespace, error: Exception
+) -> dict[str, Any]:
+    failed_step = error.step if isinstance(error, SmokeFailure) else "smoke"
+    diagnostic = (
+        str(error)[:300]
+        if isinstance(error, SmokeFailure)
+        else f"smoke failed with {type(error).__name__}"
+    )
+    source_revision = getattr(args, "source_revision", "")
+    expected_version = getattr(args, "expected_version", "")
+    return {
+        "schema_version": "hf-mcp-installed-smoke.v1",
+        "status": "failed",
+        "source_revision": source_revision
+        if REVISION_PATTERN.fullmatch(source_revision)
+        else None,
+        "expected_version": expected_version
+        if VERSION_PATTERN.fullmatch(expected_version)
+        else None,
+        "failed_step": failed_step,
+        "diagnostic": diagnostic,
+        "failed_check": error.check_record if isinstance(error, SmokeFailure) else None,
+    }
+
+
 def main() -> int:
     args = _arguments()
     try:
@@ -994,27 +1102,9 @@ def main() -> int:
         tarfile.TarError,
         ValueError,
     ) as exc:
-        failed_step = exc.step if isinstance(exc, SmokeFailure) else "smoke"
-        diagnostic = (
-            str(exc)[:300]
-            if isinstance(exc, SmokeFailure)
-            else f"smoke failed with {type(exc).__name__}"
-        )
-        source_revision = getattr(args, "source_revision", "")
-        expected_version = getattr(args, "expected_version", "")
-        failure = {
-            "schema_version": "hf-mcp-installed-smoke.v1",
-            "status": "failed",
-            "source_revision": source_revision
-            if REVISION_PATTERN.fullmatch(source_revision)
-            else None,
-            "expected_version": expected_version
-            if VERSION_PATTERN.fullmatch(expected_version)
-            else None,
-            "failed_step": failed_step,
-            "diagnostic": diagnostic,
-            "failed_check": exc.check_record if isinstance(exc, SmokeFailure) else None,
-        }
+        failure = _failure_receipt_document(args, exc)
+        failed_step = failure["failed_step"]
+        diagnostic = failure["diagnostic"]
         path = Path(args.receipt)
         product_root = Path(__file__).resolve().parents[1]
         resolved_path = path.resolve(strict=False)

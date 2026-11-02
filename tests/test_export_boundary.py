@@ -148,19 +148,19 @@ def test_live_write_boundary_language_is_published_in_docs_and_config() -> None:
     config_yaml = _allowlist_product_path(YAML_EXAMPLE).read_text(encoding="utf-8")
 
     required_boundary_markers = [
-        "posts.reply",
-        "TID 6083735",
-        "at most one `threads.create` in `FID 375`",
-        "No Bytes live writes are in scope for this wave.",
-        "Placeholder writes remain out of scope in this wave",
+        "Live-write validation stays manual: no automated live writes.",
+        "Concrete writes require `confirm_live=true`.",
+        "Root-level repository assets are outside the export boundary.",
+        "Token-store location must be an absolute path outside the tracked repository",
     ]
     for marker in required_boundary_markers:
         assert marker in export_boundary_doc
 
-    assert "posts.reply on TID 6083735" in config_yaml
-    assert "at most one threads.create in FID 375" in config_yaml
-    assert "no Bytes live writes in this wave" in config_yaml
-    assert "placeholder writes remain out of scope in this wave" in config_yaml
+    assert "profile: reader" in config_yaml
+    assert "enabled_capabilities: []" in config_yaml
+    assert "enabled_parameter_families: []" in config_yaml
+    assert "no automated live writes" in config_yaml
+    assert "concrete writes require confirm_live=true" in config_yaml
 
 
 @pytest.mark.core
@@ -698,6 +698,86 @@ def test_failed_subprocess_diagnostics_redact_paths_and_secret_text(
     assert records[0]["diagnostic"] == detail.removeprefix(
         "check failed: controlled_failure: "
     )
+
+
+@pytest.mark.core
+@pytest.mark.build
+@pytest.mark.regression
+@pytest.mark.parametrize(
+    "state_target", ["config", "token", "explicit_draft", "default_draft"]
+)
+@pytest.mark.parametrize("install_kind", ["wheel", "sdist_derived"])
+def test_installed_probe_state_guard_passes_clean_state_and_receipts_each_write(
+    state_target: str,
+    install_kind: str,
+    tmp_path: Path,
+    isolated_child_context,
+) -> None:
+    smoke = runpy.run_path(str(PRODUCT_ROOT / "scripts" / "smoke_installed.py"))
+    home = isolated_child_context.state.home
+    explicit_state = tmp_path / "explicit-state"
+    explicit_drafts = explicit_state / "drafts"
+    explicit_drafts.mkdir(parents=True)
+    config_path = explicit_state / "config.yaml"
+    config_path.write_text("profile: reader\n", encoding="utf-8")
+    token_path = explicit_state / "token.json"
+    default_draft = home / ".config" / "hf_mcp" / "drafts" / "smoke-draft.json"
+    child_env = isolated_child_context.environment()
+    child_env.update(
+        {
+            "HOME": str(home),
+            "HF_MCP_CONFIG": str(config_path),
+            "HF_MCP_TOKEN_PATH": str(token_path),
+            "HF_MCP_DRAFT_DIR": str(explicit_drafts),
+        }
+    )
+    state_roots = (explicit_state, home)
+    records = []
+    clean_result = smoke["_run_state_guarded_probe"](
+        f"{install_kind}_installed_probe",
+        [sys.executable, "-I", "-c", "print('clean probe')"],
+        cwd=tmp_path,
+        env=child_env,
+        records=records,
+        state_roots=state_roots,
+    )
+    assert clean_result.returncode == 0
+    assert records[-1]["result"] == "pass"
+
+    target_path = {
+        "config": config_path,
+        "token": token_path,
+        "explicit_draft": explicit_drafts / "synthetic.json",
+        "default_draft": default_draft,
+    }[state_target]
+    write_code = (
+        "from pathlib import Path; "
+        f"Path({str(target_path)!r}).write_text('synthetic-state-write', encoding='utf-8')"
+    )
+    with pytest.raises(smoke["SmokeFailure"]) as failure:
+        smoke["_run_state_guarded_probe"](
+            f"{install_kind}_installed_probe",
+            [sys.executable, "-I", "-c", write_code],
+            cwd=tmp_path,
+            env=child_env,
+            records=records,
+            state_roots=state_roots,
+        )
+
+    receipt_path = tmp_path / "state-leak-receipt.json"
+    receipt = smoke["_failure_receipt_document"](
+        smoke["argparse"].Namespace(
+            source_revision="a" * 40, expected_version="0.6.1"
+        ),
+        failure.value,
+    )
+    receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
+    failed_receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    assert failed_receipt["status"] == "failed"
+    assert failed_receipt["failed_step"] == "state_leak"
+    assert failed_receipt["failed_check"]["result"] == "fail"
+    assert "filesystem state" in failed_receipt["diagnostic"]
+    assert str(tmp_path) not in json.dumps(failed_receipt)
 
 
 @pytest.mark.core
