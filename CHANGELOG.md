@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.3
+
+- Preserve complete balanced Markdown link and image destinations while converting nested emphasis and flat top-level unordered lists.
+- Honor backslash escape parity and protect code payloads from conversion passes.
+- Keep unsupported Markdown constructs literal and retain raw/MyCode write identity; no Hack Forums public-rendering fidelity is claimed.
+
 ## 0.3.6
 
 - Preserve exact raw-body and MyCode write input, protected code/PHP payloads, and literal entity spellings.

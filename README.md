@@ -2,12 +2,19 @@
 
 `hf-mcp` is a standalone MCP server package for the Hack Forums API v2.
 
-Current release line: `0.3.6`.
+Current release line: `0.4.3`.
 
 The PyPI publisher workflow runs only on an explicit manual dispatch. Export
 boundary checks also resolve files from a standalone `hf-mcp` product checkout.
 
-Version 0.3.6 preserves raw and MyCode write input exactly. Readable projections
+Version 0.4.3 preserves raw and MyCode write input exactly. Markdown conversion
+supports balanced links and images, nested emphasis, flat top-level unordered
+lists, basic quotes, and fenced or inline code. Unsupported Markdown constructs
+remain literal. The existing code-label, inline-code, and image-alt mappings can
+omit source details; this supported-subset projection does not claim fidelity
+with Hack Forums' public rendering.
+
+Readable projections
 preserve code and PHP payloads and literal entity spellings, show spoiler titles
 and boundaries as plaintext, and retain malformed markup. This conversion
 contract does not claim fidelity with Hack Forums' public quote rendering.

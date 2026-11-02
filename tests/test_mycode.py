@@ -223,3 +223,111 @@ def test_markdown_to_mycode_does_not_italicize_snake_case_or_urls() -> None:
         "https://github.com/CortaLabs/hf_mcp stays literal.\n"
         "normal [i]italic[/i] and [i]emphasis[/i] still convert."
     )
+
+
+@pytest.mark.regression
+def test_markdown_balanced_destinations() -> None:
+    destination = "https://example.org/a_(b)/c?x=a%2Fb&raw=&quot;"
+    escaped_destination = r"https://example.org/a\(b\)/c"
+
+    assert markdown_to_mycode(f"[docs]({destination})") == f"[url={destination}]docs[/url]"
+    assert markdown_to_mycode(f"[docs]({escaped_destination})") == (
+        f"[url={escaped_destination}]docs[/url]"
+    )
+    assert markdown_to_mycode(r"[literal \*x*](url)") == "[url=url]literal *x*[/url]"
+    assert markdown_to_mycode(r"\[docs](url)") == "[docs](url)"
+    assert markdown_to_mycode("[Use `code`](https://x.test)") == (
+        "[url=https://x.test]Use [code]code[/code][/url]"
+    )
+    image = "https://example.org/a_b*(c).png"
+    assert markdown_to_mycode(f"![alt]({image})") == f"[img]{image}[/img]"
+    assert markdown_to_mycode("[docs](https://example.org/a_(b)/c)") == (
+        "[url=https://example.org/a_(b)/c]docs[/url]"
+    )
+
+
+@pytest.mark.regression
+def test_markdown_escape_parity() -> None:
+    slash = chr(92)
+    for run_length in range(5):
+        source = slash * run_length + "*x*"
+        prefix = slash * (run_length // 2)
+        expected = prefix + ("*x*" if run_length % 2 else "[i]x[/i]")
+        assert markdown_to_mycode(source) == expected
+
+    assert markdown_to_mycode(r"literal\n stays literal") == r"literal\n stays literal"
+    assert markdown_to_mycode(r"escaped \_underscore\_") == "escaped _underscore_"
+
+
+@pytest.mark.regression
+def test_markdown_nested_emphasis() -> None:
+    converted = (
+        ("***both styles***", "[b][i]both styles[/i][/b]"),
+        ("**bold _nested_**", "[b]bold [i]nested[/i][/b]"),
+        ("*outer **bold** outer*", "[i]outer [b]bold[/b] outer[/i]"),
+        ("~~strike **bold**~~", "[s]strike [b]bold[/b][/s]"),
+    )
+    for source, expected in converted:
+        output = markdown_to_mycode(source)
+        assert output == expected
+        _assert_balanced_emphasis_tags(output)
+
+    assert markdown_to_mycode("unmatched ** stays and intraword a_b_c stays") == (
+        "unmatched ** stays and intraword a_b_c stays"
+    )
+
+
+def _assert_balanced_emphasis_tags(value: str) -> None:
+    stack: list[str] = []
+    for match in re.finditer(r"\[(?P<close>/)?(?P<tag>b|i|s)\]", value):
+        tag = match.group("tag")
+        if match.group("close"):
+            assert stack and stack.pop() == tag
+        else:
+            stack.append(tag)
+    assert stack == []
+
+
+@pytest.mark.regression
+def test_markdown_flat_list_boundaries() -> None:
+    assert markdown_to_mycode("- one\n\n* two") == (
+        "[list]\n[*] one\n[/list]\n\n[list]\n[*] two\n[/list]"
+    )
+    nested = "- parent\n  - child\n- sibling"
+    assert markdown_to_mycode(nested) == nested
+    styled_nested = "- **parent**\n  - *child*\n- sibling"
+    assert markdown_to_mycode(styled_nested) == styled_nested
+    mixed = "1. ordered\n- unordered"
+    assert markdown_to_mycode(mixed) == mixed
+    task = "- [ ] todo\n- [x] done"
+    assert markdown_to_mycode(task) == task
+
+
+@pytest.mark.regression
+def test_markdown_unsupported_constructs_preserved() -> None:
+    source = (
+        "# heading\n"
+        "\n| a | b |\n| - | - |\n| x | y |\n"
+        "\n---\n"
+        "[docs](https://example.org/page \"optional title\")\n"
+        "~~~python\nprint('keep')\n~~~"
+    )
+    assert markdown_to_mycode(source) == source
+
+
+@pytest.mark.regression
+def test_markdown_code_payload_identity() -> None:
+    payload = "\x00CODE0\x00 \x00INLCODE0\x00 **literal** [docs](https://x.test/a_(b))"
+    source = f"```python\n{payload}\n``` and `**inline** [x](url)`"
+    rendered = markdown_to_mycode(source)
+
+    assert rendered == f"[code]{payload}\n[/code] and [code]**inline** [x](url)[/code]"
+
+
+@pytest.mark.regression
+def test_markdown_terminates_on_malformed_input() -> None:
+    malformed = "[label](https://example.org/" + "(" * 1200 + "*unfinished"
+    assert markdown_to_mycode(malformed) == malformed
+    unclosed_link = "[label](https://example.org/*leave this literal*"
+    assert markdown_to_mycode(unclosed_link) == unclosed_link
+    assert markdown_to_mycode("*" * 3000 + "unfinished") == "*" * 3000 + "unfinished"

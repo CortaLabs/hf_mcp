@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import re
-from typing import Literal
+from typing import Callable, Literal
 
 BodyFormat = Literal["raw", "clean", "markdown"]
 MessageFormat = Literal["mycode", "markdown"]
@@ -11,11 +11,8 @@ _VALID_BODY_FORMATS: frozenset[str] = frozenset({"raw", "clean", "markdown"})
 _VALID_MESSAGE_FORMATS: frozenset[str] = frozenset({"mycode", "markdown"})
 _CODE_BLOCK_PATTERN = re.compile(r"\[(code|php)\](.*?)\[/\1\]", re.IGNORECASE | re.DOTALL)
 _MARKDOWN_CODE_BLOCK_PATTERN = re.compile(r"```(?:[a-zA-Z0-9_-]+)?\n?(.*?)```", re.DOTALL)
-_MARKDOWN_IMAGE_PATTERN = re.compile(r"!\[[^\]]*\]\(([^)\s]+)\)")
-_MARKDOWN_LINK_PATTERN = re.compile(r"(?<!!)\[([^\]]+)\]\(([^)\s]+)\)")
 _MARKDOWN_INLINE_CODE_PATTERN = re.compile(r"`([^`\n]+)`")
-_MARKDOWN_ASTERISK_EMPHASIS_PATTERN = re.compile(r"(?<![\w*])\*(?![\s*])(.+?)(?<![\s*])\*(?![\w*])", re.DOTALL)
-_MARKDOWN_UNDERSCORE_EMPHASIS_PATTERN = re.compile(r"(?<![\w_])_(?![\s_])(.+?)(?<![\s_])_(?![\w_])", re.DOTALL)
+_MARKDOWN_LIST_LINE_PATTERN = re.compile(r"^(?P<indent>[ \t]*)(?P<marker>[-*]|\d+[.)])\s+(?P<body>.*)$")
 _QUOTE_PATTERN = re.compile(r"\[quote(?P<attrs>[^\]]*)\](?P<body>.*?)\[/quote\]", re.IGNORECASE | re.DOTALL)
 _LIST_PATTERN = re.compile(r"\[list(?:=[^\]]*)?\](?P<body>.*?)\[/list\]", re.IGNORECASE | re.DOTALL)
 _URL_WITH_TARGET_PATTERN = re.compile(r"\[url=(?P<url>[^\]]+)\](?P<body>.*?)\[/url\]", re.IGNORECASE | re.DOTALL)
@@ -203,35 +200,310 @@ def _convert_spoilers(text: str) -> str:
 
 
 def markdown_to_mycode(value: str) -> str:
-    code_blocks: list[str] = []
-    inline_code_blocks: list[str] = []
+    protected: list[str] = []
+    placeholder_prefix = _markdown_placeholder_prefix(value)
 
-    def _stash_code_block(match: re.Match[str]) -> str:
-        code_blocks.append(f"[code]{match.group(1)}[/code]")
-        return f"\u0000CODE{len(code_blocks) - 1}\u0000"
+    def protect(replacement: str) -> str:
+        protected.append(replacement)
+        return f"{placeholder_prefix}{len(protected) - 1}\x00"
 
-    def _stash_inline_code(match: re.Match[str]) -> str:
-        inline_code_blocks.append(f"[code]{match.group(1)}[/code]")
-        return f"\u0000INLCODE{len(inline_code_blocks) - 1}\u0000"
-
-    text = _MARKDOWN_CODE_BLOCK_PATTERN.sub(_stash_code_block, value)
-    text = _MARKDOWN_INLINE_CODE_PATTERN.sub(_stash_inline_code, text)
-    text = _MARKDOWN_IMAGE_PATTERN.sub(lambda match: f"[img]{match.group(1)}[/img]", text)
-    text = _MARKDOWN_LINK_PATTERN.sub(lambda match: f"[url={match.group(2)}]{match.group(1)}[/url]", text)
-    text = re.sub(r"\*\*(.+?)\*\*", r"[b]\1[/b]", text, flags=re.DOTALL)
-    text = re.sub(r"__(.+?)__", r"[b]\1[/b]", text, flags=re.DOTALL)
-    text = re.sub(r"~~(.+?)~~", r"[s]\1[/s]", text, flags=re.DOTALL)
-    text = _MARKDOWN_ASTERISK_EMPHASIS_PATTERN.sub(r"[i]\1[/i]", text)
-    text = _MARKDOWN_UNDERSCORE_EMPHASIS_PATTERN.sub(r"[i]\1[/i]", text)
+    text = _MARKDOWN_CODE_BLOCK_PATTERN.sub(
+        lambda match: protect(f"[code]{match.group(1)}[/code]"), value
+    )
+    text = _MARKDOWN_INLINE_CODE_PATTERN.sub(
+        lambda match: protect(f"[code]{match.group(1)}[/code]"), text
+    )
+    text = _protect_unsupported_markdown_blocks(text, protect)
+    text = _protect_unsupported_markdown_lists(text, protect)
+    text = _protect_markdown_links(text, placeholder_prefix, protected)
+    text = _protect_markdown_escapes(text, placeholder_prefix, protected)
+    text = _convert_markdown_emphasis(text)
     text = _convert_markdown_blockquotes(text)
     text = _convert_markdown_lists(text)
 
-    for index, replacement in enumerate(code_blocks):
-        text = text.replace(f"\u0000CODE{index}\u0000", replacement)
-    for index, replacement in enumerate(inline_code_blocks):
-        text = text.replace(f"\u0000INLCODE{index}\u0000", replacement)
-
+    for index in reversed(range(len(protected))):
+        text = text.replace(f"{placeholder_prefix}{index}\x00", protected[index])
     return _tidy_text(text)
+
+
+def _markdown_placeholder_prefix(value: str) -> str:
+    attempt = 0
+    while True:
+        prefix = f"\x00HF_MCP_MARKDOWN_{attempt}_"
+        if prefix not in value:
+            return prefix
+        attempt += 1
+
+
+def _protect_unsupported_markdown_blocks(text: str, protect: Callable[[str], str]) -> str:
+    # These constructs are intentionally preserved whole until their semantics
+    # are part of the supported conversion subset.
+    def protect_table(match: re.Match[str]) -> str:
+        return protect(match.group(0))
+
+    text = re.sub(r"(?m)^ {0,3}~{3,}[^\n]*(?:\n[\s\S]*?^ {0,3}~{3,}[^\n]*|\Z)", protect_table, text)
+    text = re.sub(r"(?m)^ {0,3}(?:#{1,6}[^\n]*|(?:\*\s*){3,}|(?:-\s*){3,}|(?:_\s*){3,})$", protect_table, text)
+    lines = text.splitlines(keepends=True)
+    output: list[str] = []
+    index = 0
+    while index < len(lines):
+        if lines[index].lstrip().startswith("|"):
+            end = index + 1
+            while end < len(lines) and lines[end].lstrip().startswith("|"):
+                end += 1
+            output.append(protect("".join(lines[index:end])))
+            index = end
+            continue
+        output.append(lines[index])
+        index += 1
+    return "".join(output)
+
+
+def _is_flat_unordered_list(matches: list[re.Match[str]]) -> bool:
+    return all(
+        not match.group("indent")
+        and match.group("marker") in ("-", "*")
+        and not re.match(r"\[[ xX]\](?:\s|$)", match.group("body"))
+        for match in matches
+    )
+
+
+def _protect_unsupported_markdown_lists(text: str, protect: Callable[[str], str]) -> str:
+    lines = text.splitlines(keepends=True)
+    output: list[str] = []
+    index = 0
+    while index < len(lines):
+        first = _MARKDOWN_LIST_LINE_PATTERN.match(lines[index].rstrip("\r\n"))
+        if first is None:
+            output.append(lines[index])
+            index += 1
+            continue
+
+        end = index + 1
+        matches = [first]
+        while end < len(lines):
+            match = _MARKDOWN_LIST_LINE_PATTERN.match(lines[end].rstrip("\r\n"))
+            if match is None:
+                break
+            matches.append(match)
+            end += 1
+
+        if _is_flat_unordered_list(matches):
+            output.extend(lines[index:end])
+        else:
+            output.append(protect("".join(lines[index:end])))
+        index = end
+    return "".join(output)
+
+
+def _protect_markdown_links(text: str, placeholder_prefix: str, protected: list[str]) -> str:
+    output: list[str] = []
+    cursor = 0
+    index = 0
+    while index < len(text):
+        image = text.startswith("![", index)
+        open_bracket = index + 1 if image else index
+        if _markdown_character_is_escaped(text, open_bracket):
+            index += 1
+            continue
+        if text[open_bracket:open_bracket + 1] != "[":
+            index += 1
+            continue
+
+        label_end = _markdown_matching_bracket(text, open_bracket)
+        if label_end is None or label_end + 1 >= len(text) or text[label_end + 1] != "(":
+            index += 1
+            continue
+        destination_end = _markdown_destination_end(text, label_end + 1)
+        if destination_end is None:
+            output.append(text[cursor:index])
+            protected.append(text[index:])
+            output.append(f"{placeholder_prefix}{len(protected) - 1}\x00")
+            cursor = len(text)
+            break
+
+        destination = text[label_end + 2:destination_end]
+        whole_end = destination_end + 1
+        if any(character.isspace() for character in destination):
+            # Optional titles and other whitespace-bearing forms stay literal.
+            replacement = text[index:whole_end]
+        else:
+            label = text[open_bracket + 1:label_end]
+            rendered = f"[img]{destination}[/img]" if image else (
+                f"[url={destination}]{_convert_markdown_inline(label)}[/url]"
+            )
+            replacement = rendered
+
+        output.append(text[cursor:index])
+        protected.append(replacement)
+        output.append(f"{placeholder_prefix}{len(protected) - 1}\x00")
+        cursor = whole_end
+        index = whole_end
+    output.append(text[cursor:])
+    return "".join(output)
+
+
+def _markdown_matching_bracket(text: str, opening: int) -> int | None:
+    depth = 0
+    index = opening
+    while index < len(text):
+        character = text[index]
+        if character == "\\":
+            run_end = index
+            while run_end < len(text) and text[run_end] == "\\":
+                run_end += 1
+            if (run_end - index) % 2 and run_end < len(text) and text[run_end] in r"!\"#$%&'()*+,-./:;<=>?@[\]^_`{|}~":
+                index = run_end + 1
+                continue
+            index = run_end
+            continue
+        if character == "[":
+            depth += 1
+        elif character == "]":
+            depth -= 1
+            if depth == 0:
+                return index
+        index += 1
+    return None
+
+
+def _markdown_character_is_escaped(text: str, index: int) -> bool:
+    backslashes = 0
+    index -= 1
+    while index >= 0 and text[index] == "\\":
+        backslashes += 1
+        index -= 1
+    return backslashes % 2 == 1
+
+
+def _markdown_destination_end(text: str, opening: int) -> int | None:
+    depth = 1
+    index = opening + 1
+    while index < len(text):
+        character = text[index]
+        if character == "\\":
+            run_end = index
+            while run_end < len(text) and text[run_end] == "\\":
+                run_end += 1
+            if (run_end - index) % 2 and run_end < len(text):
+                index = run_end + 1
+                continue
+            index = run_end
+            continue
+        if character == "(":
+            depth += 1
+        elif character == ")":
+            depth -= 1
+            if depth == 0:
+                return index
+        index += 1
+    return None
+
+
+def _protect_markdown_escapes(text: str, placeholder_prefix: str, protected: list[str]) -> str:
+    output: list[str] = []
+    index = 0
+    while index < len(text):
+        if text[index] != "\\":
+            output.append(text[index])
+            index += 1
+            continue
+        end = index
+        while end < len(text) and text[end] == "\\":
+            end += 1
+        run_length = end - index
+        output.append("\\" * (run_length // 2))
+        if run_length % 2 and end < len(text) and text[end] in r"!\"#$%&'()*+,-./:;<=>?@[\]^_`{|}~":
+            protected.append(text[end])
+            output.append(f"{placeholder_prefix}{len(protected) - 1}\x00")
+            index = end + 1
+        else:
+            if run_length % 2:
+                output.append("\\")
+            index = end
+    return "".join(output)
+
+
+def _convert_markdown_inline(value: str) -> str:
+    protected: list[str] = []
+    prefix = _markdown_placeholder_prefix(value)
+    text = _protect_markdown_escapes(value, prefix, protected)
+    text = _convert_markdown_emphasis(text)
+    for index, replacement in enumerate(protected):
+        text = text.replace(f"{prefix}{index}\x00", replacement)
+    return text
+
+
+def _convert_markdown_emphasis(text: str) -> str:
+    delimiters = ("***", "___", "**", "__", "~~", "*", "_")
+
+    def convert(start: int, end: int) -> str:
+        output: list[str] = []
+        index = start
+        while index < end:
+            marker = next((item for item in delimiters if text.startswith(item, index)), None)
+            if marker is None:
+                output.append(text[index])
+                index += 1
+                continue
+            run_end = index + len(marker)
+            while run_end < end and text[run_end] == marker[0]:
+                run_end += 1
+            if run_end - index != len(marker):
+                output.append(text[index:run_end])
+                index = run_end
+                continue
+            if marker.startswith("_") and index > start and (text[index - 1].isalnum() or text[index - 1] == "_"):
+                output.append(marker)
+                index = run_end
+                continue
+            if run_end >= end or text[run_end].isspace():
+                output.append(marker)
+                index = run_end
+                continue
+
+            closing = _find_markdown_emphasis_close(text, marker, run_end, end)
+            if closing is None or closing == run_end:
+                output.append(marker)
+                index = run_end
+                continue
+            inner = convert(run_end, closing)
+            if marker in ("***", "___"):
+                output.append(f"[b][i]{inner}[/i][/b]")
+            elif marker in ("**", "__"):
+                output.append(f"[b]{inner}[/b]")
+            elif marker == "~~":
+                output.append(f"[s]{inner}[/s]")
+            else:
+                output.append(f"[i]{inner}[/i]")
+            index = closing + len(marker)
+        return "".join(output)
+
+    return convert(0, len(text))
+
+
+def _find_markdown_emphasis_close(text: str, marker: str, start: int, end: int) -> int | None:
+    index = start
+    while index < end:
+        found = text.find(marker, index, end)
+        if found < 0:
+            return None
+        run_start = found
+        while run_start > start and text[run_start - 1] == marker[0]:
+            run_start -= 1
+        run_end = found + len(marker)
+        while run_end < end and text[run_end] == marker[0]:
+            run_end += 1
+        if run_end - run_start == len(marker) and found == run_start:
+            if marker.startswith("_") and run_end < end and (text[run_end].isalnum() or text[run_end] == "_"):
+                index = run_end
+                continue
+            if found == start or text[found - 1].isspace():
+                index = run_end
+                continue
+            return found
+        index = run_end
+    return None
 
 
 def format_write_text(value: str, message_format: MessageFormat) -> str:
@@ -366,24 +638,32 @@ def _convert_markdown_blockquotes(text: str) -> str:
 
 
 def _convert_markdown_lists(text: str) -> str:
-    lines = text.splitlines()
+    lines = text.split("\n")
     converted: list[str] = []
-    list_items: list[str] = []
+    index = 0
 
-    def _flush_list() -> None:
-        if not list_items:
-            return
-        converted.append("[list]\n" + "\n".join(f"[*] {item}" for item in list_items) + "\n[/list]")
-        list_items.clear()
+    while index < len(lines):
+        first = _MARKDOWN_LIST_LINE_PATTERN.match(lines[index])
+        if first is None:
+            converted.append(lines[index])
+            index += 1
+            continue
 
-    for line in lines:
-        match = re.match(r"\s*[-*]\s+(.+)", line)
-        if match:
-            list_items.append(match.group(1).strip())
+        end = index + 1
+        matches = [first]
+        while end < len(lines):
+            match = _MARKDOWN_LIST_LINE_PATTERN.match(lines[end])
+            if match is None:
+                break
+            matches.append(match)
+            end += 1
+
+        if _is_flat_unordered_list(matches):
+            items = [match.group("body").strip() for match in matches]
+            converted.append("[list]\n" + "\n".join(f"[*] {item}" for item in items) + "\n[/list]")
         else:
-            _flush_list()
-            converted.append(line)
-    _flush_list()
+            converted.extend(lines[index:end])
+        index = end
     return "\n".join(converted)
 
 
