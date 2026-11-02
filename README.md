@@ -2,7 +2,7 @@
 
 `hf-mcp` is a standalone MCP server package for the Hack Forums API v2.
 
-Current release line: `0.4.4`.
+Current release line: `0.4.5`.
 
 The PyPI publisher workflow runs only on an explicit manual dispatch. Export
 boundary checks also resolve files from a standalone `hf-mcp` product checkout.

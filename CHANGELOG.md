@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.5
+
+- Build audited wheel and sdist artifacts from an isolated staged product copy without deleting source-tree build state.
+- Add an offline installed-artifact smoke path for fresh wheel and sdist-derived installs.
+
 ## 0.4.4
 
 - Pin development, test, and build tools in the `dev` extra and add offline source checks with isolated HF test state.

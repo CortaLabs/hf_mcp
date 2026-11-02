@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import io
+import json
 import os
 import socket
 import subprocess
 import sys
+import tarfile
 import tomllib
+import zipfile
 from importlib.metadata import version as installed_version
 from pathlib import Path
 
@@ -42,6 +46,8 @@ EXPECTED_MANIFEST_LINES = {
     "include MANIFEST.in",
     "include config.example.yaml",
     "include export_manifest.toml",
+    "include scripts/build_release_dists.sh",
+    "include scripts/smoke_installed.py",
     "recursive-include docs *.md",
     "recursive-include skills *.md",
     "recursive-include tests *.py",
@@ -178,11 +184,15 @@ def test_pyproject_release_contract_and_metadata_boundary() -> None:
     project = pyproject["project"]
 
     assert project["name"] == "hf-mcp"
+    assert project["version"] == "0.4.5"
     assert isinstance(project["version"], str) and project["version"].strip()
     assert project["scripts"]["hf-mcp"] == "hf_mcp.cli:main"
     assert project["keywords"] == ["hackforums", "mcp", "model-context-protocol"]
     assert "Programming Language :: Python :: 3.11" in project["classifiers"]
     assert pyproject["tool"]["setuptools"]["package-data"]["hf_mcp"] == ["data/*.json"]
+    assert pyproject["tool"]["setuptools"]["data-files"]["skills/hf-mycode/references"] == [
+        "skills/hf-mycode/references/MYCODE_REFERENCE.md"
+    ]
 
     pyproject_text = PYPROJECT_PATH.read_text(encoding="utf-8").lower()
     for forbidden in FORBIDDEN_EXPORT_REFERENCES:
@@ -198,6 +208,20 @@ def test_sdist_manifest_is_explicit_and_package_local() -> None:
     assert set(lines) == EXPECTED_MANIFEST_LINES
     for forbidden in FORBIDDEN_EXPORT_REFERENCES:
         assert forbidden not in manifest_text.lower(), f"Forbidden reference in MANIFEST.in: {forbidden}"
+
+
+@pytest.mark.core
+@pytest.mark.build
+@pytest.mark.regression
+def test_release_build_derives_version_and_preserves_executable_entrypoint() -> None:
+    build_script = (PRODUCT_ROOT / "scripts" / "build_release_dists.sh").read_text(
+        encoding="utf-8"
+    )
+
+    assert "tomllib.loads" in build_script
+    assert 'version = "0.4.5"' not in build_script
+    assert '"$SCRIPT_DIR/.."' not in build_script
+    assert os.access(PRODUCT_ROOT / "scripts" / "build_release_dists.sh", os.X_OK)
 
 
 @pytest.mark.core
@@ -382,3 +406,211 @@ if not credentials_absent or not all(blocked):
     assert "credentials_absent=True; outbound_blocked=True" in result.stdout
     assert client_poison not in result.stdout + result.stderr
     assert secret_poison not in result.stdout + result.stderr
+
+
+@pytest.mark.core
+@pytest.mark.build
+@pytest.mark.regression
+@pytest.mark.parametrize("target_kind", ["relative", "source", "nonempty"])
+def test_release_build_rejects_unsafe_output_without_mutating_source(
+    target_kind: str, tmp_path: Path, isolated_child_context
+) -> None:
+    if target_kind == "relative":
+        target = Path("relative-build-output")
+    elif target_kind == "source":
+        target = PRODUCT_ROOT
+    else:
+        target = tmp_path / "not-empty"
+        target.mkdir()
+        sentinel = target / "preserve.txt"
+        sentinel.write_text("keep", encoding="utf-8")
+
+    child_env = isolated_child_context.environment()
+    child_env["PYTHONDONTWRITEBYTECODE"] = "1"
+    result = subprocess.run(
+        ["bash", str(PRODUCT_ROOT / "scripts" / "build_release_dists.sh"), str(target)],
+        cwd=PRODUCT_ROOT,
+        env=child_env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode != 0
+    if target_kind == "nonempty":
+        assert sentinel.read_text(encoding="utf-8") == "keep"
+
+
+@pytest.mark.core
+@pytest.mark.build
+@pytest.mark.regression
+def test_smoke_rejects_missing_artifacts_without_writing_a_pass_receipt(
+    tmp_path: Path, isolated_child_context
+) -> None:
+    artifact_dir = tmp_path / "artifacts"
+    artifact_dir.mkdir()
+    work_dir = tmp_path / "work"
+    wheelhouse = tmp_path / "wheelhouse"
+    wheelhouse.mkdir()
+    (wheelhouse / "provisioned.whl").touch()
+    receipt = tmp_path / "receipt.json"
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(PRODUCT_ROOT / "scripts" / "smoke_installed.py"),
+            "--artifact-dir", str(artifact_dir),
+            "--work-dir", str(work_dir),
+            "--wheelhouse", str(wheelhouse),
+            "--source-revision", "a" * 40,
+            "--expected-version", "0.4.5",
+            "--receipt", str(receipt),
+        ],
+        cwd=tmp_path,
+        env=isolated_child_context.environment(),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert json.loads(receipt.read_text(encoding="utf-8"))["status"] == "failed"
+    assert "artifact" in (result.stdout + result.stderr).lower()
+
+
+def _make_controlled_release_archives(
+    tmp_path: Path, *, failure_mode: str | None = None
+) -> tuple[Path, Path, Path]:
+    artifact_dir = tmp_path / "artifacts"
+    artifact_dir.mkdir()
+    wheel_name = "hf_mcp-0.4.5-py3-none-any.whl"
+    if failure_mode == "stale_filename":
+        wheel_name = "hf_mcp-0.4.4-py3-none-any.whl"
+    wheel_path = artifact_dir / wheel_name
+    wheel_files = {
+        "hf_mcp/__init__.py": b"__version__ = '0.4.5'\n",
+        "hf_mcp/cli.py": b"",
+        "hf_mcp/server.py": b"",
+        "hf_mcp/dispatcher.py": b"",
+        "hf_mcp/transport.py": b"",
+        "hf_mcp/data/forums_index.json": b"{}\n",
+        "hf_mcp-0.4.5.dist-info/METADATA": (
+            b"Name: hf-mcp\nVersion: 0.4.4\n"
+            if failure_mode == "version"
+            else b"Name: hf-mcp\nVersion: 0.4.5\n"
+        ),
+        "hf_mcp-0.4.5.dist-info/WHEEL": b"Wheel-Version: 1.0\n",
+        "hf_mcp-0.4.5.data/data/docs/configuration.md": b"config\n",
+    }
+    if failure_mode != "resource":
+        wheel_files["hf_mcp/data/forums_index.json"] = b"{}\n"
+    else:
+        wheel_files.pop("hf_mcp/data/forums_index.json")
+    for skill in ("hf-api-v2", "hf-mcp", "hf-mcp-bootstrap", "hf-mcp-reads", "hf-mcp-writes", "hf-mycode"):
+        wheel_files[f"hf_mcp-0.4.5.data/data/skills/{skill}/SKILL.md"] = b"skill\n"
+    if failure_mode != "skill_reference":
+        wheel_files[
+            "hf_mcp-0.4.5.data/data/skills/hf-mycode/references/MYCODE_REFERENCE.md"
+        ] = b"reference\n"
+    if failure_mode == "contamination":
+        wheel_files["private/.council/AGENTS.md"] = b"forbidden\n"
+    with zipfile.ZipFile(wheel_path, "w") as archive:
+        for name, content in wheel_files.items():
+            archive.writestr(name, content)
+
+    sdist_path = artifact_dir / "hf-mcp-0.4.5.tar.gz"
+    sdist_files = {
+        "README.md": b"README\n",
+        "pyproject.toml": b"[project]\nname='hf-mcp'\nversion='0.4.5'\n",
+        "MANIFEST.in": b"",
+        "config.example.yaml": b"profile: custom\n",
+        "export_manifest.toml": b"",
+        "scripts/build_release_dists.sh": b"",
+        "scripts/smoke_installed.py": b"",
+        "src/hf_mcp/__init__.py": b"",
+        "src/hf_mcp/cli.py": b"",
+        "src/hf_mcp/server.py": b"",
+        "src/hf_mcp/dispatcher.py": b"",
+        "src/hf_mcp/transport.py": b"",
+        "src/hf_mcp/data/forums_index.json": b"{}\n",
+        "docs/configuration.md": b"config\n",
+        "PKG-INFO": b"Name: hf-mcp\nVersion: 0.4.5\n",
+    }
+    if failure_mode != "resource":
+        for skill in ("hf-api-v2", "hf-mcp", "hf-mcp-bootstrap", "hf-mcp-reads", "hf-mcp-writes", "hf-mycode"):
+            sdist_files[f"skills/{skill}/SKILL.md"] = b"skill\n"
+    else:
+        sdist_files.pop("src/hf_mcp/data/forums_index.json")
+    if failure_mode != "skill_reference":
+        sdist_files["skills/hf-mycode/references/MYCODE_REFERENCE.md"] = b"reference\n"
+    with tarfile.open(sdist_path, "w:gz") as archive:
+        for name, content in sdist_files.items():
+            info = tarfile.TarInfo(f"hf-mcp-0.4.5/{name}")
+            info.size = len(content)
+            archive.addfile(info, io.BytesIO(content))
+    wheelhouse = tmp_path / "wheelhouse"
+    wheelhouse.mkdir()
+    (wheelhouse / "provisioned.whl").touch()
+    return artifact_dir, wheelhouse, wheel_path
+
+
+@pytest.mark.core
+@pytest.mark.build
+@pytest.mark.regression
+@pytest.mark.parametrize(
+    ("failure_mode", "expected_step"),
+    [
+        ("contamination", "archive_audit"),
+        ("version", "version_audit"),
+        ("resource", "resource_audit"),
+        ("skill_reference", "resource_audit"),
+        ("stale_filename", "version_audit"),
+        ("duplicate", "artifact_inventory"),
+        ("unsafe_work", "arguments"),
+    ],
+)
+def test_installed_smoke_cli_records_controlled_failure(
+    failure_mode: str, expected_step: str, tmp_path: Path, isolated_child_context
+) -> None:
+    artifact_dir, wheelhouse, wheel_path = _make_controlled_release_archives(
+        tmp_path, failure_mode=failure_mode
+    )
+    if failure_mode == "duplicate":
+        (artifact_dir / "hf_mcp-0.4.5-duplicate.whl").write_bytes(wheel_path.read_bytes())
+    work_dir = PRODUCT_ROOT if failure_mode == "unsafe_work" else tmp_path / "work"
+    receipt = tmp_path / "receipt.json"
+    child_env = isolated_child_context.environment()
+    child_env.pop("PYTHONPATH", None)
+    child_env.pop("HF_BUILD_SRC", None)
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(PRODUCT_ROOT / "scripts" / "smoke_installed.py"),
+            "--artifact-dir", str(artifact_dir),
+            "--work-dir", str(work_dir),
+            "--wheelhouse", str(wheelhouse),
+            "--source-revision", "a" * 40,
+            "--expected-version", "0.4.5",
+            "--receipt", str(receipt),
+        ],
+        cwd=tmp_path,
+        env=child_env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode != 0
+    failure_receipt = json.loads(receipt.read_text(encoding="utf-8"))
+    assert failure_receipt["status"] == "failed"
+    assert failure_receipt["failed_step"] == expected_step
+    assert str(Path.home()) not in result.stdout + result.stderr
+
+
+@pytest.mark.core
+@pytest.mark.build
+def test_release_metadata_describes_build_smoke_scope() -> None:
+    changelog = (PRODUCT_ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+    readme = (PRODUCT_ROOT / "README.md").read_text(encoding="utf-8")
+
+    assert "## 0.4.5" in changelog
+    assert "Current release line: `0.4.5`." in readme
