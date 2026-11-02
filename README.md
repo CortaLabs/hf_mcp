@@ -2,15 +2,19 @@
 
 `hf-mcp` is a standalone MCP server package for the Hack Forums API v2.
 
-Current release line: `0.4.1`.
+Current release line: `0.4.2`.
 
 The PyPI publisher workflow runs only on an explicit manual dispatch. Export
 boundary checks also resolve files from a standalone `hf-mcp` product checkout.
 
-Version 0.4.1 tightens the published schemas for Bytes deposits and withdrawals
-and keeps `hf.doctor` as a local catalog fact. This does not expose a callable
-diagnostic tool. The 0.4.0 release recorded canonical tool facts and derived
-locality metadata and behavior hints from the registry.
+Version 0.4.2 publishes and enforces the complete Draft 2020-12 input schema
+before SDK argument parsing, coercion, or handler invocation. Invalid values
+such as numeric strings, booleans used as integers, and unknown fields are
+rejected; omitted optional values keep their existing defaults. The 0.4.1
+release tightened the published schemas for Bytes deposits and withdrawals and
+kept `hf.doctor` as a local catalog fact without exposing a callable diagnostic
+tool. The 0.4.0 release recorded canonical tool facts and derived locality
+metadata and behavior hints from the registry.
 
 ## Install
 

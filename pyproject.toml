@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "hf-mcp"
-version = "0.4.1"
+version = "0.4.2"
 description = "Standalone Hack Forums MCP launch surface"
 keywords = ["hackforums", "mcp", "model-context-protocol"]
 classifiers = [
@@ -20,7 +20,7 @@ readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
 requires-python = ">=3.11"
-dependencies = ["PyYAML>=6.0", "mcp>=2.3.0,<3"]
+dependencies = ["PyYAML>=6.0", "jsonschema>=4.20.0", "referencing>=0.30.0", "mcp>=2.3.0,<3"]
 
 [project.scripts]
 hf-mcp = "hf_mcp.cli:main"

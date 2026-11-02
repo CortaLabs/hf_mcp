@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.2
+
+- Publish and validate complete Draft 2020-12 tool input schemas before SDK parsing or handler invocation, preserving original JSON types and optional-argument behavior.
+- Declare `jsonschema>=4.20.0` and `referencing>=0.30.0` as direct runtime dependencies for original-schema validation and local reference resolution.
+
 ## 0.4.1
 
 - Require at least 100 Bytes for deposit and withdrawal schemas while preserving the 1-Byte transfer minimum.
