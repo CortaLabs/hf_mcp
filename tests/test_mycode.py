@@ -476,6 +476,14 @@ def test_conversion_analysis_ignores_protected_content() -> None:
     assert analyze_conversion(mycode, "mycode") == ()
     assert analyze_conversion("\\# not a heading\n\\- [ ] literal", "markdown") == ()
 
+    protected_markdown = (
+        "[code][spoiler]secret[/spoiler][mystery]x[/mystery][/code]",
+        "[php][spoiler]secret[/spoiler][mystery]x[/mystery][/php]",
+    )
+    for source in protected_markdown:
+        assert markdown_to_mycode(source) == source
+        assert analyze_conversion(source, "markdown") == ()
+
 
 def test_conversion_analysis_is_deterministic() -> None:
     source = "![alt](x)\n# heading\n# heading"
@@ -495,3 +503,25 @@ def test_conversion_analysis_does_not_attest_uri_safety() -> None:
     assert tuple(ConversionFinding.__dataclass_fields__) == (
         "code", "kind", "stage", "start", "end"
     )
+
+
+def test_conversion_analysis_shares_composed_protection_decisions() -> None:
+    linked_emphasis = "**[docs](https://example.test)**"
+    assert markdown_to_mycode(linked_emphasis) == "[b][url=https://example.test]docs[/url][/b]"
+    assert analyze_conversion(linked_emphasis, "markdown") == ()
+
+    discarded_image_alt = "![*alt](https://example.test)"
+    assert markdown_to_mycode(discarded_image_alt) == "[img]https://example.test[/img]"
+    assert tuple(f.code for f in analyze_conversion(discarded_image_alt, "markdown")) == (
+        "image_alt_loss",
+    )
+
+    malformed_spoiler = "[spoiler][b]secret[/spoiler][/b]"
+    assert format_body_text(malformed_spoiler, "markdown") == malformed_spoiler
+    assert analyze_conversion(malformed_spoiler, "mycode") == ()
+
+    code_destination = "[x](`url`)"
+    assert markdown_to_mycode(code_destination) == "[url=[code]url[/code]]x[/url]"
+    findings = analyze_conversion(code_destination, "markdown")
+    assert tuple(f.code for f in findings) == ("inline_code_block_conversion",)
+    assert (findings[0].start, findings[0].end) == (4, 9)

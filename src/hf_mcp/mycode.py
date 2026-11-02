@@ -58,6 +58,27 @@ class _ConversionResult:
     findings: tuple[ConversionFinding, ...]
 
 
+@dataclass(slots=True)
+class _MappedText:
+    text: str
+    source_spans: list[tuple[int, int]]
+
+    @classmethod
+    def from_source(cls, value: str) -> _MappedText:
+        return cls(value, [(index, index + 1) for index in range(len(value))])
+
+    def source_span(self, start: int, end: int) -> tuple[int, int]:
+        spans = self.source_spans[start:end]
+        if not spans:
+            return 0, 0
+        return min(span[0] for span in spans), max(span[1] for span in spans)
+
+    def replace(self, start: int, end: int, replacement: str) -> None:
+        source_span = self.source_span(start, end)
+        self.text = self.text[:start] + replacement + self.text[end:]
+        self.source_spans[start:end] = [source_span] * len(replacement)
+
+
 TAG_RULES: dict[str, MyCodeRule] = {
     "b": MyCodeRule(markdown_prefix="**", markdown_suffix="**"),
     "strong": MyCodeRule(markdown_prefix="**", markdown_suffix="**"),
@@ -143,6 +164,23 @@ def _code_placeholder_prefix(value: str) -> str:
 
 
 def _protect_malformed_markup(text: str, placeholder_prefix: str) -> tuple[str, list[str]]:
+    malformed_ranges = _malformed_markup_ranges(text)
+    if not malformed_ranges:
+        return text, []
+
+    literal_blocks: list[str] = []
+    output: list[str] = []
+    cursor = 0
+    for index, (start, end) in enumerate(malformed_ranges):
+        output.append(text[cursor:start])
+        literal_blocks.append(text[start:end])
+        output.append(f"{placeholder_prefix}LITERAL{index}\x00")
+        cursor = end
+    output.append(text[cursor:])
+    return "".join(output), literal_blocks
+
+
+def _malformed_markup_ranges(text: str) -> list[tuple[int, int]]:
     stack: list[tuple[str, int]] = []
     malformed_start: int | None = None
     malformed_ranges: list[tuple[int, int]] = []
@@ -177,18 +215,8 @@ def _protect_malformed_markup(text: str, placeholder_prefix: str) -> tuple[str, 
         malformed_ranges.append((malformed_start if malformed_start is not None else stack[0][1], len(text)))
 
     if not malformed_ranges:
-        return text, []
-
-    literal_blocks: list[str] = []
-    output: list[str] = []
-    cursor = 0
-    for index, (start, end) in enumerate(malformed_ranges):
-        output.append(text[cursor:start])
-        literal_blocks.append(text[start:end])
-        output.append(f"{placeholder_prefix}LITERAL{index}\x00")
-        cursor = end
-    output.append(text[cursor:])
-    return "".join(output), literal_blocks
+        return []
+    return malformed_ranges
 
 
 def _convert_spoilers(text: str) -> str:
@@ -228,33 +256,167 @@ def markdown_to_mycode(value: str) -> str:
 
 
 def _convert_markdown_to_mycode(value: str) -> _ConversionResult:
-    findings = _markdown_conversion_findings(value)
+    findings: list[ConversionFinding] = []
     protected: list[str] = []
     placeholder_prefix = _markdown_placeholder_prefix(value)
+    mapped = _MappedText.from_source(value)
+    readable_protected_spans: list[tuple[int, int]] = []
 
-    def protect(replacement: str) -> str:
+    def protect_range(start: int, end: int, replacement: str) -> None:
         protected.append(replacement)
-        return f"{placeholder_prefix}{len(protected) - 1}\x00"
+        placeholder = f"{placeholder_prefix}{len(protected) - 1}\x00"
+        mapped.replace(start, end, placeholder)
 
-    # Shield whole unsupported constructs before converting code nested inside them.
-    text = _protect_unsupported_markdown_blocks(value, protect)
-    text = _protect_unsupported_markdown_lists(text, protect)
-    text = _MARKDOWN_CODE_BLOCK_PATTERN.sub(
-        lambda match: protect(f"[code]{match.group('body')}[/code]"), text
+    def finding(
+        code: str,
+        start: int,
+        end: int,
+        *,
+        kind: Literal["unsupported", "loss"] = "unsupported",
+        stage: Literal["mycode", "readable"] = "mycode",
+    ) -> None:
+        findings.append(ConversionFinding(code, kind, stage, start, end))
+
+    # Parse source protection in the same order as output. Fence code is
+    # masked while unsupported blocks and lists are recognized, but its
+    # placeholder is not emitted until after those outer literal spans.
+    analysis_chars = list(mapped.text)
+    for match in _MARKDOWN_CODE_BLOCK_PATTERN.finditer(mapped.text):
+        for position in range(match.start(), match.end()):
+            if analysis_chars[position] not in "\r\n":
+                analysis_chars[position] = " "
+    analysis_text = "".join(analysis_chars)
+    protected_source_ranges: list[tuple[int, int, str]] = []
+
+    for match in _MARKDOWN_TILDE_FENCE_PATTERN.finditer(analysis_text):
+        protected_source_ranges.append((match.start(), match.end(), "unsupported_fence"))
+        for position in range(match.start(), match.end()):
+            if analysis_chars[position] not in "\r\n":
+                analysis_chars[position] = " "
+    analysis_text = "".join(analysis_chars)
+    for match in _MARKDOWN_UNSUPPORTED_BLOCK_LINE_PATTERN.finditer(analysis_text):
+        code = "heading" if match.group("heading") else "horizontal_rule"
+        protected_source_ranges.append((match.start(), match.end(), code))
+        for position in range(match.start(), match.end()):
+            if analysis_chars[position] not in "\r\n":
+                analysis_chars[position] = " "
+    analysis_text = "".join(analysis_chars)
+    for start, end in _iter_markdown_table_ranges(analysis_text):
+        protected_source_ranges.append((start, end, "table"))
+        for position in range(start, end):
+            if analysis_chars[position] not in "\r\n":
+                analysis_chars[position] = " "
+    analysis_text = "".join(analysis_chars)
+
+    for start, end, matches in _iter_markdown_list_groups(analysis_text):
+        if _is_flat_unordered_list(matches):
+            continue
+        if any(re.match(r"\[[ xX]\](?:\s|$)", item.group("body")) for item in matches):
+            code = "task_list"
+        elif any(item.group("indent") for item in matches):
+            code = "nested_list"
+        else:
+            code = "ordered_list"
+        protected_source_ranges.append((start, end, code))
+
+    for start, end, code in reversed(protected_source_ranges):
+        finding(code, start, end)
+        protect_range(start, end, mapped.text[start:end])
+
+    # Convert fence blocks only after unsupported outer spans have been
+    # protected, matching the payload-preserving output order.
+    for match in reversed(list(_MARKDOWN_CODE_BLOCK_PATTERN.finditer(mapped.text))):
+        if match.group("language"):
+            source_span = mapped.source_span(match.start("language"), match.end("language"))
+            finding("fence_language_loss", *source_span, kind="loss")
+        source_span = mapped.source_span(match.start(), match.end())
+        readable_protected_spans.append(source_span)
+        protect_range(
+            match.start(),
+            match.end(),
+            f"[code]{match.group('body')}[/code]",
+        )
+
+    # Inline code placeholders are authoritative for subsequent link parsing
+    # and the source-based readable projection, after unsupported lists shield.
+    for match in reversed(list(_MARKDOWN_INLINE_CODE_PATTERN.finditer(mapped.text))):
+        source_span = mapped.source_span(match.start(), match.end())
+        finding("inline_code_block_conversion", *source_span, kind="loss")
+        readable_protected_spans.append(source_span)
+        protect_range(
+            match.start(),
+            match.end(),
+            f"[code]{match.group(1)}[/code]",
+        )
+
+    # Link recognition runs on the same code placeholders as output, so a code
+    # span in a destination is opaque rather than whitespace or a title.
+    for start, opening, label_end, destination_end in reversed(
+        list(_iter_markdown_links(mapped.text))
+    ):
+        if destination_end is None:
+            protect_range(start, len(mapped.text), mapped.text[start:])
+            continue
+        end = destination_end + 1
+        current = mapped.text
+        destination = current[label_end + 2:destination_end]
+        has_title = any(character.isspace() for character in destination)
+        image = start < opening
+        open_span = mapped.source_span(opening, opening + 1)
+        close_span = mapped.source_span(label_end, label_end + 1)
+        readable_protected_spans.extend((open_span, close_span))
+        if has_title:
+            source_span = mapped.source_span(start, end)
+            finding("link_title", *source_span)
+            protect_range(start, end, current[start:end])
+            continue
+
+        label = current[opening + 1:label_end]
+        if image:
+            if label:
+                source_span = mapped.source_span(start, end)
+                finding("image_alt_loss", *source_span, kind="loss")
+                readable_protected_spans.append(mapped.source_span(opening + 1, label_end))
+            rendered = f"[img]{destination}[/img]"
+        else:
+            rendered = f"[url={destination}]{_convert_markdown_inline(label)}[/url]"
+        protect_range(start, end, rendered)
+
+    for match in reversed(list(_MARKDOWN_BARE_URL_PATTERN.finditer(mapped.text))):
+        protect_range(match.start(), match.end(), match.group(0))
+
+    # Escape placeholders are shared by the emitted text and delimiter parser.
+    escape_runs = list(_markdown_escape_runs(mapped.text))
+    for start, end, escaped_character in reversed(escape_runs):
+        run_length = end - start
+        replacement = "\\" * (run_length // 2)
+        if escaped_character is not None:
+            protected.append(mapped.text[escaped_character])
+            replacement += f"{placeholder_prefix}{len(protected) - 1}\x00"
+            end = escaped_character + 1
+        elif run_length % 2:
+            replacement += "\\"
+        mapped.replace(start, end, replacement)
+
+    text = _convert_markdown_emphasis(
+        mapped.text,
+        on_unmatched=lambda start, end: finding(
+            "unmatched_markdown_delimiter",
+            *mapped.source_span(start, end),
+        ),
     )
-    text = _MARKDOWN_INLINE_CODE_PATTERN.sub(
-        lambda match: protect(f"[code]{match.group(1)}[/code]"), text
-    )
-    text = _protect_markdown_links(text, placeholder_prefix, protected)
-    text = _protect_markdown_bare_urls(text, placeholder_prefix, protected)
-    text = _protect_markdown_escapes(text, placeholder_prefix, protected)
-    text = _convert_markdown_emphasis(text)
     text = _convert_markdown_blockquotes(text)
     text = _convert_markdown_lists(text)
 
     for index in reversed(range(len(protected))):
         text = text.replace(f"{placeholder_prefix}{index}\x00", protected[index])
-    return _ConversionResult(_tidy_text(text), findings)
+    findings.extend(
+        _readable_projection_findings(
+            value,
+            protected_spans=readable_protected_spans,
+        )
+    )
+    return _ConversionResult(_tidy_text(text), _sorted_findings(findings))
 
 
 def _markdown_placeholder_prefix(value: str) -> str:
@@ -264,24 +426,6 @@ def _markdown_placeholder_prefix(value: str) -> str:
         if prefix not in value:
             return prefix
         attempt += 1
-
-
-def _protect_unsupported_markdown_blocks(text: str, protect: Callable[[str], str]) -> str:
-    # These constructs are intentionally preserved whole until their semantics
-    # are part of the supported conversion subset.
-    def protect_table(match: re.Match[str]) -> str:
-        return protect(match.group(0))
-
-    text = _MARKDOWN_TILDE_FENCE_PATTERN.sub(protect_table, text)
-    text = _MARKDOWN_UNSUPPORTED_BLOCK_LINE_PATTERN.sub(protect_table, text)
-    output: list[str] = []
-    cursor = 0
-    for start, end in _iter_markdown_table_ranges(text):
-        output.append(text[cursor:start])
-        output.append(protect(text[start:end]))
-        cursor = end
-    output.append(text[cursor:])
-    return "".join(output)
 
 
 def _iter_markdown_table_ranges(text: str) -> Iterator[tuple[int, int]]:
@@ -312,18 +456,6 @@ def _is_flat_unordered_list(matches: list[re.Match[str]]) -> bool:
     )
 
 
-def _protect_unsupported_markdown_lists(text: str, protect: Callable[[str], str]) -> str:
-    output: list[str] = []
-    cursor = 0
-    for start, end, matches in _iter_markdown_list_groups(text):
-        output.append(text[cursor:start])
-        group = text[start:end]
-        output.append(group if _is_flat_unordered_list(matches) else protect(group))
-        cursor = end
-    output.append(text[cursor:])
-    return "".join(output)
-
-
 def _iter_markdown_list_groups(
     text: str,
 ) -> Iterator[tuple[int, int, list[re.Match[str]]]]:
@@ -349,50 +481,6 @@ def _iter_markdown_list_groups(
             end += 1
         yield start, offset, matches
         index = end
-
-
-def _protect_markdown_links(text: str, placeholder_prefix: str, protected: list[str]) -> str:
-    output: list[str] = []
-    cursor = 0
-    for index, open_bracket, label_end, destination_end in _iter_markdown_links(text):
-        image = index < open_bracket
-        if destination_end is None:
-            output.append(text[cursor:index])
-            protected.append(text[index:])
-            output.append(f"{placeholder_prefix}{len(protected) - 1}\x00")
-            cursor = len(text)
-            break
-
-        destination = text[label_end + 2:destination_end]
-        whole_end = destination_end + 1
-        if any(character.isspace() for character in destination):
-            # Optional titles and other whitespace-bearing forms stay literal.
-            replacement = text[index:whole_end]
-        else:
-            label = text[open_bracket + 1:label_end]
-            rendered = f"[img]{destination}[/img]" if image else (
-                f"[url={destination}]{_convert_markdown_inline(label)}[/url]"
-            )
-            replacement = rendered
-
-        output.append(text[cursor:index])
-        protected.append(replacement)
-        output.append(f"{placeholder_prefix}{len(protected) - 1}\x00")
-        cursor = whole_end
-    output.append(text[cursor:])
-    return "".join(output)
-
-
-def _protect_markdown_bare_urls(
-    text: str,
-    placeholder_prefix: str,
-    protected: list[str],
-) -> str:
-    def protect(match: re.Match[str]) -> str:
-        protected.append(match.group(0))
-        return f"{placeholder_prefix}{len(protected) - 1}\x00"
-
-    return _MARKDOWN_BARE_URL_PATTERN.sub(protect, text)
 
 
 def _iter_markdown_links(text: str) -> Iterator[tuple[int, int, int, int | None]]:
@@ -612,158 +700,6 @@ def analyze_conversion(value: str, message_format: MessageFormat) -> tuple[Conve
     return _mycode_projection_findings(value)
 
 
-def _markdown_conversion_findings(value: str) -> tuple[ConversionFinding, ...]:
-    findings: list[ConversionFinding] = []
-    code_findings: list[ConversionFinding] = []
-    literal_ranges: list[tuple[int, int]] = []
-    masked = list(value)
-    readable_mask = list(value)
-
-    def add(code: str, start: int, end: int, kind: Literal["unsupported", "loss"] = "unsupported") -> None:
-        findings.append(ConversionFinding(code, kind, "mycode", start, end))
-
-    def mask(start: int, end: int) -> None:
-        for position in range(start, end):
-            if masked[position] not in "\r\n":
-                masked[position] = " "
-
-    def mask_readable(start: int, end: int) -> None:
-        for position in range(start, end):
-            if readable_mask[position] not in "\r\n":
-                readable_mask[position] = " "
-
-    # These are the same code constructs stashed by the Markdown converter.
-    for match in _MARKDOWN_CODE_BLOCK_PATTERN.finditer(value):
-        if match.group("language"):
-            code_findings.append(
-                ConversionFinding(
-                    "fence_language_loss",
-                    "loss",
-                    "mycode",
-                    match.start("language"),
-                    match.end("language"),
-                )
-            )
-        mask(match.start(), match.end())
-        mask_readable(match.start(), match.end())
-    for match in _MARKDOWN_INLINE_CODE_PATTERN.finditer("".join(masked)):
-        code_findings.append(
-            ConversionFinding(
-                "inline_code_block_conversion",
-                "loss",
-                "mycode",
-                match.start(),
-                match.end(),
-            )
-        )
-        mask(match.start(), match.end())
-        mask_readable(match.start(), match.end())
-
-    text = "".join(masked)
-
-    # Unsupported fenced code using tildes is protected by the converter as a whole.
-    for match in _MARKDOWN_TILDE_FENCE_PATTERN.finditer(text):
-        add("unsupported_fence", match.start(), match.end())
-        literal_ranges.append((match.start(), match.end()))
-        mask(match.start(), match.end())
-    text = "".join(masked)
-
-    for match in _MARKDOWN_UNSUPPORTED_BLOCK_LINE_PATTERN.finditer(text):
-        add("heading" if match.group("heading") else "horizontal_rule", match.start(), match.end())
-        literal_ranges.append((match.start(), match.end()))
-        mask(match.start(), match.end())
-
-    # Pipe rows are the same table ranges protected by the converter.
-    for start, end in _iter_markdown_table_ranges(text):
-        add("table", start, end)
-        literal_ranges.append((start, end))
-        for position in range(start, end):
-            if masked[position] not in "\r\n":
-                masked[position] = " "
-
-    # List shape is the same group iterator consumed by the output pass.
-    text = "".join(masked)
-    for start, end, matches in _iter_markdown_list_groups(text):
-        if not _is_flat_unordered_list(matches):
-            if any(re.match(r"\[[ xX]\](?:\s|$)", item.group("body")) for item in matches):
-                code = "task_list"
-            elif any(item.group("indent") for item in matches):
-                code = "nested_list"
-            else:
-                code = "ordered_list"
-            add(code, start, end)
-            literal_ranges.append((start, end))
-            mask(start, end)
-
-    # Link recognition is shared with the output pass. Preserve the same portions
-    # from delimiter recognition that the converter shields or leaves literal.
-    text = "".join(masked)
-    for start, opening, label_end, destination_end in _iter_markdown_links(text):
-        if destination_end is None:
-            literal_ranges.append((start, len(masked)))
-            for position in range(start, len(masked)):
-                if masked[position] not in "\r\n":
-                    masked[position] = " "
-            continue
-        end = destination_end + 1
-        destination = text[label_end + 2:destination_end]
-        has_title = any(character.isspace() for character in destination)
-        is_image = start < opening
-        mask_readable(opening, opening + 1)
-        mask_readable(label_end, label_end + 1)
-        if has_title:
-            add("link_title", start, end)
-            literal_ranges.append((start, end))
-            for position in range(start, end):
-                if masked[position] not in "\r\n":
-                    masked[position] = " "
-        else:
-            if is_image and text[opening + 1:label_end]:
-                add("image_alt_loss", start, end, "loss")
-                literal_ranges.append((opening + 1, label_end))
-                mask_readable(opening + 1, label_end)
-            literal_ranges.append((label_end + 1, end))
-            for position in range(label_end + 1, end):
-                if masked[position] not in "\r\n":
-                    masked[position] = " "
-
-    for match in _MARKDOWN_BARE_URL_PATTERN.finditer("".join(masked)):
-        literal_ranges.append((match.start(), match.end()))
-        for position in range(match.start(), match.end()):
-            if masked[position] not in "\r\n":
-                masked[position] = " "
-
-    # Escaped delimiter characters are shielded by the same escape-run parser
-    # used before the converter's emphasis pass.
-    for _, _, escaped_character in _markdown_escape_runs("".join(masked)):
-        if escaped_character is not None:
-            masked[escaped_character] = " "
-    _convert_markdown_emphasis(
-        "".join(masked),
-        on_unmatched=lambda start, end: add(
-            "unmatched_markdown_delimiter", start, end
-        ),
-    )
-
-    findings.extend(
-        finding
-        for finding in code_findings
-        if not any(
-            finding.start < end and start < finding.end
-            for start, end in literal_ranges
-        )
-    )
-    for _, opening, label_end, destination_end in _iter_markdown_links(value):
-        if destination_end is not None:
-            mask_readable(opening, opening + 1)
-            mask_readable(label_end, label_end + 1)
-    findings.extend(
-        _readable_projection_findings("".join(readable_mask), code_already_masked=True)
-    )
-
-    return _sorted_findings(findings)
-
-
 def _mycode_projection_findings(value: str) -> tuple[ConversionFinding, ...]:
     return _readable_projection_findings(value)
 
@@ -771,7 +707,7 @@ def _mycode_projection_findings(value: str) -> tuple[ConversionFinding, ...]:
 def _readable_projection_findings(
     value: str,
     *,
-    code_already_masked: bool = False,
+    protected_spans: tuple[tuple[int, int], ...] | list[tuple[int, int]] = (),
 ) -> tuple[ConversionFinding, ...]:
     findings: list[ConversionFinding] = []
     masked = list(value)
@@ -781,9 +717,13 @@ def _readable_projection_findings(
             if masked[position] not in "\r\n":
                 masked[position] = " "
 
-    if not code_already_masked:
-        for match in _CODE_BLOCK_PATTERN.finditer(value):
-            mask(match.start(), match.end())
+    for match in _CODE_BLOCK_PATTERN.finditer(value):
+        mask(match.start(), match.end())
+    for start, end in protected_spans:
+        mask(start, end)
+
+    for start, end in _malformed_markup_ranges("".join(masked)):
+        mask(start, end)
     text = "".join(masked)
     known_tags = set(TAG_RULES) | {"url", "img", "uimg", "quote", "list", "code", "php"}
     for match in _MYCODE_TAG_PATTERN.finditer(text):
