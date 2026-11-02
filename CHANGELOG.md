@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.3
+
+- Document `full_api` as the default ChatGPT profile for all supported tools, with a custom read-only profile as an optional restriction.
+- Add client configuration, secret-reference, health, lifecycle, rollback, and WSL availability guidance.
+- Clarify that local server validation and a successful ChatGPT tool call are separate verification steps.
+
 ## 0.3.2
 
 - Restore stdio startup using the official MCP SDK 2.3 `MCPServer` API; require `mcp>=2.3.0,<3`.
