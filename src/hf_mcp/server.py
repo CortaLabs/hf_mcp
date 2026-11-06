@@ -14,6 +14,8 @@ from . import __version__
 from .capabilities import CapabilityPolicy
 from .config import HFMCPSettings, load_settings
 from .dispatcher import register_tools, resolve_runtime_bundle
+from .transport import HFAPIError, build_error
+from .write_preflight import WritePreflightError
 
 _RUNTIME_MODULE = "mcp.server.mcpserver"
 
@@ -466,11 +468,17 @@ def _with_schema_signature(
     if inspect.iscoroutinefunction(handler):
 
         async def _wrapped_handler(**kwargs: Any) -> Any:
-            return _normalize_handler_result(await handler(**kwargs))
+            try:
+                return _normalize_handler_result(await handler(**kwargs))
+            except Exception as error:
+                return _error_call_tool_result(tool_name, error)
     else:
         # Sync/async variants intentionally differ in return type.
         def _wrapped_handler(**kwargs: Any) -> Any:  # type: ignore[misc]
-            return _normalize_handler_result(handler(**kwargs))
+            try:
+                return _normalize_handler_result(handler(**kwargs))
+            except Exception as error:
+                return _error_call_tool_result(tool_name, error)
 
     handler_name = _tool_handler_name(tool_name)
     _wrapped_handler.__name__ = handler_name
@@ -485,6 +493,43 @@ def _with_schema_signature(
     }
     _wrapped_handler.__annotations__["return"] = signature.return_annotation
     return _wrapped_handler
+
+
+def _error_call_tool_result(tool_name: str, error: Exception) -> Any:
+    """Return one safe ErrorV1 tool result for a failed handler call."""
+    error_v1 = _error_v1_for_exception(tool_name, error)
+    module = import_module("mcp.types")
+    return getattr(module, "CallToolResult")(
+        content=[
+            getattr(module, "TextContent")(
+                type="text", text=f"{error_v1['code']}: {error_v1['message']}"
+            )
+        ],
+        structuredContent={"error": error_v1},
+        isError=True,
+    )
+
+
+def _error_v1_for_exception(tool_name: str, error: Exception) -> dict[str, object]:
+    if isinstance(error, HFAPIError):
+        return {**error.error, "tool": tool_name}
+    if isinstance(error, ValidationError):
+        paths = sorted(
+            {".".join(str(part) for part in item["loc"]) for item in error.errors()}
+        )
+        message = "Invalid arguments: " + ", ".join(path or "(root)" for path in paths)
+        return build_error(
+            "INVALID_ARGUMENT", operation="local", tool=tool_name, message=message
+        )
+    if isinstance(error, WritePreflightError):
+        return build_error(
+            "FORMAT_NOT_READY", operation="local", tool=tool_name, message=str(error)
+        )
+    if isinstance(error, (ValueError, TypeError, PermissionError)):
+        return build_error(
+            "INVALID_ARGUMENT", operation="local", tool=tool_name, message=str(error)
+        )
+    return build_error("INTERNAL_ERROR", operation="local", tool=tool_name)
 
 
 def _normalize_handler_result(result: Any) -> Any:

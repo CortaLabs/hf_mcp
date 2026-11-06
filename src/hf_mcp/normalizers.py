@@ -9,14 +9,6 @@ MAX_PERPAGE = 30
 AVATAR_BASE_URL = "https://hackforums.net"
 BODY_TEXT_KEYS: frozenset[str] = frozenset({"message"})
 
-_ORDERING_KEYS: dict[str, tuple[str, ...]] = {
-    "contracts": ("cid", "id"),
-    "disputes": ("did", "id"),
-    "bratings": ("id", "uid"),
-    "sigmarket/market": ("mid", "id"),
-    "sigmarket/order": ("smid", "oid", "id"),
-}
-
 
 def normalize_asks(asks: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
     if not asks:
@@ -43,7 +35,7 @@ def normalize_response(payload: dict[str, Any]) -> dict[str, Any]:
     normalized: dict[str, Any] = {}
     for endpoint, raw_rows in payload.items():
         if isinstance(raw_rows, Mapping):
-            normalized[endpoint] = [_normalize_row(raw_rows)]
+            normalized[endpoint] = [_normalize_row(raw_rows)] if raw_rows else []
         elif isinstance(raw_rows, list):
             normalized[endpoint] = [_normalize_value(row) for row in raw_rows]
         else:
@@ -93,17 +85,8 @@ def _format_body_value(value: Any, body_format: BodyFormat) -> Any:
     return value
 
 
-def _normalize_endpoint_rows(
-    endpoint: str, rows: list[dict[str, Any]]
-) -> list[dict[str, Any]]:
-    normalized_rows = [_normalize_endpoint_row(endpoint, row) for row in rows]
-    return _order_endpoint_rows(endpoint, normalized_rows)
-
-
-def _normalize_endpoint_row(endpoint: str, row: dict[str, Any]) -> dict[str, Any]:
+def _normalize_endpoint_row(row: Mapping[str, Any]) -> dict[str, Any]:
     normalized = dict(row)
-    if endpoint == "bytes" and "amount" in normalized:
-        normalized["amount"] = _normalize_bytes_amount(normalized["amount"])
     if "avatar" in normalized:
         normalized["avatar"] = _normalize_avatar_path(normalized["avatar"])
     if "additionalgroups" in normalized:
@@ -111,50 +94,6 @@ def _normalize_endpoint_row(endpoint: str, row: dict[str, Any]) -> dict[str, Any
             normalized["additionalgroups"]
         )
     return normalized
-
-
-def _order_endpoint_rows(
-    endpoint: str, rows: list[dict[str, Any]]
-) -> list[dict[str, Any]]:
-    keys = _ORDERING_KEYS.get(endpoint)
-    if not keys:
-        return rows
-    for key in keys:
-        if any(key in row for row in rows):
-            return sorted(rows, key=lambda row: _sort_key(row.get(key)), reverse=True)
-    return rows
-
-
-def _sort_key(value: Any) -> tuple[int, float | str]:
-    if value is None:
-        return (0, "")
-    if isinstance(value, (int, float)):
-        return (1, float(value))
-    if isinstance(value, str):
-        stripped = value.strip()
-        if not stripped:
-            return (0, "")
-        try:
-            return (1, float(stripped))
-        except ValueError:
-            return (0, stripped)
-    return (0, str(value))
-
-
-def _normalize_bytes_amount(value: Any) -> Any:
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, (int, float)):
-        return str(int(float(value)))
-    if isinstance(value, str):
-        stripped = value.strip()
-        if not stripped:
-            return value
-        try:
-            return str(int(float(stripped)))
-        except ValueError:
-            return value
-    return value
 
 
 def _normalize_avatar_path(value: Any) -> Any:
@@ -174,34 +113,25 @@ def _normalize_additional_groups(value: Any) -> Any:
 
 
 def normalize_extended_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    normalized: dict[str, Any] = {}
-    for endpoint, value in payload.items():
-        if isinstance(value, Mapping):
-            normalized[endpoint] = _normalize_endpoint_rows(endpoint, [dict(value)])
-            continue
+    normalized = normalize_response(payload)
+    for endpoint, value in normalized.items():
         if isinstance(value, list) and all(isinstance(item, Mapping) for item in value):
-            normalized[endpoint] = _normalize_endpoint_rows(
-                endpoint, [dict(item) for item in value]
-            )
-            continue
-        normalized[endpoint] = value
+            normalized[endpoint] = [_normalize_endpoint_row(item) for item in value]
     return normalized
 
 
 def _cap_perpage(value: Any) -> int:
     if isinstance(value, bool):
         raise ValueError("`_perpage` must be numeric.")
-    if isinstance(value, int):
-        numeric = value
-    elif isinstance(value, float):
-        numeric = int(value)
-    elif isinstance(value, str):
-        value = value.strip()
-        if not value:
-            raise ValueError("`_perpage` cannot be empty.")
-        numeric = int(value)
-    else:
+    if isinstance(value, str) and not value.strip():
+        raise ValueError("`_perpage` cannot be empty.")
+    if not isinstance(value, (int, float, str)):
         raise ValueError("`_perpage` must be numeric.")
+    try:
+        numeric = int(value.strip() if isinstance(value, str) else value)
+    except (ValueError, OverflowError):
+        # int() text would echo the caller's value; keep the fixed sentence.
+        raise ValueError("`_perpage` must be numeric.") from None
 
     if numeric < 1:
         raise ValueError("`_perpage` must be >= 1.")

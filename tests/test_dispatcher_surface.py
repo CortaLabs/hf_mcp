@@ -2032,3 +2032,128 @@ def test_serve_stdio_does_not_retry_when_stdio_is_closed(
     with pytest.raises(ValueError, match="closed file"):
         serve_stdio(settings)
     assert run_calls == ["stdio"]
+
+
+def test_runtime_stdio_client_session_returns_error_v1_for_failed_read_and_write() -> (
+    None
+):
+    from mcp import ClientSession
+    from mcp.client.stdio import StdioServerParameters, stdio_client
+
+    server_probe = """
+import email.message
+import io
+import urllib.error
+import urllib.request
+
+from hf_mcp.capabilities import CapabilityPolicy
+from hf_mcp.config import HFMCPSettings, PRESET_PARAMETER_FAMILIES
+from hf_mcp.dispatcher import RuntimeBundle, register_tools
+from hf_mcp.server import _MCPServerToolAdapter
+from hf_mcp.token_store import TokenBundle
+from hf_mcp.transport import HFTransport
+from mcp.server.mcpserver import MCPServer
+
+class _ProbeTokenStore:
+    def require_bundle(self):
+        return TokenBundle(access_token="TOKENSEED", token_type="Bearer", scope=frozenset({"read"}))
+
+def _failing_urlopen(request, timeout=None):
+    if request.full_url.endswith("/write"):
+        raise TimeoutError("WRITESEED upstream text")
+    headers = email.message.Message()
+    headers["Retry-After"] = "7"
+    raise urllib.error.HTTPError(
+        request.full_url, 503, "unavailable", headers, io.BytesIO(b"BODYSEED upstream text")
+    )
+
+urllib.request.urlopen = _failing_urlopen
+transport = HFTransport(token_store=_ProbeTokenStore(), base_url="https://example.test")
+settings = HFMCPSettings(
+    profile="test",
+    enabled_capabilities=frozenset({"me.read", "posts.reply"}),
+    enabled_parameter_families=PRESET_PARAMETER_FAMILIES["full_api"],
+)
+policy = CapabilityPolicy(settings)
+app = MCPServer(name="hf-mcp-probe")
+adapter = _MCPServerToolAdapter(app)
+register_tools(adapter, policy, RuntimeBundle(transport=transport))
+app.run(transport="stdio")
+"""
+
+    async def _run_probe() -> tuple[Any, Any]:
+        env = dict(os.environ)
+        pythonpath = env.get("PYTHONPATH")
+        src_path = str(SRC_PATH)
+        env["PYTHONPATH"] = f"{src_path}:{pythonpath}" if pythonpath else src_path
+        params = StdioServerParameters(
+            command=sys.executable,
+            args=["-c", server_probe],
+            env=env,
+            cwd=str(PRODUCT_ROOT),
+        )
+        async with stdio_client(params) as (read_stream, write_stream):
+            async with ClientSession(read_stream, write_stream) as session:
+                await session.initialize()
+                read_result = await session.call_tool(
+                    "me_read", {"output_mode": "raw", "include_raw_payload": True}
+                )
+                write_result = await session.call_tool(
+                    "posts_reply",
+                    {"tid": 123, "message": "Hello there", "confirm_live": True},
+                )
+                return read_result, write_result
+
+    read_result, write_result = anyio.run(_run_probe)
+
+    expected_fields = {
+        "code",
+        "operation",
+        "tool",
+        "message",
+        "http_status",
+        "retry_after",
+        "retryable",
+        "correlation_id",
+        "mutation_outcome",
+    }
+    cases = (
+        (
+            read_result,
+            "me_read",
+            {
+                "code": "UPSTREAM_UNAVAILABLE",
+                "operation": "read",
+                "http_status": 503,
+                "retry_after": 7,
+                "retryable": True,
+                "mutation_outcome": "not_attempted",
+            },
+        ),
+        (
+            write_result,
+            "posts_reply",
+            {
+                "code": "WRITE_OUTCOME_UNKNOWN",
+                "operation": "write",
+                "http_status": None,
+                "retry_after": None,
+                "retryable": False,
+                "mutation_outcome": "unknown",
+            },
+        ),
+    )
+    for result, tool_name, expected in cases:
+        assert result.is_error is True
+        assert result.structured_content is not None
+        assert set(result.structured_content) == {"error"}
+        error = result.structured_content["error"]
+        assert set(error) == expected_fields
+        assert error["tool"] == tool_name
+        for key, value in expected.items():
+            assert error[key] == value
+        assert [part.type for part in result.content] == ["text"]
+        assert result.content[0].text == f"{error['code']}: {error['message']}"
+        dumped = result.model_dump_json(by_alias=True)
+        for seed in ("TOKENSEED", "BODYSEED", "WRITESEED", "example.test"):
+            assert seed not in dumped
