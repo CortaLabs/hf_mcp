@@ -2,7 +2,6 @@ include README.md
 include pyproject.toml
 include MANIFEST.in
 include config.example.yaml
-include export_manifest.toml
 include scripts/build_release_dists.sh
 include scripts/smoke_installed.py
 recursive-include docs *.md

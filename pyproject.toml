@@ -60,16 +60,6 @@ where = ["src"]
 [tool.setuptools.package-data]
 hf_mcp = ["data/*.json"]
 
-[tool.setuptools.data-files]
-"docs" = ["docs/*.md"]
-"skills/hf-api-v2" = ["skills/hf-api-v2/SKILL.md"]
-"skills/hf-mcp" = ["skills/hf-mcp/SKILL.md"]
-"skills/hf-mcp-bootstrap" = ["skills/hf-mcp-bootstrap/SKILL.md"]
-"skills/hf-mcp-reads" = ["skills/hf-mcp-reads/SKILL.md"]
-"skills/hf-mcp-writes" = ["skills/hf-mcp-writes/SKILL.md"]
-"skills/hf-mycode" = ["skills/hf-mycode/SKILL.md"]
-"skills/hf-mycode/references" = ["skills/hf-mycode/references/MYCODE_REFERENCE.md"]
-
 [tool.ruff]
 target-version = "py311"
 src = ["src"]
