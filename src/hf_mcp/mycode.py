@@ -621,7 +621,13 @@ def _convert_markdown_to_mycode(value: str) -> _ConversionResult:
         finding("unmatched_markdown_delimiter", *mapped.source_span(start, end))
 
     text = _convert_markdown_emphasis(mapped.text, on_unmatched=unmatched)
-    text = _convert_markdown_blocks(text)
+
+    def blockquote_truncated() -> None:
+        # Block conversion runs after emphasis rewriting, so the line has no
+        # source offset; the finding covers the whole message.
+        finding("blockquote_depth_truncated", 0, len(value), kind="loss")
+
+    text = _convert_markdown_blocks(text, on_truncated=blockquote_truncated)
     findings.extend(
         _readable_projection_findings(value, protected_spans=readable_protected_spans)
     )
@@ -907,12 +913,17 @@ def _find_markdown_emphasis_close(
 _MAX_BLOCKQUOTE_DEPTH = 16
 
 
-def _convert_markdown_blocks(text: str, depth: int = 0) -> str:
+def _convert_markdown_blocks(
+    text: str,
+    depth: int = 0,
+    on_truncated: Callable[[], None] | None = None,
+) -> str:
     """Line-level constructs: blockquotes, headings, rules and lists.
 
     Blockquote nesting recurses once per level, so it stops at
     ``_MAX_BLOCKQUOTE_DEPTH``: deeper ``>`` markers stay literal text, which keeps
-    the result deterministic and the Python stack bounded for any input size.
+    the result deterministic and the Python stack bounded for any input size;
+    ``on_truncated`` is called once per such line so the caller can report it.
     """
     lines = text.replace("\r\n", "\n").split("\n")
     converted: list[str] = []
@@ -920,12 +931,15 @@ def _convert_markdown_blocks(text: str, depth: int = 0) -> str:
     while index < len(lines):
         line = lines[index]
         end = index + 1
+        if line.startswith(">") and depth >= _MAX_BLOCKQUOTE_DEPTH and on_truncated:
+            on_truncated()
         if line.startswith(">") and depth < _MAX_BLOCKQUOTE_DEPTH:
             while end < len(lines) and lines[end].startswith(">"):
                 end += 1
             inner = _convert_markdown_blocks(
                 "\n".join(item[1:].lstrip() for item in lines[index:end]),
                 depth + 1,
+                on_truncated,
             )
             converted.append("[quote]" + inner.strip() + "[/quote]")
         elif (heading := _MARKDOWN_HEADING_PATTERN.match(line)) and heading.group(

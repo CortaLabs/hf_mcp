@@ -6,16 +6,44 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import select
+import queue
 import subprocess
 import tempfile
+import threading
 import tomllib
 import venv
+import weakref
 from pathlib import Path
 
 PROFILES = ("reader", "full_api")
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 RESPONSE_TIMEOUT_SECONDS = 30.0
+_LINE_QUEUES: weakref.WeakKeyDictionary[
+    subprocess.Popen[str], queue.Queue[str | None]
+] = weakref.WeakKeyDictionary()
+
+
+def _line_queue(process: subprocess.Popen[str]) -> queue.Queue[str | None]:
+    """One reader thread per process feeds every stdout line into a queue.
+
+    A bounded `select` on the text-mode pipe loses lines the buffered reader
+    already holds when two arrive in one write; a queue never does. `None`
+    marks end of stream.
+    """
+    lines = _LINE_QUEUES.get(process)
+    if lines is None:
+        lines = queue.Queue()
+        _LINE_QUEUES[process] = lines
+        stdout = process.stdout
+        assert stdout is not None
+
+        def pump() -> None:
+            for line in stdout:
+                lines.put(line)
+            lines.put(None)
+
+        threading.Thread(target=pump, daemon=True).start()
+    return lines
 
 
 def exchange(
@@ -37,12 +65,14 @@ def exchange(
     process.stdin.flush()
     if id_ is None:
         return {}
-    ready, _, _ = select.select([process.stdout], [], [], timeout)
-    if not ready:
+    try:
+        line = _line_queue(process).get(timeout=timeout)
+    except queue.Empty:
         process.kill()
-        raise SystemExit(f"server gave no answer to {method} within {timeout:g}s")
-    line = process.stdout.readline()
-    if not line:
+        raise SystemExit(
+            f"server gave no answer to {method} within {timeout:g}s"
+        ) from None
+    if line is None:
         raise SystemExit(f"server exited before answering {method}")
     response = json.loads(line)
     if response.get("id") != id_ or "error" in response:
