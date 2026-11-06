@@ -23,6 +23,10 @@ TEMPLATE_NAME_PATTERN = "^[a-z0-9][a-z0-9_-]{0,63}$"
 # One ceiling for every free-text message/source: tool arguments, converter
 # input, rendered templates and draft source files.
 MAX_MESSAGE_CHARS = 500_000
+# Ceilings for the remaining free-text kinds: titles, categories and subjects
+# share the short-text limit; filesystem selectors share the path limit.
+MAX_SHORT_TEXT_CHARS = 512
+MAX_PATH_CHARS = 4096
 
 FAMILY_KEY = "x-hf-family"
 WIRE_KEY = "x-hf-wire"
@@ -104,6 +108,10 @@ def _paging(*, per_page: dict[str, Any] | None = None) -> dict[str, Any]:
     }
 
 
+def _timestamp(family: str) -> dict[str, Any]:
+    return _p(family, "string", format="date-time", maxLength=MAX_SHORT_TEXT_CHARS)
+
+
 def _flag(family: str, default: bool, *, wire: bool = False) -> dict[str, Any]:
     return _p(family, "boolean", default=default, wire=wire)
 
@@ -135,7 +143,9 @@ def _confirm_live() -> dict[str, Any]:
 def _draft_selector() -> dict[str, Any]:
     return {
         "draft_id": _p("drafts.selector", "string", pattern=DRAFT_ID_PATTERN),
-        "draft_path": _p("drafts.selector", "string", minLength=1),
+        "draft_path": _p(
+            "drafts.selector", "string", minLength=1, maxLength=MAX_PATH_CHARS
+        ),
     }
 
 
@@ -143,7 +153,9 @@ def _write_content(*, subject: bool = False) -> dict[str, Any]:
     family = "writes.content"
     props: dict[str, Any] = {}
     if subject:
-        props["subject"] = _p(family, "string", minLength=1)
+        props["subject"] = _p(
+            family, "string", minLength=1, maxLength=MAX_SHORT_TEXT_CHARS
+        )
     props.update(
         message=_p(family, "string", minLength=1, maxLength=MAX_MESSAGE_CHARS),
         draft_id=_p(
@@ -153,7 +165,11 @@ def _write_content(*, subject: bool = False) -> dict[str, Any]:
             description=_DRAFT_ID_DESCRIPTION,
         ),
         draft_path=_p(
-            family, "string", minLength=1, description=_DRAFT_PATH_DESCRIPTION
+            family,
+            "string",
+            minLength=1,
+            maxLength=MAX_PATH_CHARS,
+            description=_DRAFT_PATH_DESCRIPTION,
         ),
         message_format=_p(
             family,
@@ -432,6 +448,7 @@ TOOLS: tuple[ToolSpec, ...] = (
                 "formatting.content",
                 "string",
                 minLength=1,
+                maxLength=MAX_PATH_CHARS,
                 description="Optional .md, .mycode, or .txt source file inside the hf_mcp draft cache directory.",
             ),
             "message_format": _p(
@@ -507,10 +524,14 @@ TOOLS: tuple[ToolSpec, ...] = (
         "List local drafts with optional status, category, title, or schedule filters and paginated results.",
         {
             "status": _p("drafts.filters", "string", enum=_DRAFT_STATUSES),
-            "category": _p("drafts.filters", "string", minLength=1),
-            "title": _p("drafts.filters", "string", minLength=1),
-            "scheduled_before": _p("drafts.filters", "string", format="date-time"),
-            "scheduled_after": _p("drafts.filters", "string", format="date-time"),
+            "category": _p(
+                "drafts.filters", "string", minLength=1, maxLength=MAX_SHORT_TEXT_CHARS
+            ),
+            "title": _p(
+                "drafts.filters", "string", minLength=1, maxLength=MAX_SHORT_TEXT_CHARS
+            ),
+            "scheduled_before": _timestamp("drafts.filters"),
+            "scheduled_after": _timestamp("drafts.filters"),
             "limit": _p("drafts.filters", "integer", minimum=0, default=50),
             "offset": _p("drafts.filters", "integer", minimum=0, default=0),
         },
@@ -535,10 +556,10 @@ TOOLS: tuple[ToolSpec, ...] = (
         "Update title, category, status, or scheduled-time metadata on a selected local draft; content is not sent to Hack Forums.",
         {
             **_draft_selector(),
-            "title": _p("drafts.metadata", "string"),
-            "category": _p("drafts.metadata", "string"),
+            "title": _p("drafts.metadata", "string", maxLength=MAX_SHORT_TEXT_CHARS),
+            "category": _p("drafts.metadata", "string", maxLength=MAX_SHORT_TEXT_CHARS),
             "status": _p("drafts.metadata", "string", enum=_DRAFT_STATUSES),
-            "scheduled_at": _p("drafts.metadata", "string", format="date-time"),
+            "scheduled_at": _timestamp("drafts.metadata"),
         },
         operation="write",
         any_of=_DRAFT_SELECTOR_ANY,
@@ -650,6 +671,8 @@ __all__ = [
     "DRAFT_ID_PATTERN",
     "FAMILY_KEY",
     "MAX_MESSAGE_CHARS",
+    "MAX_PATH_CHARS",
+    "MAX_SHORT_TEXT_CHARS",
     "TEMPLATE_NAME_PATTERN",
     "TOOLS",
     "WIRE_KEY",
