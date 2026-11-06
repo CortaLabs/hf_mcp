@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -8,16 +9,16 @@ from pathlib import Path
 
 import pytest
 
-PRODUCT_ROOT = Path(__file__).resolve().parents[1]
-PYPROJECT_PATH = PRODUCT_ROOT / "pyproject.toml"
-SRC_PATH = PRODUCT_ROOT / "src"
-if str(SRC_PATH) not in sys.path:
-    sys.path.insert(0, str(SRC_PATH))
-
 import hf_mcp
 from hf_mcp.cli import build_cli, main
 
-_HOSTED_EXTERNAL_REDIRECT_EXAMPLE_URI = "https://cortalabs.github.io/hf_mcp/oauth_callback.html"
+PRODUCT_ROOT = Path(__file__).resolve().parents[1]
+SRC_PATH = PRODUCT_ROOT / "src"
+PYPROJECT_PATH = PRODUCT_ROOT / "pyproject.toml"
+
+_HOSTED_EXTERNAL_REDIRECT_EXAMPLE_URI = (
+    "https://cortalabs.github.io/hf_mcp/oauth_callback.html"
+)
 
 
 def _parse_hf_mcp_script_target(pyproject_text: str) -> str:
@@ -36,7 +37,9 @@ def _parse_hf_mcp_script_target(pyproject_text: str) -> str:
 
 
 def test_console_script_entrypoint_resolves_to_public_main() -> None:
-    script_target = _parse_hf_mcp_script_target(PYPROJECT_PATH.read_text(encoding="utf-8"))
+    script_target = _parse_hf_mcp_script_target(
+        PYPROJECT_PATH.read_text(encoding="utf-8")
+    )
     assert script_target == "hf_mcp.cli:main"
     assert callable(main)
     assert callable(build_cli)
@@ -46,10 +49,15 @@ def test_pyproject_includes_stdio_runtime_dependency() -> None:
     pyproject = tomllib.loads(PYPROJECT_PATH.read_text(encoding="utf-8"))
     dependencies: list[str] = pyproject["project"]["dependencies"]
 
-    assert any(dependency.split(">=", 1)[0].split("==", 1)[0] == "mcp" for dependency in dependencies)
+    assert any(
+        dependency.split(">=", 1)[0].split("==", 1)[0] == "mcp"
+        for dependency in dependencies
+    )
 
 
-def test_version_surfaces_match_declared_project_version(capsys: pytest.CaptureFixture[str]) -> None:
+def test_version_surfaces_match_declared_project_version(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     pyproject = tomllib.loads(PYPROJECT_PATH.read_text(encoding="utf-8"))
     expected_version = pyproject["project"]["version"]
 
@@ -201,3 +209,45 @@ def test_serve_startup_failure_returns_clear_launch_error(
     assert exit_code == 2
     assert "Launch error: Missing runtime dependency 'mcp'" in captured.err
     assert "council" not in captured.err.lower()
+
+
+def test_mcp_initialize_reports_package_name_and_version(tmp_path: Path) -> None:
+    import anyio
+    from mcp import ClientSession
+    from mcp.client.stdio import StdioServerParameters, stdio_client
+
+    expected_version = tomllib.loads(PYPROJECT_PATH.read_text(encoding="utf-8"))[
+        "project"
+    ]["version"]
+    token_path = tmp_path / "token.json"
+    token_path.write_text(
+        json.dumps(
+            {"access_token": "test-token", "token_type": "Bearer", "scope": ["read"]}
+        ),
+        encoding="utf-8",
+    )
+    token_path.chmod(0o600)
+    env = os.environ.copy()
+    env.update(
+        {
+            "PYTHONPATH": str(SRC_PATH),
+            "HF_MCP_CONFIG": str(tmp_path / "config.yaml"),
+            "HF_MCP_TOKEN_PATH": str(token_path),
+            "HF_MCP_CLIENT_ID": "test-client",
+            "HF_MCP_CLIENT_SECRET": "test-secret",
+        }
+    )
+    params = StdioServerParameters(
+        command=sys.executable,
+        args=["-m", "hf_mcp", "serve"],
+        env=env,
+        cwd=str(tmp_path),
+    )
+
+    async def _initialize() -> tuple[str, str]:
+        async with stdio_client(params) as (read_stream, write_stream):
+            async with ClientSession(read_stream, write_stream) as session:
+                result = await session.initialize()
+                return result.server_info.name, result.server_info.version
+
+    assert anyio.run(_initialize) == ("hf-mcp", expected_version)

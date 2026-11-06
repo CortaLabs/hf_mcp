@@ -16,13 +16,27 @@ _FAMILY_PROPERTY_SPECS: dict[str, tuple[tuple[str, dict[str, Any], bool], ...]] 
     "selectors.sigmarket": (("listing_id", {"type": "integer", "minimum": 1}, True),),
     "filters.pagination": (
         ("page", {"type": "integer", "minimum": 1, "default": 1}, False),
-        ("per_page", {"type": "integer", "minimum": 1, "maximum": 30, "default": 30}, False),
+        (
+            "per_page",
+            {"type": "integer", "minimum": 1, "maximum": 30, "default": 30},
+            False,
+        ),
     ),
-    "fields.me.basic": (("include_basic_fields", {"type": "boolean", "default": True}, False),),
-    "fields.me.advanced": (("include_advanced_fields", {"type": "boolean", "default": False}, False),),
-    "fields.users.profile": (("include_profile_fields", {"type": "boolean", "default": True}, False),),
-    "fields.posts.body": (("include_post_body", {"type": "boolean", "default": True}, False),),
-    "fields.bytes.amount": (("include_amount", {"type": "boolean", "default": True}, False),),
+    "fields.me.basic": (
+        ("include_basic_fields", {"type": "boolean", "default": True}, False),
+    ),
+    "fields.me.advanced": (
+        ("include_advanced_fields", {"type": "boolean", "default": False}, False),
+    ),
+    "fields.users.profile": (
+        ("include_profile_fields", {"type": "boolean", "default": True}, False),
+    ),
+    "fields.posts.body": (
+        ("include_post_body", {"type": "boolean", "default": True}, False),
+    ),
+    "fields.bytes.amount": (
+        ("include_amount", {"type": "boolean", "default": True}, False),
+    ),
     "formatting.content": (
         ("message", {"type": "string", "minLength": 1}, False),
         (
@@ -129,7 +143,9 @@ _FAMILY_PROPERTY_SPECS: dict[str, tuple[tuple[str, dict[str, Any], bool], ...]] 
         ),
         ("scheduled_at", {"type": "string", "format": "date-time"}, False),
     ),
-    "drafts.confirm_delete": (("confirm_delete", {"type": "boolean", "const": True}, True),),
+    "drafts.confirm_delete": (
+        ("confirm_delete", {"type": "boolean", "const": True}, True),
+    ),
 }
 
 _TOOL_REQUIRED_OVERRIDES: dict[str, tuple[str, ...]] = {
@@ -259,7 +275,9 @@ def _base_schema(spec: ToolSpec) -> dict[str, Any]:
     seen_required: set[str] = set()
 
     for family in spec.parameter_families:
-        for property_name, property_schema, is_required in _FAMILY_PROPERTY_SPECS.get(family, ()):
+        for property_name, property_schema, is_required in _FAMILY_PROPERTY_SPECS.get(
+            family, ()
+        ):
             if property_name not in properties:
                 properties[property_name] = _tag_with_family(property_schema, family)
             if is_required and property_name not in seen_required:
@@ -292,9 +310,13 @@ def build_tool_schema(spec: ToolSpec, policy: CapabilityPolicy) -> dict[str, Any
         for legacy_name in _TOOL_SELECTOR_PROPERTY_REMOVALS.get(spec.tool_name, ()):
             updated_properties.pop(legacy_name, None)
         if policy.can_register(spec.tool_name):
-            for selector_name, selector_family in _TOOL_SELECTOR_PROPERTY_OVERRIDES.get(spec.tool_name, ()):
+            for selector_name, selector_family in _TOOL_SELECTOR_PROPERTY_OVERRIDES.get(
+                spec.tool_name, ()
+            ):
                 selector_schema = {"type": "integer", "minimum": 1}
-                updated_properties[selector_name] = _tag_with_family(selector_schema, selector_family)
+                updated_properties[selector_name] = _tag_with_family(
+                    selector_schema, selector_family
+                )
         if spec.tool_name in {"bytes.deposit", "bytes.withdraw"}:
             amount_schema = updated_properties.get("amount")
             if isinstance(amount_schema, dict):
@@ -307,30 +329,45 @@ def build_tool_schema(spec: ToolSpec, policy: CapabilityPolicy) -> dict[str, Any
         if not required_override:
             schema.pop("required", None)
         else:
-            required = [field for field in required_override if field in schema.get("properties", {})]
+            required = [
+                field
+                for field in required_override
+                if field in schema.get("properties", {})
+            ]
             if required:
                 schema["required"] = required
             elif isinstance(pruned_required, list):
-                fallback_required = [field for field in pruned_required if field in schema.get("properties", {})]
+                fallback_required = [
+                    field
+                    for field in pruned_required
+                    if field in schema.get("properties", {})
+                ]
                 if fallback_required:
                     schema["required"] = fallback_required
                 else:
                     schema.pop("required", None)
             else:
                 schema.pop("required", None)
-    if spec.operation == "read" and policy.can_register(spec.tool_name) and spec.tool_name not in {
-        "formatting.preflight",
-        "drafts.list",
-        "drafts.read",
-        "hf.doctor",
-    }:
+    if (
+        spec.operation == "read"
+        and policy.can_register(spec.tool_name)
+        and spec.tool_name
+        not in {
+            "formatting.preflight",
+            "drafts.list",
+            "drafts.read",
+            "hf.doctor",
+        }
+    ):
         properties = schema.get("properties")
         if isinstance(properties, dict):
             updated_properties = dict(properties)
         else:
             updated_properties = {}
         updated_properties.setdefault("output_mode", dict(_READ_OUTPUT_MODE_SCHEMA))
-        updated_properties.setdefault("include_raw_payload", dict(_READ_INCLUDE_RAW_PAYLOAD_SCHEMA))
+        updated_properties.setdefault(
+            "include_raw_payload", dict(_READ_INCLUDE_RAW_PAYLOAD_SCHEMA)
+        )
         updated_properties.setdefault("body_format", dict(_READ_BODY_FORMAT_SCHEMA))
         schema["properties"] = updated_properties
     if spec.tool_name == "forums.index" and policy.can_register(spec.tool_name):
@@ -340,22 +377,36 @@ def build_tool_schema(spec: ToolSpec, policy: CapabilityPolicy) -> dict[str, Any
         else:
             updated_properties = {}
         updated_properties["view"] = dict(_FORUMS_INDEX_VIEW_SCHEMA)
-        updated_properties["include_inactive"] = dict(_FORUMS_INDEX_INCLUDE_INACTIVE_SCHEMA)
+        updated_properties["include_inactive"] = dict(
+            _FORUMS_INDEX_INCLUDE_INACTIVE_SCHEMA
+        )
         schema["properties"] = updated_properties
     if spec.tool_name == "formatting.preflight":
         schema["anyOf"] = [{"required": ["message"]}, {"required": ["source_path"]}]
     elif spec.tool_name in {"drafts.read", "drafts.update", "drafts.delete"}:
         schema["anyOf"] = [{"required": ["draft_id"]}, {"required": ["draft_path"]}]
     elif spec.tool_name == "threads.read":
-        selector_options = tuple(field for field in ("fid", "tid", "uid") if field in schema.get("properties", {}))
+        selector_options = tuple(
+            field
+            for field in ("fid", "tid", "uid")
+            if field in schema.get("properties", {})
+        )
         if selector_options:
             schema["anyOf"] = [{"required": [field]} for field in selector_options]
     elif spec.tool_name == "posts.read":
-        selector_options = tuple(field for field in ("pid", "tid", "uid") if field in schema.get("properties", {}))
+        selector_options = tuple(
+            field
+            for field in ("pid", "tid", "uid")
+            if field in schema.get("properties", {})
+        )
         if selector_options:
             schema["anyOf"] = [{"required": [field]} for field in selector_options]
     elif "writes.content" in spec.parameter_families:
-        schema["anyOf"] = [{"required": ["message"]}, {"required": ["draft_id"]}, {"required": ["draft_path"]}]
+        schema["anyOf"] = [
+            {"required": ["message"]},
+            {"required": ["draft_id"]},
+            {"required": ["draft_path"]},
+        ]
     return schema
 
 

@@ -4,12 +4,12 @@ description: Index and routing skill for using the hf-mcp package safely and cho
 user-invocable: true
 context: full
 visibility: exported
-owner: hackforums-council
+owner: hf-mcp
 ---
 
 # HF MCP
 
-Use this skill as the router for hf-mcp tasks so you choose the right specialized skill quickly and keep guidance aligned with current package truth.
+Use this skill as the router for hf-mcp tasks so you choose the right specialized skill quickly and keep guidance aligned with current package behavior.
 
 ## Foundation Status
 
@@ -40,8 +40,8 @@ Future HF-aware agents should consume these shipped tools first instead of scrap
 3. Route to `hf-mcp-reads` for read tooling.
    Use it for tool family selection, required selectors, browse-first optional-filter semantics, and JSON-first read examples.
    Keep compounding flow entry explicit: `forums.index` / `forums_index` is local catalog-backed root discovery, then `forums.read` -> `threads.read` -> `posts.read`.
-   Keep selector truth explicit: `forums.read` still requires `fid` and is not root discovery.
-   Keep flow envelope truth explicit: `_hf_flow.next_actions` is the machine-readable handoff layer emitted by `forums.index`, core reads, supported extended reads, local draft/preflight tools, and successful results from implemented guarded writes (write actions remain explicitly confirmed).
+   Keep selector rules explicit: `forums.read` still requires `fid` and is not root discovery.
+   Keep the flow envelope explicit: `_hf_flow.next_actions` is the machine-readable handoff layer emitted by `forums.index`, core reads, supported extended reads, local draft/preflight tools, and successful results from implemented guarded writes (write actions remain explicitly confirmed).
 
 4. Route to `hf-mycode` for formatting and syntax work.
    Use it when the user needs MyCode/BBCode authoring, conversion, linting, or syntax troubleshooting.

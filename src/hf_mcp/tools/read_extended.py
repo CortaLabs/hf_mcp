@@ -138,7 +138,9 @@ _SIGMARKET_ORDER_FIELDS: tuple[str, ...] = (
 )
 
 
-def _translate_selector_kwargs(tool_name: str, kwargs: dict[str, Any]) -> dict[str, Any]:
+def _translate_selector_kwargs(
+    tool_name: str, kwargs: dict[str, Any]
+) -> dict[str, Any]:
     translated = dict(kwargs)
     for public_name, internal_name in _SELECTOR_ALIASES.get(tool_name, {}).items():
         if public_name not in translated:
@@ -210,7 +212,14 @@ def _build_contracts_asks(
         asks["contracts"]["_uid"] = uid
     for field, enabled in zip(
         _CONTRACTS_EXPANSION_FIELDS,
-        (include_inituser, include_otheruser, include_escrow, include_thread, include_ibrating, include_obrating),
+        (
+            include_inituser,
+            include_otheruser,
+            include_escrow,
+            include_thread,
+            include_ibrating,
+            include_obrating,
+        ),
         strict=True,
     ):
         if enabled:
@@ -344,7 +353,9 @@ def _build_orders_asks(
     return asks
 
 
-def _build_admin_high_risk_asks(*, page: int = 1, per_page: int = 30) -> dict[str, dict[str, Any]]:
+def _build_admin_high_risk_asks(
+    *, page: int = 1, per_page: int = 30
+) -> dict[str, dict[str, Any]]:
     return {"admin/high-risk/read": {"_page": page, "_perpage": per_page}}
 
 
@@ -397,14 +408,18 @@ def _extended_root_key(tool_name: str) -> str:
     return tool_name.split(".", 1)[0]
 
 
-def _build_content_summary(tool_name: str, payload: Mapping[str, Any], mode: ReadOutputMode) -> str:
+def _build_content_summary(
+    tool_name: str, payload: Mapping[str, Any], mode: ReadOutputMode
+) -> str:
     rows = _as_rows(payload, _extended_root_key(tool_name))
     if mode != "readable":
         return f"{tool_name} returned {len(rows)} row(s)."
     return _build_rows_summary(tool_name, rows)
 
 
-def _build_raw_resource(tool_name: str, raw_payload: Mapping[str, Any]) -> dict[str, Any]:
+def _build_raw_resource(
+    tool_name: str, raw_payload: Mapping[str, Any]
+) -> dict[str, Any]:
     return {
         "type": "resource",
         "resource": {
@@ -425,7 +440,12 @@ def _build_read_tool_result(
     arguments: Mapping[str, Any] | None = None,
     source: str | None = None,
 ) -> dict[str, Any]:
-    content: list[dict[str, Any]] = [{"type": "text", "text": _build_content_summary(tool_name, normalized_payload, mode)}]
+    content: list[dict[str, Any]] = [
+        {
+            "type": "text",
+            "text": _build_content_summary(tool_name, normalized_payload, mode),
+        }
+    ]
     if raw_payload is not None and (mode == "raw" or include_raw_payload):
         content.append(_build_raw_resource(tool_name, raw_payload))
     if tool_name not in _FLOW_EXTENDED_TOOL_NAMES:
@@ -436,7 +456,10 @@ def _build_read_tool_result(
         arguments=arguments,
         source=source,
     )
-    return {"content": content, "structuredContent": attach_hf_flow(normalized_payload, flow)}
+    return {
+        "content": content,
+        "structuredContent": attach_hf_flow(normalized_payload, flow),
+    }
 
 
 def list_entries(
@@ -559,7 +582,9 @@ def list_market(
     per_page: int = 30,
 ) -> dict[str, Any]:
     asks = _build_market_asks(uid=uid, page=page, per_page=per_page)
-    return normalize_extended_payload(transport.read(asks=asks, helper="sigmarket/market"))
+    return normalize_extended_payload(
+        transport.read(asks=asks, helper="sigmarket/market")
+    )
 
 
 def list_orders(
@@ -587,7 +612,9 @@ def list_orders(
         page=page,
         per_page=per_page,
     )
-    return normalize_extended_payload(transport.read(asks=asks, helper="sigmarket/order"))
+    return normalize_extended_payload(
+        transport.read(asks=asks, helper="sigmarket/order")
+    )
 
 
 def list_admin_high_risk(
@@ -597,20 +624,36 @@ def list_admin_high_risk(
     per_page: int = 30,
 ) -> dict[str, Any]:
     asks = _build_admin_high_risk_asks(page=page, per_page=per_page)
-    return normalize_extended_payload(transport.read(asks=asks, helper="admin/high-risk/read"))
+    return normalize_extended_payload(
+        transport.read(asks=asks, helper="admin/high-risk/read")
+    )
 
 
-def build_extended_read_handlers(policy: CapabilityPolicy, transport: HFTransport) -> dict[str, ReadHandler]:
+def build_extended_read_handlers(
+    policy: CapabilityPolicy, transport: HFTransport
+) -> dict[str, ReadHandler]:
     settings = cast(HFMCPSettings, getattr(policy, "_settings"))
 
     request_builders: dict[str, AskBuilder] = {
         "bytes.read": lambda **kwargs: (_build_entries_asks(**kwargs), "bytes"),
-        "contracts.read": lambda **kwargs: (_build_contracts_asks(**kwargs), "contracts"),
+        "contracts.read": lambda **kwargs: (
+            _build_contracts_asks(**kwargs),
+            "contracts",
+        ),
         "disputes.read": lambda **kwargs: (_build_disputes_asks(**kwargs), "disputes"),
         "bratings.read": lambda **kwargs: (_build_bratings_asks(**kwargs), "bratings"),
-        "sigmarket.market.read": lambda **kwargs: (_build_market_asks(**kwargs), "sigmarket/market"),
-        "sigmarket.order.read": lambda **kwargs: (_build_orders_asks(**kwargs), "sigmarket/order"),
-        "admin.high_risk.read": lambda **kwargs: (_build_admin_high_risk_asks(**kwargs), "admin/high-risk/read"),
+        "sigmarket.market.read": lambda **kwargs: (
+            _build_market_asks(**kwargs),
+            "sigmarket/market",
+        ),
+        "sigmarket.order.read": lambda **kwargs: (
+            _build_orders_asks(**kwargs),
+            "sigmarket/order",
+        ),
+        "admin.high_risk.read": lambda **kwargs: (
+            _build_admin_high_risk_asks(**kwargs),
+            "admin/high-risk/read",
+        ),
     }
 
     def _finalize_result(
@@ -623,7 +666,9 @@ def build_extended_read_handlers(policy: CapabilityPolicy, transport: HFTranspor
         body_format: str | None,
         arguments: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
-        defaults = resolve_read_output_defaults(settings, output_mode, include_raw_payload, body_format)
+        defaults = resolve_read_output_defaults(
+            settings, output_mode, include_raw_payload, body_format
+        )
         need_raw = defaults.mode == "raw" or defaults.include_raw_payload
         raw_payload: dict[str, Any] | None = None
         # The bratings helper returns 404 live; preserve asks on generic /read.
@@ -632,8 +677,12 @@ def build_extended_read_handlers(policy: CapabilityPolicy, transport: HFTranspor
             raw_payload = transport.read_raw(asks=asks, helper=transport_helper)
             normalized_payload = normalize_extended_payload(raw_payload)
         else:
-            normalized_payload = normalize_extended_payload(transport.read(asks=asks, helper=transport_helper))
-        normalized_payload = format_body_fields(normalized_payload, defaults.body_format)
+            normalized_payload = normalize_extended_payload(
+                transport.read(asks=asks, helper=transport_helper)
+            )
+        normalized_payload = format_body_fields(
+            normalized_payload, defaults.body_format
+        )
         return _build_read_tool_result(
             tool_name=tool_name,
             normalized_payload=normalized_payload,

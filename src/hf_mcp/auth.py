@@ -35,22 +35,30 @@ def authorize_via_loopback(
     client_id = _required_setting(settings, "HF_MCP_CLIENT_ID")
     client_secret = _required_setting(settings, "HF_MCP_CLIENT_SECRET")
 
-    external_redirect_uri = settings.runtime_env.get("HF_MCP_EXTERNAL_REDIRECT_URI", "").strip()
+    external_redirect_uri = settings.runtime_env.get(
+        "HF_MCP_EXTERNAL_REDIRECT_URI", ""
+    ).strip()
     if external_redirect_uri:
         redirect_uri = _validate_external_redirect_uri(external_redirect_uri)
         callback_redirect_uri = HOSTED_MODE_LOOPBACK_CALLBACK_URI
     else:
-        redirect_uri = settings.runtime_env.get("HF_MCP_REDIRECT_URI", DEFAULT_LOOPBACK_REDIRECT_URI)
+        redirect_uri = settings.runtime_env.get(
+            "HF_MCP_REDIRECT_URI", DEFAULT_LOOPBACK_REDIRECT_URI
+        )
         callback_redirect_uri = redirect_uri
 
-    authorize_url = settings.runtime_env.get("HF_MCP_AUTHORIZE_URL", DEFAULT_AUTHORIZE_ENDPOINT)
+    authorize_url = settings.runtime_env.get(
+        "HF_MCP_AUTHORIZE_URL", DEFAULT_AUTHORIZE_ENDPOINT
+    )
     token_url = settings.runtime_env.get("HF_MCP_TOKEN_URL", DEFAULT_AUTHORIZE_ENDPOINT)
 
     timeout_raw = settings.runtime_env.get("HF_MCP_AUTH_TIMEOUT_SECONDS", "180")
     try:
         timeout_seconds = int(timeout_raw)
     except (TypeError, ValueError) as exc:
-        raise ValueError("HF_MCP_AUTH_TIMEOUT_SECONDS must be an integer number of seconds.") from exc
+        raise ValueError(
+            "HF_MCP_AUTH_TIMEOUT_SECONDS must be an integer number of seconds."
+        ) from exc
 
     state = secrets.token_urlsafe(24)
     browser_url = _build_authorize_url(
@@ -105,7 +113,9 @@ def _build_authorize_url(
     return f"{authorize_url}{separator}{params}"
 
 
-def _await_loopback_callback(redirect_uri: str, timeout_seconds: int) -> Mapping[str, str]:
+def _await_loopback_callback(
+    redirect_uri: str, timeout_seconds: int
+) -> Mapping[str, str]:
     parsed_uri = urllib.parse.urlparse(redirect_uri)
     host = parsed_uri.hostname
     port = parsed_uri.port
@@ -126,7 +136,9 @@ def _await_loopback_callback(redirect_uri: str, timeout_seconds: int) -> Mapping
                 self.end_headers()
                 return
 
-            parsed_query = urllib.parse.parse_qs(parsed_request.query, keep_blank_values=True)
+            parsed_query = urllib.parse.parse_qs(
+                parsed_request.query, keep_blank_values=True
+            )
             for key in ("code", "state", "error"):
                 values = parsed_query.get(key)
                 if values:
@@ -145,7 +157,11 @@ def _await_loopback_callback(redirect_uri: str, timeout_seconds: int) -> Mapping
     server.timeout = 0.25
 
     deadline = time.monotonic() + timeout_seconds
-    while time.monotonic() < deadline and "code" not in callback_state and "error" not in callback_state:
+    while (
+        time.monotonic() < deadline
+        and "code" not in callback_state
+        and "error" not in callback_state
+    ):
         server.handle_request()
 
     server.server_close()
@@ -187,7 +203,9 @@ def _exchange_code_for_token(
             response_body = response.read().decode("utf-8")
     except urllib.error.HTTPError as error:
         error_body = error.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"Token exchange failed: HTTP {error.code}. {error_body}") from error
+        raise RuntimeError(
+            f"Token exchange failed: HTTP {error.code}. {error_body}"
+        ) from error
 
     parsed = json.loads(response_body)
     if not isinstance(parsed, dict):

@@ -28,7 +28,9 @@ def validate_write_body(value: str, *, source_format: WriteSourceFormat) -> None
 
 def _reject_control_or_placeholder_text(value: str) -> None:
     if _PLACEHOLDER_PATTERN.search(value):
-        raise WritePreflightError("Write body contains an internal formatter placeholder.")
+        raise WritePreflightError(
+            "Write body contains an internal formatter placeholder."
+        )
     if _CONTROL_PATTERN.search(value):
         raise WritePreflightError("Write body contains unsupported control characters.")
 
@@ -47,10 +49,14 @@ def _remove_balanced_code_blocks(value: str) -> str:
             continue
 
         if not stack:
-            raise WritePreflightError(f"Write body contains closing {tag_name} tag without an opener.")
+            raise WritePreflightError(
+                f"Write body contains closing {tag_name} tag without an opener."
+            )
         open_tag, open_start = stack.pop()
         if open_tag != tag_name:
-            raise WritePreflightError(f"Write body closes {tag_name} while {open_tag} is still open.")
+            raise WritePreflightError(
+                f"Write body closes {tag_name} while {open_tag} is still open."
+            )
         remove_ranges.append((open_start, match.end()))
 
     if stack:
@@ -76,7 +82,9 @@ def _validate_emitted_mycode_tags(value: str) -> None:
         raw_token = match.group(0).lower()
         if raw_token == "[*]":
             if "list" not in stack:
-                raise WritePreflightError("Write body contains a list item outside a list block.")
+                raise WritePreflightError(
+                    "Write body contains a list item outside a list block."
+                )
             continue
 
         tag_name = match.group("tag").lower()
@@ -88,10 +96,14 @@ def _validate_emitted_mycode_tags(value: str) -> None:
             continue
 
         if not stack:
-            raise WritePreflightError(f"Write body contains closing {tag_name} tag without an opener.")
+            raise WritePreflightError(
+                f"Write body contains closing {tag_name} tag without an opener."
+            )
         open_tag = stack.pop()
         if open_tag != tag_name:
-            raise WritePreflightError(f"Write body closes {tag_name} while {open_tag} is still open.")
+            raise WritePreflightError(
+                f"Write body closes {tag_name} while {open_tag} is still open."
+            )
 
     if stack:
         raise WritePreflightError(f"Write body contains unclosed {stack[-1]} tag.")

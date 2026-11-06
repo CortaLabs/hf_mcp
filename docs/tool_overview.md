@@ -1,7 +1,11 @@
 # Tool Overview
 
 This page summarizes the shipped MCP tool surface defined in
-`src/hf_mcp/registry.py` for operator use.
+`src/hf_mcp/registry.py` for users and operators.
+
+Clients list tools with underscores instead of dots (for example
+`threads_read` for `threads.read`). These docs and the config file use the
+dotted names; both refer to the same tool.
 
 ## Availability labels
 
@@ -15,8 +19,9 @@ Evidence tags used in this document and the coverage matrix:
 - `OpenAPI-confirmed`
 - `PHP-source-confirmed`
 - `HF_API_REFERENCE-confirmed`
-- `live-proven`
-- `unproven`
+- `none` (no source confirms it)
+
+Live status values: `tested live` and `untested`.
 
 ## Read output contract
 
@@ -122,7 +127,7 @@ Content writes (`threads.create`, `posts.reply`) also accept `message_format`.
 
 ## Not exposed boundaries
 
-- `contracts.write` is not exposed because sandbox proof is unavailable.
+- `contracts.write` is not exposed because there is no verified contract for it.
 - Signature Market write operations are unsupported and not exposed.
 - Admin-only high-risk write operations are unsupported and not exposed.
 

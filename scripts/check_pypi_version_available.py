@@ -31,7 +31,10 @@ def main() -> int:
         return 1
 
     if not version:
-        print(f"Refusing release check: missing project.version in {pyproject_path}.", file=sys.stderr)
+        print(
+            f"Refusing release check: missing project.version in {pyproject_path}.",
+            file=sys.stderr,
+        )
         return 1
 
     url = f"https://pypi.org/pypi/{PACKAGE_NAME}/json"
@@ -44,7 +47,10 @@ def main() -> int:
                 f"PyPI package {PACKAGE_NAME!r} does not exist yet; version {version} is available."
             )
             return 0
-        print(f"PyPI version check failed for {PACKAGE_NAME!r}: HTTP {exc.code}.", file=sys.stderr)
+        print(
+            f"PyPI version check failed for {PACKAGE_NAME!r}: HTTP {exc.code}.",
+            file=sys.stderr,
+        )
         return 1
     except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
         print(

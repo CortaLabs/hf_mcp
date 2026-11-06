@@ -63,14 +63,18 @@ def _resolve_message_text(
         raise ValueError("Provide either message or draft_id/draft_path, not both.")
     if not has_message and not has_draft:
         raise ValueError("A message, draft_id, or draft_path is required.")
-    if has_message:
+    if message:
         return _normalize_write_text(message, message_format)
 
-    artifact = read_draft_artifact(draft_id=draft_id, draft_path=draft_path, draft_dir=draft_dir)
+    artifact = read_draft_artifact(
+        draft_id=draft_id, draft_path=draft_path, draft_dir=draft_dir
+    )
     for issue in artifact.report.issues:
         if issue.severity == "error":
             raise WritePreflightError(issue.message)
-    validate_write_body(artifact.report.mycode, source_format=artifact.report.source_format)
+    validate_write_body(
+        artifact.report.mycode, source_format=artifact.report.source_format
+    )
     return artifact.report.mycode
 
 

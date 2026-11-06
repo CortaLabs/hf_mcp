@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import re
 import json
 import os
 import runpy
@@ -33,14 +34,22 @@ EXPORT_MANIFEST_PATH = PRODUCT_ROOT / "export_manifest.toml"
 SDIST_MANIFEST_PATH = PRODUCT_ROOT / "MANIFEST.in"
 PYPROJECT_PATH = PRODUCT_ROOT / "pyproject.toml"
 CONFIGURATION_DOC_PATH = PRODUCT_ROOT / "docs/configuration.md"
-EXPORT_BOUNDARY_DOC_PATH = PRODUCT_ROOT / "docs/export_boundary.md"
+SECURITY_MODEL_DOC_PATH = PRODUCT_ROOT / "docs/security_model.md"
+README_PATH = PRODUCT_ROOT / "README.md"
 PUBLISH_WORKFLOW_PATH = PRODUCT_ROOT / ".github/workflows/publish-hf-mcp-pypi.yml"
 ALLOWED_PREFIX = "products/hf_mcp/"
 YAML_EXAMPLE = "products/hf_mcp/config.example.yaml"
 TOML_EXAMPLE = "products/hf_mcp/config.example.toml"
 SKILLS_SUBTREE = "products/hf_mcp/skills/**"
 CATALOG_DATA_SUBTREE = "products/hf_mcp/src/hf_mcp/data/**"
-FORBIDDEN_EXPORT_REFERENCES = (".council", ".scribe", ".claude", ".codex", "../", "..\\")
+FORBIDDEN_EXPORT_REFERENCES = (
+    ".council",
+    ".scribe",
+    ".claude",
+    ".codex",
+    "../",
+    "..\\",
+)
 EXPECTED_MANIFEST_LINES = {
     "include README.md",
     "include pyproject.toml",
@@ -60,12 +69,16 @@ EXPECTED_MANIFEST_LINES = {
 
 def _validate_allowlist(entries: list[str]) -> None:
     for entry in entries:
-        assert entry.startswith(ALLOWED_PREFIX), f"Allowlist entry escapes product subtree: {entry}"
+        assert entry.startswith(ALLOWED_PREFIX), (
+            f"Allowlist entry escapes product subtree: {entry}"
+        )
         assert ".." not in entry, f"Allowlist entry contains parent traversal: {entry}"
 
 
 def _allowlist_product_path(entry: str) -> Path:
-    assert entry.startswith(ALLOWED_PREFIX), f"Allowlist entry escapes product subtree: {entry}"
+    assert entry.startswith(ALLOWED_PREFIX), (
+        f"Allowlist entry escapes product subtree: {entry}"
+    )
     return PRODUCT_ROOT / entry.removeprefix(ALLOWED_PREFIX)
 
 
@@ -108,7 +121,9 @@ def test_export_root_resolves_from_standalone_product_checkout(tmp_path: Path) -
 @pytest.mark.build
 @pytest.mark.regression
 def test_publisher_trigger_containment() -> None:
-    workflow = yaml.load(PUBLISH_WORKFLOW_PATH.read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
+    workflow = yaml.load(
+        PUBLISH_WORKFLOW_PATH.read_text(encoding="utf-8"), Loader=yaml.BaseLoader
+    )
     triggers = workflow["on"]
     event_cases = (
         ("source push", "push", False),
@@ -128,33 +143,27 @@ def test_publisher_trigger_containment() -> None:
 @pytest.mark.build
 def test_docs_define_yaml_env_and_token_path_responsibilities() -> None:
     configuration_doc = CONFIGURATION_DOC_PATH.read_text(encoding="utf-8")
-    export_boundary_doc = EXPORT_BOUNDARY_DOC_PATH.read_text(encoding="utf-8")
 
-    assert "YAML is the canonical runtime config input for non-secret policy" in configuration_doc
+    assert (
+        "YAML is the canonical runtime config input for non-secret policy"
+        in configuration_doc
+    )
     assert "must not be used to choose non-secret runtime policy" in configuration_doc
-    assert "must resolve to an absolute path outside the tracked repository" in configuration_doc
-
-    assert "Runtime policy is YAML-first: non-secret policy belongs in `config.yaml`." in export_boundary_doc
-    assert "reserved for secrets and machine-local overrides" in export_boundary_doc
-    assert "must not define" in export_boundary_doc
-    assert "profile/capability/parameter policy" in export_boundary_doc
-    assert "Token-store location must be an absolute path outside the tracked repository" in export_boundary_doc
+    assert (
+        "must resolve to an absolute path outside the tracked repository"
+        in configuration_doc
+    )
 
 
 @pytest.mark.core
 @pytest.mark.build
 def test_live_write_boundary_language_is_published_in_docs_and_config() -> None:
-    export_boundary_doc = EXPORT_BOUNDARY_DOC_PATH.read_text(encoding="utf-8")
+    security_doc = SECURITY_MODEL_DOC_PATH.read_text(encoding="utf-8")
+    readme = README_PATH.read_text(encoding="utf-8")
     config_yaml = _allowlist_product_path(YAML_EXAMPLE).read_text(encoding="utf-8")
 
-    required_boundary_markers = [
-        "Live-write validation stays manual: no automated live writes.",
-        "Concrete writes require `confirm_live=true`.",
-        "Root-level repository assets are outside the export boundary.",
-        "Token-store location must be an absolute path outside the tracked repository",
-    ]
-    for marker in required_boundary_markers:
-        assert marker in export_boundary_doc
+    assert "`confirm_live=true`" in security_doc
+    assert "`confirm_live=true`" in readme
 
     assert "profile: reader" in config_yaml
     assert "enabled_capabilities: []" in config_yaml
@@ -186,30 +195,48 @@ def test_pyproject_release_contract_and_metadata_boundary() -> None:
 
     assert "setuptools>=77.0.3" in pyproject["build-system"]["requires"]
     assert project["name"] == "hf-mcp"
-    assert project["version"] == "0.6.1"
+    assert project["version"] == "0.6.2"
     assert isinstance(project["version"], str) and project["version"].strip()
     assert project["scripts"]["hf-mcp"] == "hf_mcp.cli:main"
     assert project["keywords"] == ["hackforums", "mcp", "model-context-protocol"]
-    assert "Programming Language :: Python :: 3.11" in project["classifiers"]
+    for python_minor in ("3.11", "3.12", "3.13"):
+        assert (
+            f"Programming Language :: Python :: {python_minor}"
+            in project["classifiers"]
+        )
+    assert any(c.startswith("Development Status ::") for c in project["classifiers"])
+    assert project["description"].strip()
+    assert project["authors"]
+    assert set(project["urls"]) >= {"Homepage", "Repository", "Issues", "Changelog"}
+    for url in project["urls"].values():
+        assert url.startswith("https://github.com/CortaLabs/hf_mcp")
     assert pyproject["tool"]["setuptools"]["package-data"]["hf_mcp"] == ["data/*.json"]
-    assert pyproject["tool"]["setuptools"]["data-files"]["skills/hf-mycode/references"] == [
-        "skills/hf-mycode/references/MYCODE_REFERENCE.md"
-    ]
+    assert pyproject["tool"]["setuptools"]["data-files"][
+        "skills/hf-mycode/references"
+    ] == ["skills/hf-mycode/references/MYCODE_REFERENCE.md"]
 
     pyproject_text = PYPROJECT_PATH.read_text(encoding="utf-8").lower()
     for forbidden in FORBIDDEN_EXPORT_REFERENCES:
-        assert forbidden not in pyproject_text, f"Forbidden reference in pyproject metadata: {forbidden}"
+        assert forbidden not in pyproject_text, (
+            f"Forbidden reference in pyproject metadata: {forbidden}"
+        )
 
 
 @pytest.mark.core
 @pytest.mark.build
 def test_sdist_manifest_is_explicit_and_package_local() -> None:
     manifest_text = SDIST_MANIFEST_PATH.read_text(encoding="utf-8")
-    lines = [line.strip() for line in manifest_text.splitlines() if line.strip() and not line.strip().startswith("#")]
+    lines = [
+        line.strip()
+        for line in manifest_text.splitlines()
+        if line.strip() and not line.strip().startswith("#")
+    ]
 
     assert set(lines) == EXPECTED_MANIFEST_LINES
     for forbidden in FORBIDDEN_EXPORT_REFERENCES:
-        assert forbidden not in manifest_text.lower(), f"Forbidden reference in MANIFEST.in: {forbidden}"
+        assert forbidden not in manifest_text.lower(), (
+            f"Forbidden reference in MANIFEST.in: {forbidden}"
+        )
 
 
 @pytest.mark.core
@@ -245,8 +272,7 @@ def test_dev_tools_are_exactly_pinned_without_runtime_dependency_drift() -> None
         for requirement in project["optional-dependencies"]["dev"]
     ]
     dev_names = [
-        requirement.name.lower().replace("_", "-")
-        for requirement in dev_requirements
+        requirement.name.lower().replace("_", "-") for requirement in dev_requirements
     ]
     assert len(dev_names) == len(set(dev_names))
     assert {
@@ -297,7 +323,9 @@ def test_version_resolution_prefers_source_then_distribution_then_unknown(
     monkeypatch.setattr(
         hf_mcp,
         "distribution_version",
-        lambda _name: pytest.fail("installed metadata must not override the source version"),
+        lambda _name: pytest.fail(
+            "installed metadata must not override the source version"
+        ),
     )
     hf_mcp._resolve_version.cache_clear()
     try:
@@ -460,12 +488,18 @@ def test_smoke_rejects_missing_artifacts_without_writing_a_pass_receipt(
         [
             sys.executable,
             str(PRODUCT_ROOT / "scripts" / "smoke_installed.py"),
-            "--artifact-dir", str(artifact_dir),
-            "--work-dir", str(work_dir),
-            "--wheelhouse", str(wheelhouse),
-            "--source-revision", "a" * 40,
-            "--expected-version", "0.4.5",
-            "--receipt", str(receipt),
+            "--artifact-dir",
+            str(artifact_dir),
+            "--work-dir",
+            str(work_dir),
+            "--wheelhouse",
+            str(wheelhouse),
+            "--source-revision",
+            "a" * 40,
+            "--expected-version",
+            "0.4.5",
+            "--receipt",
+            str(receipt),
         ],
         cwd=tmp_path,
         env=isolated_child_context.environment(),
@@ -507,7 +541,14 @@ def _make_controlled_release_archives(
         wheel_files["hf_mcp/data/forums_index.json"] = b"{}\n"
     else:
         wheel_files.pop("hf_mcp/data/forums_index.json")
-    for skill in ("hf-api-v2", "hf-mcp", "hf-mcp-bootstrap", "hf-mcp-reads", "hf-mcp-writes", "hf-mycode"):
+    for skill in (
+        "hf-api-v2",
+        "hf-mcp",
+        "hf-mcp-bootstrap",
+        "hf-mcp-reads",
+        "hf-mcp-writes",
+        "hf-mycode",
+    ):
         wheel_files[f"hf_mcp-0.4.5.data/data/skills/{skill}/SKILL.md"] = b"skill\n"
     if failure_mode != "skill_reference":
         wheel_files[
@@ -542,7 +583,14 @@ def _make_controlled_release_archives(
         "PKG-INFO": b"Name: hf-mcp\nVersion: 0.4.5\n",
     }
     if failure_mode != "resource":
-        for skill in ("hf-api-v2", "hf-mcp", "hf-mcp-bootstrap", "hf-mcp-reads", "hf-mcp-writes", "hf-mycode"):
+        for skill in (
+            "hf-api-v2",
+            "hf-mcp",
+            "hf-mcp-bootstrap",
+            "hf-mcp-reads",
+            "hf-mcp-writes",
+            "hf-mycode",
+        ):
             sdist_files[f"skills/{skill}/SKILL.md"] = b"skill\n"
     else:
         sdist_files.pop("src/hf_mcp/data/forums_index.json")
@@ -590,7 +638,9 @@ def test_installed_smoke_cli_records_controlled_failure(
         tmp_path, failure_mode=failure_mode
     )
     if failure_mode == "duplicate":
-        (artifact_dir / "hf_mcp-0.4.5-duplicate.whl").write_bytes(wheel_path.read_bytes())
+        (artifact_dir / "hf_mcp-0.4.5-duplicate.whl").write_bytes(
+            wheel_path.read_bytes()
+        )
     work_dir = PRODUCT_ROOT if failure_mode == "unsafe_work" else tmp_path / "work"
     receipt = tmp_path / "receipt.json"
     child_env = isolated_child_context.environment()
@@ -600,12 +650,18 @@ def test_installed_smoke_cli_records_controlled_failure(
         [
             sys.executable,
             str(PRODUCT_ROOT / "scripts" / "smoke_installed.py"),
-            "--artifact-dir", str(artifact_dir),
-            "--work-dir", str(work_dir),
-            "--wheelhouse", str(wheelhouse),
-            "--source-revision", "a" * 40,
-            "--expected-version", "0.4.5",
-            "--receipt", str(receipt),
+            "--artifact-dir",
+            str(artifact_dir),
+            "--work-dir",
+            str(work_dir),
+            "--wheelhouse",
+            str(wheelhouse),
+            "--source-revision",
+            "a" * 40,
+            "--expected-version",
+            "0.4.5",
+            "--receipt",
+            str(receipt),
         ],
         cwd=tmp_path,
         env=child_env,
@@ -766,9 +822,7 @@ def test_installed_probe_state_guard_passes_clean_state_and_receipts_each_write(
 
     receipt_path = tmp_path / "state-leak-receipt.json"
     receipt = smoke["_failure_receipt_document"](
-        smoke["argparse"].Namespace(
-            source_revision="a" * 40, expected_version="0.6.1"
-        ),
+        smoke["argparse"].Namespace(source_revision="a" * 40, expected_version="0.6.1"),
         failure.value,
     )
     receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
@@ -796,12 +850,18 @@ def test_smoke_failure_receipt_binds_safe_check_exit_and_argv(
         [
             sys.executable,
             str(PRODUCT_ROOT / "scripts" / "smoke_installed.py"),
-            "--artifact-dir", str(artifact_dir),
-            "--work-dir", str(work_dir),
-            "--wheelhouse", str(wheelhouse),
-            "--source-revision", "a" * 40,
-            "--expected-version", "0.4.5",
-            "--receipt", str(receipt),
+            "--artifact-dir",
+            str(artifact_dir),
+            "--work-dir",
+            str(work_dir),
+            "--wheelhouse",
+            str(wheelhouse),
+            "--source-revision",
+            "a" * 40,
+            "--expected-version",
+            "0.4.5",
+            "--receipt",
+            str(receipt),
         ],
         cwd=tmp_path,
         env=child_env,
@@ -822,12 +882,77 @@ def test_smoke_failure_receipt_binds_safe_check_exit_and_argv(
 
 @pytest.mark.core
 @pytest.mark.build
-def test_release_metadata_describes_build_smoke_scope() -> None:
+def test_release_metadata_describes_current_release() -> None:
+    version = tomllib.loads(PYPROJECT_PATH.read_text(encoding="utf-8"))["project"][
+        "version"
+    ]
     changelog = (PRODUCT_ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
-    readme = (PRODUCT_ROOT / "README.md").read_text(encoding="utf-8")
+    readme = README_PATH.read_text(encoding="utf-8")
 
-    assert "## 0.6.1" in changelog
-    assert "## 0.6.0" in changelog
-    assert "## 0.4.6" in changelog
-    assert "## 0.4.5" in changelog
-    assert "Current release line: `0.6.1`." in readme
+    assert f"## {version}" in changelog
+    assert changelog.index(f"## {version}") < changelog.index("## 0.6.1")
+    assert "Version 0.4" not in readme
+    assert "Current release line" not in readme
+
+
+@pytest.mark.core
+@pytest.mark.build
+def test_public_docs_have_no_internal_process_language() -> None:
+    banned = re.compile(
+        r"this wave|operator-approved|hackforums-council|export boundary"
+        r"|\b(?:probes?|readback|truths?|proof|prove[sn]?|proven)\b"
+        r"|acceptance|baseline|sandbox"
+        r"|(?:tid|fid|thread|forum)\W{0,3}\d{5,}",
+        re.IGNORECASE,
+    )
+    public_files = [
+        README_PATH,
+        PRODUCT_ROOT / "config.example.yaml",
+        *sorted((PRODUCT_ROOT / "docs").glob("*.md")),
+        *sorted((PRODUCT_ROOT / "docs").glob("*.html")),
+        *sorted((PRODUCT_ROOT / "skills").rglob("*.md")),
+    ]
+    for path in public_files:
+        text = path.read_text(encoding="utf-8")
+        text = re.sub(r"https?://\S+", "", text)
+        match = banned.search(text)
+        assert match is None, f"{match.group(0)!r} found in {path.name}"
+
+
+@pytest.mark.core
+@pytest.mark.build
+def test_packaging_files_reference_only_existing_files() -> None:
+    pyproject = tomllib.loads(PYPROJECT_PATH.read_text(encoding="utf-8"))
+    data_files = pyproject["tool"]["setuptools"]["data-files"]
+    for patterns in data_files.values():
+        for pattern in patterns:
+            assert list(PRODUCT_ROOT.glob(pattern)), (
+                f"data-files matches nothing: {pattern}"
+            )
+
+    for line in SDIST_MANIFEST_PATH.read_text(encoding="utf-8").splitlines():
+        if line.startswith("include "):
+            assert (PRODUCT_ROOT / line.removeprefix("include ")).exists(), line
+
+    assert not (PRODUCT_ROOT / "docs" / "export_boundary.md").exists()
+    assert not list((PRODUCT_ROOT / "docs").glob("*.mycode"))
+    assert ".council/" in (PRODUCT_ROOT / ".gitignore").read_text(encoding="utf-8")
+
+
+@pytest.mark.core
+@pytest.mark.build
+@pytest.mark.regression
+def test_version_ignores_unrelated_pyproject_outside_a_source_tree(
+    tmp_path: Path,
+) -> None:
+    site = tmp_path / "lib" / "python3.12" / "site-packages" / "hf_mcp"
+    site.mkdir(parents=True)
+    (site / "__init__.py").write_bytes(
+        (PRODUCT_ROOT / "src" / "hf_mcp" / "__init__.py").read_bytes()
+    )
+    (tmp_path / "lib" / "pyproject.toml").write_text(
+        '[project]\nname = "hf-mcp"\nversion = "9.9.9"\n', encoding="utf-8"
+    )
+    namespace = runpy.run_path(str(site / "__init__.py"))
+    assert namespace["_read_local_pyproject_version"]() is None
+    assert namespace["__version__"] == installed_version("hf-mcp")

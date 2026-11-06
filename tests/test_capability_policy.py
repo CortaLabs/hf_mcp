@@ -1,16 +1,11 @@
 from __future__ import annotations
 
-import sys
 import textwrap
 from pathlib import Path
 
 import pytest
 import yaml
 
-PRODUCT_ROOT = Path(__file__).resolve().parents[1]
-SRC_PATH = PRODUCT_ROOT / "src"
-if str(SRC_PATH) not in sys.path:
-    sys.path.insert(0, str(SRC_PATH))
 
 from hf_mcp.capabilities import CapabilityPolicy
 from hf_mcp.config import (
@@ -22,6 +17,9 @@ from hf_mcp.config import (
     PRESET_PARAMETER_FAMILIES,
     load_settings,
 )
+
+PRODUCT_ROOT = Path(__file__).resolve().parents[1]
+SRC_PATH = PRODUCT_ROOT / "src"
 
 
 def _write_config(tmp_path: Path, content: str) -> Path:
@@ -112,7 +110,9 @@ def test_full_api_profile_exposes_verified_concrete_surface_only() -> None:
         assert policy.can_register(name) is False
 
 
-def test_reader_preset_disables_registration_for_write_capabilities(tmp_path: Path) -> None:
+def test_reader_preset_disables_registration_for_write_capabilities(
+    tmp_path: Path,
+) -> None:
     config_path = _write_config(
         tmp_path,
         """
@@ -186,8 +186,14 @@ def test_full_api_family_disables_support_required_permission_groups(
             {
                 "type": "object",
                 "properties": {
-                    "_uid": {"type": "integer", "x-hf-parameter-family": "selectors.user"},
-                    "_page": {"type": "integer", "x-hf-parameter-family": "filters.pagination"},
+                    "_uid": {
+                        "type": "integer",
+                        "x-hf-parameter-family": "selectors.user",
+                    },
+                    "_page": {
+                        "type": "integer",
+                        "x-hf-parameter-family": "filters.pagination",
+                    },
                 },
             },
             "_uid",
@@ -198,8 +204,14 @@ def test_full_api_family_disables_support_required_permission_groups(
             {
                 "type": "object",
                 "properties": {
-                    "_cid": {"type": "integer", "x-hf-parameter-family": "selectors.contract"},
-                    "_page": {"type": "integer", "x-hf-parameter-family": "filters.pagination"},
+                    "_cid": {
+                        "type": "integer",
+                        "x-hf-parameter-family": "selectors.contract",
+                    },
+                    "_page": {
+                        "type": "integer",
+                        "x-hf-parameter-family": "filters.pagination",
+                    },
                 },
             },
             "_cid",
@@ -210,8 +222,14 @@ def test_full_api_family_disables_support_required_permission_groups(
             {
                 "type": "object",
                 "properties": {
-                    "_smid": {"type": "integer", "x-hf-parameter-family": "selectors.sigmarket"},
-                    "_page": {"type": "integer", "x-hf-parameter-family": "filters.pagination"},
+                    "_smid": {
+                        "type": "integer",
+                        "x-hf-parameter-family": "selectors.sigmarket",
+                    },
+                    "_page": {
+                        "type": "integer",
+                        "x-hf-parameter-family": "filters.pagination",
+                    },
                 },
             },
             "_smid",
@@ -222,8 +240,14 @@ def test_full_api_family_disables_support_required_permission_groups(
             {
                 "type": "object",
                 "properties": {
-                    "_uid": {"type": "integer", "x-hf-parameter-family": "selectors.user"},
-                    "_stats": {"type": "boolean", "x-hf-parameter-family": "fields.me.advanced"},
+                    "_uid": {
+                        "type": "integer",
+                        "x-hf-parameter-family": "selectors.user",
+                    },
+                    "_stats": {
+                        "type": "boolean",
+                        "x-hf-parameter-family": "fields.me.advanced",
+                    },
                 },
             },
             "_stats",
@@ -234,8 +258,14 @@ def test_full_api_family_disables_support_required_permission_groups(
             {
                 "type": "object",
                 "properties": {
-                    "_tid": {"type": "integer", "x-hf-parameter-family": "selectors.thread"},
-                    "_body": {"type": "boolean", "x-hf-parameter-family": "fields.posts.body"},
+                    "_tid": {
+                        "type": "integer",
+                        "x-hf-parameter-family": "selectors.thread",
+                    },
+                    "_body": {
+                        "type": "boolean",
+                        "x-hf-parameter-family": "fields.posts.body",
+                    },
                 },
             },
             "_body",
@@ -246,8 +276,14 @@ def test_full_api_family_disables_support_required_permission_groups(
             {
                 "type": "object",
                 "properties": {
-                    "_uid": {"type": "integer", "x-hf-parameter-family": "selectors.bytes"},
-                    "_amount": {"type": "boolean", "x-hf-parameter-family": "fields.bytes.amount"},
+                    "_uid": {
+                        "type": "integer",
+                        "x-hf-parameter-family": "selectors.bytes",
+                    },
+                    "_amount": {
+                        "type": "boolean",
+                        "x-hf-parameter-family": "fields.bytes.amount",
+                    },
                 },
             },
             "_amount",
@@ -295,7 +331,9 @@ def test_full_api_can_disable_capability_explicitly(tmp_path: Path) -> None:
     assert policy.can_register("threads.create") is True
 
 
-def test_custom_profile_accepts_explicit_capability_and_parameter_family(tmp_path: Path) -> None:
+def test_custom_profile_accepts_explicit_capability_and_parameter_family(
+    tmp_path: Path,
+) -> None:
     config_path = _write_config(
         tmp_path,
         """
@@ -365,13 +403,17 @@ def test_prune_schema_returns_closed_schema_for_disabled_tool() -> None:
     )
     policy = CapabilityPolicy(settings)
 
-    pruned = policy.prune_schema("posts.reply", {"type": "object", "properties": {"_tid": {}}})
+    pruned = policy.prune_schema(
+        "posts.reply", {"type": "object", "properties": {"_tid": {}}}
+    )
 
     assert pruned == {"type": "object", "properties": {}, "additionalProperties": False}
 
 
 def test_example_config_defaults_to_reader_profile() -> None:
-    data = yaml.safe_load((PRODUCT_ROOT / "config.example.yaml").read_text(encoding="utf-8"))
+    data = yaml.safe_load(
+        (PRODUCT_ROOT / "config.example.yaml").read_text(encoding="utf-8")
+    )
     assert data["profile"] == "reader"
 
 

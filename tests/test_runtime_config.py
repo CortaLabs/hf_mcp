@@ -1,20 +1,23 @@
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
 import pytest
 import yaml
 
-PRODUCT_ROOT = Path(__file__).resolve().parents[1]
-SRC_PATH = PRODUCT_ROOT / "src"
-if str(SRC_PATH) not in sys.path:
-    sys.path.insert(0, str(SRC_PATH))
 
 import hf_mcp.config as runtime_config
-from hf_mcp.config import DEFAULT_CONFIG_PATH, DEFAULT_DRAFT_DIR, DEFAULT_TOKEN_PATH, load_settings
+from hf_mcp.config import (
+    DEFAULT_CONFIG_PATH,
+    DEFAULT_DRAFT_DIR,
+    DEFAULT_TOKEN_PATH,
+    load_settings,
+)
 from hf_mcp.output_modes import ReadOutputDefaults, resolve_read_output_defaults
 from hf_mcp.token_store import load_token_store
+
+PRODUCT_ROOT = Path(__file__).resolve().parents[1]
+SRC_PATH = PRODUCT_ROOT / "src"
 
 
 def _write_yaml(path: Path, payload: dict[str, object]) -> None:
@@ -22,19 +25,25 @@ def _write_yaml(path: Path, payload: dict[str, object]) -> None:
     path.write_text(yaml.safe_dump(payload, sort_keys=True), encoding="utf-8")
 
 
-def test_resolution_prefers_explicit_config_path_over_environment(tmp_path: Path) -> None:
+def test_resolution_prefers_explicit_config_path_over_environment(
+    tmp_path: Path,
+) -> None:
     explicit_path = tmp_path / "explicit.yaml"
     env_path = tmp_path / "env.yaml"
     _write_yaml(explicit_path, {"profile": "reader"})
     _write_yaml(env_path, {"profile": "forum_operator"})
 
-    settings = load_settings(config_path=explicit_path, env={"HF_MCP_CONFIG": str(env_path)})
+    settings = load_settings(
+        config_path=explicit_path, env={"HF_MCP_CONFIG": str(env_path)}
+    )
 
     assert settings.profile == "reader"
     assert settings.config_path == explicit_path.resolve(strict=False)
 
 
-def test_resolution_uses_hf_mcp_config_when_cli_path_not_provided(tmp_path: Path) -> None:
+def test_resolution_uses_hf_mcp_config_when_cli_path_not_provided(
+    tmp_path: Path,
+) -> None:
     env_path = tmp_path / "env.yaml"
     _write_yaml(env_path, {"profile": "reader"})
 
@@ -87,7 +96,9 @@ def test_explicit_env_file_is_loaded_when_set(tmp_path: Path) -> None:
     config_path = tmp_path / "config.yaml"
     env_file = tmp_path / "custom.env"
     _write_yaml(config_path, {"profile": "full_api"})
-    env_file.write_text("HF_MCP_TOKEN_PATH=/tmp/token-from-dotenv.json\n", encoding="utf-8")
+    env_file.write_text(
+        "HF_MCP_TOKEN_PATH=/tmp/token-from-dotenv.json\n", encoding="utf-8"
+    )
 
     settings = load_settings(
         config_path=config_path,
@@ -113,7 +124,9 @@ def test_profile_from_dotenv_is_ignored_when_yaml_omits_profile(tmp_path: Path) 
     assert settings.profile == "reader"
 
 
-def test_profile_from_process_env_is_ignored_when_yaml_omits_profile(tmp_path: Path) -> None:
+def test_profile_from_process_env_is_ignored_when_yaml_omits_profile(
+    tmp_path: Path,
+) -> None:
     config_path = tmp_path / "config.yaml"
     _write_yaml(config_path, {})
 
@@ -146,7 +159,9 @@ def test_read_output_defaults_fall_back_to_builtin_defaults(tmp_path: Path) -> N
     )
 
 
-def test_read_output_defaults_allow_yaml_overrides_with_per_call_precedence(tmp_path: Path) -> None:
+def test_read_output_defaults_allow_yaml_overrides_with_per_call_precedence(
+    tmp_path: Path,
+) -> None:
     config_path = tmp_path / "config.yaml"
     _write_yaml(
         config_path,
@@ -171,7 +186,9 @@ def test_read_output_defaults_allow_yaml_overrides_with_per_call_precedence(tmp_
         settings=settings,
         output_mode=None,
         include_raw_payload=None,
-    ) == ReadOutputDefaults(mode="structured", include_raw_payload=True, body_format="clean")
+    ) == ReadOutputDefaults(
+        mode="structured", include_raw_payload=True, body_format="clean"
+    )
     assert resolve_read_output_defaults(
         settings=settings,
         output_mode="raw",
@@ -181,13 +198,17 @@ def test_read_output_defaults_allow_yaml_overrides_with_per_call_precedence(tmp_
         settings=settings,
         output_mode=None,
         include_raw_payload=False,
-    ) == ReadOutputDefaults(mode="structured", include_raw_payload=False, body_format="clean")
+    ) == ReadOutputDefaults(
+        mode="structured", include_raw_payload=False, body_format="clean"
+    )
     assert resolve_read_output_defaults(
         settings=settings,
         output_mode="raw",
         include_raw_payload=False,
         body_format="markdown",
-    ) == ReadOutputDefaults(mode="raw", include_raw_payload=False, body_format="markdown")
+    ) == ReadOutputDefaults(
+        mode="raw", include_raw_payload=False, body_format="markdown"
+    )
 
 
 def test_read_output_defaults_reject_unknown_mode_in_yaml(tmp_path: Path) -> None:
@@ -204,17 +225,24 @@ def test_read_output_defaults_reject_unknown_mode_in_yaml(tmp_path: Path) -> Non
         load_settings(config_path=config_path, env={})
 
 
-def test_read_output_defaults_reject_non_boolean_include_raw_payload(tmp_path: Path) -> None:
+def test_read_output_defaults_reject_non_boolean_include_raw_payload(
+    tmp_path: Path,
+) -> None:
     config_path = tmp_path / "config.yaml"
     _write_yaml(
         config_path,
         {
             "profile": "reader",
-            "read_output_defaults": {"mode": "readable", "include_raw_payload": "false"},
+            "read_output_defaults": {
+                "mode": "readable",
+                "include_raw_payload": "false",
+            },
         },
     )
 
-    with pytest.raises(ValueError, match="`read_output_defaults.include_raw_payload` must be a boolean"):
+    with pytest.raises(
+        ValueError, match="`read_output_defaults.include_raw_payload` must be a boolean"
+    ):
         load_settings(config_path=config_path, env={})
 
 
@@ -245,7 +273,9 @@ def test_explicit_missing_env_file_fails_closed(tmp_path: Path) -> None:
 
 def test_token_path_from_yaml_must_be_absolute(tmp_path: Path) -> None:
     config_path = tmp_path / "config.yaml"
-    _write_yaml(config_path, {"profile": "full_api", "token_path": "relative-token.json"})
+    _write_yaml(
+        config_path, {"profile": "full_api", "token_path": "relative-token.json"}
+    )
 
     with pytest.raises(ValueError, match="Token path must be absolute"):
         load_settings(config_path=config_path, env={})
@@ -289,7 +319,9 @@ def test_load_settings_does_not_create_draft_dir(tmp_path: Path) -> None:
     assert not draft_dir.exists()
 
 
-def test_draft_dir_resolution_falls_back_to_default_when_yaml_and_env_absent(tmp_path: Path) -> None:
+def test_draft_dir_resolution_falls_back_to_default_when_yaml_and_env_absent(
+    tmp_path: Path,
+) -> None:
     config_path = tmp_path / "config.yaml"
     _write_yaml(config_path, {"profile": "reader"})
 
@@ -329,7 +361,10 @@ def test_load_token_store_accepts_canonical_user_path_independent_of_cwd(
     _write_yaml(config_path, {"profile": "reader"})
 
     expected = (home_dir / ".config" / "hf_mcp" / "token.json").resolve(strict=False)
-    settings = load_settings(config_path=config_path, env={"HF_MCP_TOKEN_PATH": "~/.config/hf_mcp/token.json"})
+    settings = load_settings(
+        config_path=config_path,
+        env={"HF_MCP_TOKEN_PATH": "~/.config/hf_mcp/token.json"},
+    )
     store = load_token_store(settings)
 
     assert settings.token_path == expected
@@ -353,7 +388,9 @@ def test_load_token_store_rejects_repo_internal_absolute_path(
         load_token_store(settings)
 
 
-def test_missing_required_secret_not_synthesized(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_missing_required_secret_not_synthesized(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     config_path = tmp_path / "config.yaml"
     env_file = tmp_path / "runtime.env"
     _write_yaml(config_path, {"profile": "full_api"})
@@ -375,7 +412,9 @@ def test_default_paths_are_exported_for_runtime_contract() -> None:
 
 
 def test_configuration_doc_uses_yaml_runtime_example() -> None:
-    configuration_doc = (PRODUCT_ROOT / "docs" / "configuration.md").read_text(encoding="utf-8")
+    configuration_doc = (PRODUCT_ROOT / "docs" / "configuration.md").read_text(
+        encoding="utf-8"
+    )
 
     assert "```yaml" in configuration_doc
     assert "```toml" not in configuration_doc

@@ -4,11 +4,13 @@ import inspect
 from copy import deepcopy
 from dataclasses import dataclass
 from importlib import import_module
-from typing import Annotated, Any
+from typing import Annotated, Any, cast
 from urllib.parse import urljoin
 
 from pydantic import ConfigDict, PrivateAttr, RootModel, ValidationError
+from pydantic_core import InitErrorDetails
 
+from . import __version__
 from .capabilities import CapabilityPolicy
 from .config import HFMCPSettings, load_settings
 from .dispatcher import register_tools, resolve_runtime_bundle
@@ -68,7 +70,9 @@ class _MCPServerToolAdapter:
     ) -> None:
         schema_copy, validator = _compile_input_schema(name, input_schema)
         tool_manager = _require_tool_manager(self._app)
-        wrapped_handler = _with_schema_signature(name, handler, schema_copy, output_schema)
+        wrapped_handler = _with_schema_signature(
+            name, handler, schema_copy, output_schema
+        )
         fastmcp_annotations = _build_fastmcp_annotations(annotations)
         add_tool_kwargs: dict[str, object] = {
             "name": name,
@@ -85,7 +89,9 @@ class _MCPServerToolAdapter:
         try:
             tool = tool_manager.get_tool(name)
             if tool is None:
-                raise RuntimeError("registered tool is unavailable through the SDK tool manager")
+                raise RuntimeError(
+                    "registered tool is unavailable through the SDK tool manager"
+                )
             _install_original_schema_contract(
                 tool,
                 tool_name=name,
@@ -95,7 +101,9 @@ class _MCPServerToolAdapter:
             )
         except Exception as exc:
             tool_manager.remove_tool(name)
-            if isinstance(exc, RuntimeError) and "tool manager metadata capability" in str(exc):
+            if isinstance(
+                exc, RuntimeError
+            ) and "tool manager metadata capability" in str(exc):
                 raise
             raise RuntimeError(
                 f"MCP SDK tool manager metadata capability is incompatible for {name}"
@@ -131,7 +139,9 @@ def _require_tool_manager(app: Any) -> Any:
     return manager
 
 
-def _compile_input_schema(tool_name: str, input_schema: dict[str, object]) -> tuple[dict[str, Any], Any]:
+def _compile_input_schema(
+    tool_name: str, input_schema: dict[str, object]
+) -> tuple[dict[str, Any], Any]:
     if not isinstance(input_schema, dict):
         raise TypeError(f"Input schema for {tool_name} must be an object")
     schema_copy = deepcopy(input_schema)
@@ -141,17 +151,23 @@ def _compile_input_schema(tool_name: str, input_schema: dict[str, object]) -> tu
         from referencing.jsonschema import DRAFT202012
 
         Draft202012Validator.check_schema(schema_copy)
-        resource = Resource.from_contents(schema_copy, default_specification=DRAFT202012)
+        resource = Resource.from_contents(
+            schema_copy, default_specification=DRAFT202012
+        )
         root_uri = resource.id() or ""
         # Registry has no retrieval callback by default, so only local resources are addressable.
         registry = Registry().with_resource(root_uri, resource).crawl()
         _require_local_schema_references(resource, registry, "")
         return schema_copy, Draft202012Validator(schema_copy, registry=registry)
     except Exception as exc:
-        raise ValueError(f"Invalid Draft 2020-12 input schema for tool {tool_name}") from exc
+        raise ValueError(
+            f"Invalid Draft 2020-12 input schema for tool {tool_name}"
+        ) from exc
 
 
-def _require_local_schema_references(resource: Any, registry: Any, base_uri: str) -> None:
+def _require_local_schema_references(
+    resource: Any, registry: Any, base_uri: str
+) -> None:
     contents = resource.contents
     if not isinstance(contents, dict):
         return
@@ -181,7 +197,7 @@ def _install_original_schema_contract(
     handler: Any,
 ) -> None:
     parameters = getattr(tool, "parameters", None)
-    metadata = getattr(tool, "fn_metadata", None)
+    metadata: Any = getattr(tool, "fn_metadata", None)
     if (
         not isinstance(parameters, dict)
         or not callable(getattr(metadata, "validate_arguments", None))
@@ -204,12 +220,18 @@ def _install_original_schema_contract(
 
     properties = input_schema.get("properties")
     required = input_schema.get("required")
-    required_names = {name for name in required if isinstance(name, str)} if isinstance(required, list) else set()
+    required_names = (
+        {name for name in required if isinstance(name, str)}
+        if isinstance(required, list)
+        else set()
+    )
     handler_parameters = inspect.signature(handler).parameters
     defaults: dict[str, Any] = {}
     if isinstance(properties, dict):
         for name, property_schema in properties.items():
-            handler_parameter = handler_parameters.get(name) if isinstance(name, str) else None
+            handler_parameter = (
+                handler_parameters.get(name) if isinstance(name, str) else None
+            )
             if (
                 isinstance(property_schema, dict)
                 and name not in required_names
@@ -221,13 +243,16 @@ def _install_original_schema_contract(
 
     metadata_type = type(metadata)
 
-    class _OriginalSchemaFuncMetadata(metadata_type):
+    # The base class is the SDK's runtime-selected metadata type, so mypy cannot see it.
+    class _OriginalSchemaFuncMetadata(metadata_type):  # type: ignore[valid-type,misc]
         _tool_name: str = PrivateAttr()
         _input_schema: dict[str, Any] = PrivateAttr()
         _input_validator: Any = PrivateAttr()
         _required_defaults: dict[str, Any] = PrivateAttr()
 
-        def validate_arguments(self, arguments_to_validate: dict[str, Any]) -> dict[str, Any]:
+        def validate_arguments(
+            self, arguments_to_validate: dict[str, Any]
+        ) -> dict[str, Any]:
             if not isinstance(arguments_to_validate, dict):
                 raise _argument_validation_error(self._tool_name, [((), "type")])
             failures = [
@@ -242,9 +267,13 @@ def _install_original_schema_contract(
                 if name in validated:
                     continue
                 properties = self._input_schema.get("properties")
-                property_schema = properties.get(name) if isinstance(properties, dict) else None
+                property_schema = (
+                    properties.get(name) if isinstance(properties, dict) else None
+                )
                 if not isinstance(property_schema, dict):
-                    raise _argument_validation_error(self._tool_name, [((name,), "default")])
+                    raise _argument_validation_error(
+                        self._tool_name, [((name,), "default")]
+                    )
                 try:
                     default_errors = list(
                         self._input_validator.descend(
@@ -255,7 +284,9 @@ def _install_original_schema_contract(
                         )
                     )
                 except Exception as exc:
-                    raise _argument_validation_error(self._tool_name, [((name,), "default")]) from exc
+                    raise _argument_validation_error(
+                        self._tool_name, [((name,), "default")]
+                    ) from exc
                 if default_errors:
                     raise _argument_validation_error(
                         self._tool_name,
@@ -280,12 +311,14 @@ def _install_original_schema_contract(
         specialized_metadata._required_defaults = defaults
         tool.fn_metadata = specialized_metadata
     except Exception as exc:
-        raise RuntimeError("MCP SDK tool manager metadata capability is incompatible") from exc
+        raise RuntimeError(
+            "MCP SDK tool manager metadata capability is incompatible"
+        ) from exc
 
 
 def _argument_validation_error(
     tool_name: str,
-    failures: list[tuple[tuple[object, ...], str]],
+    failures: list[tuple[tuple[int | str, ...], str]],
 ) -> ValidationError:
     constraint_messages = {
         "additionalProperties": "contains an unknown property",
@@ -306,11 +339,10 @@ def _argument_validation_error(
         "type": "does not match the declared JSON type",
         "default": "has a schema default that violates its property schema",
     }
-    details = []
+    details: list[InitErrorDetails] = []
     for path, constraint in failures:
         path_text = "$" + "".join(
-            f"[{part}]" if isinstance(part, int) else f".{part}"
-            for part in path
+            f"[{part}]" if isinstance(part, int) else f".{part}" for part in path
         )
         message = f"{constraint}: {constraint_messages.get(constraint, 'violates its JSON Schema constraint')}"
         details.append(
@@ -318,7 +350,11 @@ def _argument_validation_error(
                 "type": "value_error",
                 "loc": path,
                 "input": "<redacted>",
-                "ctx": {"error": ValueError(f"tool {tool_name} argument {path_text} {message}")},
+                "ctx": {
+                    "error": ValueError(
+                        f"tool {tool_name} argument {path_text} {message}"
+                    )
+                },
             }
         )
     return ValidationError.from_exception_data(f"{tool_name} arguments", details)
@@ -358,7 +394,9 @@ def _schema_annotation(parameter_schema: object) -> object:
     return object
 
 
-def _signature_from_schema(handler: Any, input_schema: dict[str, object]) -> inspect.Signature:
+def _signature_from_schema(
+    handler: Any, input_schema: dict[str, object]
+) -> inspect.Signature:
     properties = input_schema.get("properties")
     if not isinstance(properties, dict):
         return inspect.Signature()
@@ -374,12 +412,17 @@ def _signature_from_schema(handler: Any, input_schema: dict[str, object]) -> ins
     parameters: list[inspect.Parameter] = []
     for parameter_name, parameter_schema in properties.items():
         if not isinstance(parameter_name, str) or not parameter_name.isidentifier():
-            raise ValueError(f"Unsupported parameter name in tool schema: {parameter_name!r}")
+            raise ValueError(
+                f"Unsupported parameter name in tool schema: {parameter_name!r}"
+            )
 
-        default = inspect.Parameter.empty
+        default: Any = inspect.Parameter.empty
         if parameter_name not in required:
             handler_parameter = handler_parameters.get(parameter_name)
-            if handler_parameter is not None and handler_parameter.default is not inspect.Parameter.empty:
+            if (
+                handler_parameter is not None
+                and handler_parameter.default is not inspect.Parameter.empty
+            ):
                 default = handler_parameter.default
             elif isinstance(parameter_schema, dict) and "default" in parameter_schema:
                 default = parameter_schema["default"]
@@ -412,17 +455,21 @@ def _with_schema_signature(
         # MCPServer supports Annotated[CallToolResult, OutputModel]. Keep the
         # existing open object contract without compiling a parallel schema.
         class _StructuredOutput(RootModel[dict[str, Any]]):
-            model_config = ConfigDict(json_schema_extra=output_schema)
+            model_config = ConfigDict(json_schema_extra=cast(Any, output_schema))
 
         module = import_module("mcp.types")
         result_type = getattr(module, "CallToolResult")
-        signature = signature.replace(return_annotation=Annotated[result_type, _StructuredOutput])
+        signature = signature.replace(
+            return_annotation=Annotated[result_type, _StructuredOutput]
+        )
 
     if inspect.iscoroutinefunction(handler):
+
         async def _wrapped_handler(**kwargs: Any) -> Any:
             return _normalize_handler_result(await handler(**kwargs))
     else:
-        def _wrapped_handler(**kwargs: Any) -> Any:
+        # Sync/async variants intentionally differ in return type.
+        def _wrapped_handler(**kwargs: Any) -> Any:  # type: ignore[misc]
             return _normalize_handler_result(handler(**kwargs))
 
     handler_name = _tool_handler_name(tool_name)
@@ -430,7 +477,7 @@ def _with_schema_signature(
     _wrapped_handler.__qualname__ = handler_name
     _wrapped_handler.__doc__ = getattr(handler, "__doc__", "")
     _wrapped_handler.__module__ = getattr(handler, "__module__", __name__)
-    _wrapped_handler.__signature__ = signature
+    setattr(_wrapped_handler, "__signature__", signature)
     _wrapped_handler.__annotations__ = {
         parameter.name: parameter.annotation
         for parameter in signature.parameters.values()
@@ -552,7 +599,9 @@ def _load_mcpserver_class() -> Any:
 
 
 def create_server(settings: HFMCPSettings | None = None) -> Any:
-    resolved_settings = settings if settings is not None else load_settings(config_path=None)
+    resolved_settings = (
+        settings if settings is not None else load_settings(config_path=None)
+    )
     policy = CapabilityPolicy(resolved_settings)
     runtime = resolve_runtime_bundle(resolved_settings)
     server = HFServer(name="hf-mcp")
@@ -561,11 +610,13 @@ def create_server(settings: HFMCPSettings | None = None) -> Any:
 
 
 def serve_stdio(settings: HFMCPSettings | None = None) -> None:
-    resolved_settings = settings if settings is not None else load_settings(config_path=None)
+    resolved_settings = (
+        settings if settings is not None else load_settings(config_path=None)
+    )
     policy = CapabilityPolicy(resolved_settings)
     runtime = resolve_runtime_bundle(resolved_settings)
     fastmcp_class = _load_mcpserver_class()
-    app = fastmcp_class(name="hf-mcp")
+    app = fastmcp_class(name="hf-mcp", version=__version__)
     register_tools(_MCPServerToolAdapter(app), policy, runtime)
     app.run(transport="stdio")
 

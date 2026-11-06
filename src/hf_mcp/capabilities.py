@@ -7,11 +7,20 @@ from hf_mcp.config import HFMCPSettings
 
 CAPABILITY_PARAMETER_FAMILIES: dict[str, frozenset[str]] = {
     "me.read": frozenset({"selectors.user", "fields.me.basic", "fields.me.advanced"}),
-    "users.read": frozenset({"selectors.user", "filters.pagination", "fields.users.profile"}),
+    "users.read": frozenset(
+        {"selectors.user", "filters.pagination", "fields.users.profile"}
+    ),
     "forums.read": frozenset({"selectors.forum", "filters.pagination"}),
-    "threads.read": frozenset({"selectors.forum", "selectors.thread", "filters.pagination"}),
+    "threads.read": frozenset(
+        {"selectors.forum", "selectors.thread", "filters.pagination"}
+    ),
     "posts.read": frozenset(
-        {"selectors.thread", "selectors.post", "filters.pagination", "fields.posts.body"}
+        {
+            "selectors.thread",
+            "selectors.post",
+            "filters.pagination",
+            "fields.posts.body",
+        }
     ),
     "bytes.read": frozenset({"selectors.bytes", "fields.bytes.amount"}),
     "contracts.read": frozenset({"selectors.contract", "filters.pagination"}),
@@ -27,12 +36,18 @@ CAPABILITY_PARAMETER_FAMILIES: dict[str, frozenset[str]] = {
     "bytes.deposit": frozenset({"selectors.bytes", "writes.bytes", "confirm.live"}),
     "bytes.withdraw": frozenset({"selectors.bytes", "writes.bytes", "confirm.live"}),
     "bytes.bump": frozenset({"selectors.bytes", "writes.bytes", "confirm.live"}),
-    "contracts.write": frozenset({"selectors.contract", "writes.content", "confirm.live"}),
-    "sigmarket.write": frozenset({"selectors.sigmarket", "writes.content", "confirm.live"}),
+    "contracts.write": frozenset(
+        {"selectors.contract", "writes.content", "confirm.live"}
+    ),
+    "sigmarket.write": frozenset(
+        {"selectors.sigmarket", "writes.content", "confirm.live"}
+    ),
     "admin.high_risk.write": frozenset({"writes.content", "confirm.live"}),
 }
 
-TOOL_TO_CAPABILITY: dict[str, str] = {capability: capability for capability in CAPABILITY_PARAMETER_FAMILIES}
+TOOL_TO_CAPABILITY: dict[str, str] = {
+    capability: capability for capability in CAPABILITY_PARAMETER_FAMILIES
+}
 TOOL_TO_CAPABILITY["forums.index"] = "forums.read"
 
 
@@ -86,7 +101,9 @@ def _prune_schema_node(node: Any, allowed: frozenset[str]) -> Any:
 
     families = node.get("x-hf-parameter-families")
     if isinstance(families, list):
-        filtered = [item for item in families if isinstance(item, str) and item in allowed]
+        filtered = [
+            item for item in families if isinstance(item, str) and item in allowed
+        ]
         if not filtered:
             return None
         node["x-hf-parameter-families"] = filtered
@@ -94,7 +111,9 @@ def _prune_schema_node(node: Any, allowed: frozenset[str]) -> Any:
     properties = node.get("properties")
     if isinstance(properties, dict):
         original_required = node.get("required")
-        required = set(original_required) if isinstance(original_required, list) else set()
+        required = (
+            set(original_required) if isinstance(original_required, list) else set()
+        )
 
         pruned_properties: dict[str, Any] = {}
         for prop_name, prop_schema in properties.items():
@@ -106,7 +125,9 @@ def _prune_schema_node(node: Any, allowed: frozenset[str]) -> Any:
 
         node["properties"] = pruned_properties
         if isinstance(original_required, list):
-            node["required"] = [name for name in original_required if name in pruned_properties]
+            node["required"] = [
+                name for name in original_required if name in pruned_properties
+            ]
 
     items = node.get("items")
     if items is not None:

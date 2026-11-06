@@ -1,9 +1,20 @@
 # Changelog
 
+All notable changes to hf-mcp are listed here, newest first.
+
+## 0.6.2
+
+- Rewrote the README around installing, authorizing, and running the server, with the tools grouped as read, draft, and write and a short safety model.
+- Removed development-process notes, test thread and forum IDs, and monorepo export wording from the docs, example config, and skills. The docs now state the actual policy: write tools exist only in profiles that enable them, and every live write needs `confirm_live=true`.
+- Removed the export-boundary note and the launch-post draft from the docs.
+- The MCP `initialize` response now reports the server name `hf-mcp` and the package version.
+- Installed builds now report their version from package metadata. A source checkout still reports the version in its own `pyproject.toml`, and an unrelated `pyproject.toml` elsewhere on disk is ignored.
+- Added project URLs, authors, a development-status classifier, and Python 3.12 and 3.13 classifiers to the package metadata.
+- `.council/` is now ignored by git.
+
 ## 0.6.1
 
-- Align offline sdist rebuilds with declared backend requirements and include the linked
-  MyCode reference in installed skill data.
+- Fix offline source-distribution rebuilds so they use the declared build requirements, and install the MyCode reference with the skills.
 
 ## 0.6.0
 
@@ -12,16 +23,16 @@
 ## 0.4.6
 
 - Preserve complete Draft 2020-12 input-schema publication and validation before SDK argument parsing or handler invocation, including local-only reference resolution.
-- Combine the original-schema runtime dependencies with the pinned development and offline source-test tooling.
+- Add the schema-validation libraries to the runtime dependencies.
 
 ## 0.4.5
 
-- Build audited wheel and sdist artifacts from an isolated staged product copy without deleting source-tree build state.
-- Add an offline installed-artifact smoke path for fresh wheel and sdist-derived installs.
+- Build wheel and source-distribution artifacts from an isolated copy so local build state is left alone.
+- Add an offline smoke test that installs the built wheel and sdist and checks they start.
 
 ## 0.4.4
 
-- Pin development, test, and build tools in the `dev` extra and add offline source checks with isolated HF test state.
+- Pin the development, test, and build tools in the `dev` extra, and run tests offline against temporary config, token, and draft paths.
 
 ## 0.4.2
 
@@ -31,16 +42,16 @@
 ## 0.4.1
 
 - Require at least 100 Bytes for deposit and withdrawal schemas while preserving the 1-Byte transfer minimum.
-- Keep `hf.doctor` as a local catalog fact with a closed empty argument schema and neutral object output metadata; it is not a callable diagnostic tool.
+- Keep `hf.doctor` as a catalog entry with an empty argument schema; it is not a callable tool.
 
 ## 0.4.0
 
-- Unify ToolSpec locality and parameter facts, derive hints and metadata, and add local `hf.doctor` catalog facts without exposing a callable diagnostic tool yet.
+- Derive tool hints and metadata from one tool registry, and record which tools run locally. A local `hf.doctor` catalog entry exists but is not a callable tool.
 
 ## 0.3.5
 
-- Restrict the PyPI publisher workflow to explicit manual dispatches.
-- Make export-boundary checks resolve from a standalone product checkout while preserving the manifest's product-prefixed allowlist.
+- Run the PyPI publish workflow only when started manually.
+- Make the package checks work from a standalone checkout of this repository.
 
 ## 0.3.4
 
@@ -58,7 +69,7 @@
 ## 0.3.2
 
 - Restore stdio startup using the official MCP SDK 2.3 `MCPServer` API; require `mcp>=2.3.0,<3`.
-- Preserve numeric pagination bounds in published schemas and reject invalid pages and page sizes before handlers run.
+- Keep pagination limits in the published schemas and reject invalid page numbers and sizes before a tool runs.
 - Send core forum, thread and post reads through the existing generic `POST /api/v2/read` route, preserving asks and public tool names.
 - Preserve standard read-only annotations and structured results on modern and legacy stdio connections. HF custom metadata previously nested in annotations is published at tool-level `_meta` through the SDK `meta` argument.
 - SDK wire serialization may omit null extension values, including the local catalog's `x-hf-helper-path: null` (no upstream helper). Populated HF metadata values are preserved.

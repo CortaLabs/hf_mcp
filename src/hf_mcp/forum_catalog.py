@@ -70,19 +70,32 @@ def _validate_nodes(raw_nodes: object) -> list[_ForumCatalogNode]:
         node = _ForumCatalogNode(
             fid=fid,
             name=_coerce_name(raw_node.get("name")),
-            active=_coerce_bool(raw_node.get("active", True), field_name=f"nodes[{fid}].active"),
-            is_category=_coerce_bool(raw_node.get("is_category", False), field_name=f"nodes[{fid}].is_category"),
-            parent_fid=_coerce_optional_fid(raw_node.get("parent_fid"), field_name=f"nodes[{fid}].parent_fid"),
-            category_fid=_coerce_optional_fid(raw_node.get("category_fid"), field_name=f"nodes[{fid}].category_fid"),
+            active=_coerce_bool(
+                raw_node.get("active", True), field_name=f"nodes[{fid}].active"
+            ),
+            is_category=_coerce_bool(
+                raw_node.get("is_category", False),
+                field_name=f"nodes[{fid}].is_category",
+            ),
+            parent_fid=_coerce_optional_fid(
+                raw_node.get("parent_fid"), field_name=f"nodes[{fid}].parent_fid"
+            ),
+            category_fid=_coerce_optional_fid(
+                raw_node.get("category_fid"), field_name=f"nodes[{fid}].category_fid"
+            ),
         )
         nodes.append(node)
 
     by_fid = {node.fid: node for node in nodes}
     for node in nodes:
         if node.parent_fid is not None and node.parent_fid not in by_fid:
-            raise ValueError(f"Node {node.fid} references unknown parent_fid {node.parent_fid}.")
+            raise ValueError(
+                f"Node {node.fid} references unknown parent_fid {node.parent_fid}."
+            )
         if node.category_fid is not None and node.category_fid not in by_fid:
-            raise ValueError(f"Node {node.fid} references unknown category_fid {node.category_fid}.")
+            raise ValueError(
+                f"Node {node.fid} references unknown category_fid {node.category_fid}."
+            )
         if node.category_fid is not None and not by_fid[node.category_fid].is_category:
             raise ValueError(
                 f"Node {node.fid} category_fid {node.category_fid} must reference a category node."
@@ -114,7 +127,9 @@ def load_forum_catalog() -> dict[str, Any]:
     return catalog
 
 
-def _filter_nodes(nodes: list[dict[str, Any]], *, include_inactive: bool) -> list[dict[str, Any]]:
+def _filter_nodes(
+    nodes: list[dict[str, Any]], *, include_inactive: bool
+) -> list[dict[str, Any]]:
     if include_inactive:
         return [dict(node) for node in nodes]
     return [dict(node) for node in nodes if bool(node["active"])]
@@ -144,7 +159,9 @@ def _build_tree(nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return roots
 
 
-def build_forum_index_payload(*, view: str = "flat", include_inactive: bool = False) -> dict[str, Any]:
+def build_forum_index_payload(
+    *, view: str = "flat", include_inactive: bool = False
+) -> dict[str, Any]:
     if view not in _ALLOWED_VIEWS:
         raise ValueError(f"Unsupported view '{view}'. Supported views: flat, tree.")
 

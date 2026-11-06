@@ -3,8 +3,8 @@
 This guide describes a private stdio connection through OpenAI Secure MCP
 Tunnel. `tunnel-client` makes outbound HTTPS requests to OpenAI and starts the
 local MCP command; the MCP server does not need an inbound public endpoint.
-These instructions are not acceptance evidence by themselves; validate each
-deployment with local checks and the ChatGPT journey below.
+Following these steps does not by itself confirm the setup works; check each
+deployment with the local checks and the ChatGPT walkthrough below.
 
 Confirm the installed HF MCP version with `hf-mcp --version` and use a release
 that declares support for its installed MCP runtime. Check that release's
@@ -45,7 +45,7 @@ the MCP server.
 ## Use all supported tools by default
 
 For the ChatGPT connection, use a dedicated per-consumer YAML with
-`profile: full_api`. The 0.3.2 deployment baseline exposes 24 supported tools
+`profile: full_api`. This profile exposes all 24 supported tools
 through this profile; check `hf-mcp --version` and the release notes when using
 another release. The package's general fallback profile is `reader`, so select
 `full_api` explicitly for this connection. Keep ChatGPT's config separate from
@@ -144,11 +144,11 @@ or command arguments.
      --control-plane-api-key-ref "file:/absolute/path/control-plane-api-key"
    ```
 
-   `CONTROL_PLANE_TUNNEL_ID` is the operator's tunnel ID. The final flag stores
+   `CONTROL_PLANE_TUNNEL_ID` is your tunnel ID. The final flag stores
    only a reference; the referenced file contains the key and must be protected
    locally. The default key reference is `env:CONTROL_PLANE_API_KEY`; do not
    put a literal key in a command, config file, or transcript. `init` creates
-   local profile configuration; it does not prove that the tunnel can connect.
+   local profile configuration; it does not confirm that the tunnel can connect.
 4. Review the generated profile and verify its stdio command runs the absolute
    HF MCP executable with `serve --config /absolute/path/chatgpt.yaml`. Keep
    the restricted profile and secret references local with owner-only
@@ -162,9 +162,9 @@ or command arguments.
 
    Keep the process running while creating the app and during discovery/calls.
    A successful `doctor` validates local profile/configuration conditions; it
-   does not prove MCP discovery, HF authentication, or a successful read.
+   does not show MCP discovery, HF authentication, or a successful read working.
 
-For local server proof, start HF MCP with the dedicated `full_api` config, list
+To check the local server, start HF MCP with the dedicated `full_api` config, list
 its tools, then call `forums_index` followed by a harmless `forums_read` using a
 forum ID returned by the catalog. This checks the local server and HF read path;
 it does not test OpenAI tunnel connectivity or ChatGPT app discovery.
@@ -263,16 +263,14 @@ Use ChatGPT web in the workspace associated with the tunnel:
    and make a harmless read journey:
 
    - Call `forums_index` to get the maintained local forum catalog. It is a
-     discovery aid, not a live scrape and not proof of HF authentication.
+     discovery aid, not a live scrape and does not show that HF authentication works.
    - Choose a returned forum ID, then call `forums_read` with that `fid`,
      `page: 1`, and `per_page: 1` to check the authenticated HF read path.
 
-Only tool discovery and a successful harmless read in ChatGPT prove the
-end-to-end journey. Local profile validation, health readiness, and available
-tool toggles alone do not. For the current 0.3.2 baseline, the operator reported
-that ChatGPT through Otto discovered the connection and read real HF thread
-bodies and authors. No write calls were run. This is evidence for that
-deployment, not a guarantee for another installation or for write acceptance.
+Only tool discovery plus a successful harmless read in ChatGPT confirms the
+end-to-end setup. Local profile validation, health readiness, and available
+tool toggles alone do not. The walkthrough above uses read calls only; test
+write calls separately and deliberately.
 
 If the tunnel is missing in ChatGPT, check its ChatGPT workspace association
 and the app operator's Tunnels Read + Use permission. If discovery or calls
@@ -284,7 +282,7 @@ and HF child logs. Keep the service running while ChatGPT polls it.
 When the MCP process runs in WSL, a Windows desktop client can launch it with
 `wsl.exe`; see the path-neutral example in
 [`client_integration.md`](client_integration.md). A running Linux user service
-or WSL linger setting does not by itself prove Windows will start the
+or WSL linger setting does not by itself mean Windows will start the
 distribution after sign-in or reboot. If automatic WSL startup is configured,
 test it after a real logout/login and reboot, then check service readiness,
 tool discovery, and a harmless read. Until those checks pass, reboot

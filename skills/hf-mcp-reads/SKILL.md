@@ -4,7 +4,7 @@ description: Read-surface usage skill for hf-mcp covering core and extended tool
 user-invocable: true
 context: full
 visibility: exported
-owner: hackforums-council
+owner: hf-mcp
 ---
 
 # HF MCP Reads

@@ -15,21 +15,33 @@ _UNKNOWN_VERSION = "0.0.0+unknown"
 
 
 def _read_local_pyproject_version() -> str | None:
-    pyproject_path = Path(__file__).resolve().parents[2] / "pyproject.toml"
+    """Return the pyproject version only when running from an hf-mcp source tree.
+
+    A source checkout has the ``src/hf_mcp`` layout with the project's own
+    ``pyproject.toml`` two levels up. Installed builds never match, so an
+    unrelated ``pyproject.toml`` near site-packages cannot influence the result.
+    """
+    package_dir = Path(__file__).resolve().parent
+    if package_dir.parent.name != "src":
+        return None
+    pyproject_path = package_dir.parents[1] / "pyproject.toml"
     try:
-        pyproject = tomllib.loads(pyproject_path.read_text(encoding="utf-8"))
+        project = tomllib.loads(pyproject_path.read_text(encoding="utf-8")).get(
+            "project", {}
+        )
     except (FileNotFoundError, OSError, tomllib.TOMLDecodeError):
         return None
-
-    version = pyproject.get("project", {}).get("version")
-    return version if isinstance(version, str) and version else None
+    version = project.get("version")
+    if project.get("name") != _DIST_NAME or not isinstance(version, str) or not version:
+        return None
+    return version
 
 
 @lru_cache(maxsize=1)
 def _resolve_version() -> str:
-    local_version = _read_local_pyproject_version()
-    if local_version is not None:
-        return local_version
+    source_version = _read_local_pyproject_version()
+    if source_version is not None:
+        return source_version
     try:
         return distribution_version(_DIST_NAME)
     except PackageNotFoundError:

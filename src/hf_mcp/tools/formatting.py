@@ -14,7 +14,9 @@ def preflight_formatting(
     message_format: str = "markdown",
     draft_dir: str | Path | None = None,
 ) -> dict[str, Any]:
-    artifact = write_draft_artifact(message, message_format, draft_dir=draft_dir, source_path=source_path)
+    artifact = write_draft_artifact(
+        message, message_format, draft_dir=draft_dir, source_path=source_path
+    )
     summary = artifact.summary()
     summary["content"] = [
         {
