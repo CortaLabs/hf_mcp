@@ -2,6 +2,14 @@
 
 All notable changes to hf-mcp are listed here, newest first.
 
+## 0.7.2
+
+Markdown now becomes the right MyCode: headings, numbered and nested lists, horizontal rules, inline code and escaped characters. Tables stay readable in a code block, and anything that cannot be carried over is reported. Raw bodies and code pass through unchanged. `formatting.preflight` and `drafts.read` return the full MyCode instead of a 500-character preview.
+
+- Raw MyCode mixed into Markdown, including `[*]` list markers, is left as written, and `[css=N]` and `[hr]` are recognized tags.
+- `formatting.preflight` and `drafts.read` report each construct that could not be carried over in `conversion_findings`, and a conversion that lost something no longer scores full integrity.
+- Every result's `_hf_flow` now includes `server.name` and `server.version`, so clients that never show the MCP `initialize` handshake can still tell which hf-mcp version answered. `_hf_flow.version` is unchanged; it is the flow-format version.
+
 ## 0.7.1
 
 Version 0.7.0 was tagged but never published to PyPI, so these changes ship as 0.7.1, together with one test-fixture fix.
