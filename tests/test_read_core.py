@@ -1229,21 +1229,39 @@ def _toggle_asks(tool_name: str, toggle: str, value: bool) -> dict[str, Any]:
     return dict(body)
 
 
-def test_every_include_toggle_in_the_registry_is_covered() -> None:
-    assert {toggle for _, toggle in _wire_include_toggles()} == {
-        "include_basic_fields",
-        "include_advanced_fields",
-        "include_profile_fields",
-        "include_post_body",
-        "include_amount",
-    }
+# The exact request fields each include_* toggle adds, written out independently
+# of the client's field table (the 0.7.2 wire contract).
+_TOGGLE_FIELDS: dict[tuple[str, str], frozenset[str]] = {
+    ("me.read", "include_basic_fields"): frozenset(
+        "uid username usergroup displaygroup additionalgroups postnum awards bytes "
+        "vault threadnum avatar avatardimensions avatartype lastvisit usertitle "
+        "website timeonline reputation referrals".split()
+    ),
+    ("me.read", "include_advanced_fields"): frozenset(
+        "invisible lastactive totalpms unreadpms warningpoints".split()
+    ),
+    ("users.read", "include_profile_fields"): frozenset(
+        "uid username usergroup displaygroup additionalgroups postnum awards myps "
+        "threadnum avatar avatardimensions avatartype usertitle website timeonline "
+        "reputation referrals".split()
+    ),
+    ("posts.read", "include_post_body"): frozenset({"message"}),
+    ("bytes.read", "include_amount"): frozenset({"amount"}),
+}
 
 
-@pytest.mark.parametrize(("tool_name", "toggle"), _wire_include_toggles())
-def test_include_toggle_adds_request_fields_when_on_and_drops_them_when_off(
+def test_every_include_toggle_in_the_registry_has_an_expected_field_set() -> None:
+    assert set(_wire_include_toggles()) == set(_TOGGLE_FIELDS)
+
+
+@pytest.mark.parametrize(("tool_name", "toggle"), sorted(_TOGGLE_FIELDS))
+def test_include_toggle_adds_exactly_its_request_fields(
     tool_name: str, toggle: str
 ) -> None:
     on = _toggle_asks(tool_name, toggle, True)
     off = _toggle_asks(tool_name, toggle, False)
 
-    assert set(off) < set(on), (tool_name, toggle)
+    assert set(on) - set(off) == _TOGGLE_FIELDS[(tool_name, toggle)]
+    assert set(off) - set(on) == set()
+    assert all(on[field] is True for field in _TOGGLE_FIELDS[(tool_name, toggle)])
+    assert {key: off[key] for key in off} == {key: on[key] for key in off}

@@ -807,18 +807,28 @@ OS_PATH = f"/mnt/seeded/{SEED_TOKEN}/draft.json"
 _WRAPPED_TOOL = "threads_read"
 
 
-def _call_raising_handler(error: Exception) -> Any:
-    """Call a tool whose handler raises ``error`` through the lowlevel Server."""
+def _call_raising_handler(error: Exception, *, awaitable: bool = False) -> Any:
+    """Call a tool whose handler raises ``error`` through the lowlevel Server.
+
+    With ``awaitable`` the handler is an async callable object (not a coroutine
+    function), so the raise happens only once the server awaits the result.
+    """
 
     def raising(**_: Any) -> dict[str, Any]:
         raise error
+
+    class _AsyncRaising:
+        async def __call__(self, **_: Any) -> dict[str, Any]:
+            raise error
+
+    handler: Any = _AsyncRaising() if awaitable else raising
 
     settings = HFMCPSettings(
         profile="test",
         enabled_capabilities=frozenset({"threads.read"}),
         enabled_parameter_families=frozenset({"selectors.thread"}),
     )
-    server = build_server(CapabilityPolicy(settings), {"threads.read": raising})
+    server = build_server(CapabilityPolicy(settings), {"threads.read": handler})
 
     async def scenario() -> Any:
         async with Client(server) as client:
@@ -946,6 +956,33 @@ def test_error_families_reach_the_client_through_the_server_handler(
     assert result.structured_content is not None
     assert result.structured_content["error"]["code"] == code
     assert result.content[0].text.startswith(f"{code}: ")
+
+
+@pytest.mark.parametrize(
+    ("error", "code", "message"),
+    [
+        (
+            WritePreflightError("Write body is empty."),
+            "FORMAT_NOT_READY",
+            "Write body is empty.",
+        ),
+        (ValueError(f"cannot open {OS_PATH}"), "INVALID_ARGUMENT", FIXED_INVALID),
+        (RuntimeError(OS_PATH), "INTERNAL_ERROR", FIXED_INTERNAL),
+    ],
+)
+def test_an_awaitable_handler_that_raises_is_wrapped_into_the_error_envelope(
+    error: Exception, code: str, message: str
+) -> None:
+    result = _call_raising_handler(error, awaitable=True)
+
+    assert result.is_error is True
+    assert result.structured_content is not None
+    envelope = result.structured_content["error"]
+    assert (envelope["code"], envelope["message"]) == (code, message)
+    assert envelope["tool"] == _WRAPPED_TOOL
+    assert OS_PATH not in json.dumps(result.model_dump(mode="json")) or (
+        message == str(error)
+    )
 
 
 def test_resource_unavailable_sentence_is_neutral() -> None:
