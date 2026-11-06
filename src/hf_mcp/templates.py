@@ -83,6 +83,13 @@ class Template:
                 raise ValueError(f"Missing required template value: {item.key}.")
         if sum(len(value) for value in values.values()) > MAX_MESSAGE_CHARS:
             raise ValueError("The template values are too large.")
+        # Project the output size from the matches before building anything:
+        # one value referenced many times must not allocate past the ceiling.
+        projected = len(self.body)
+        for match in _PLACEHOLDER_RE.finditer(self.body):
+            projected += len(values.get(match.group(1), "")) - len(match.group(0))
+        if projected > MAX_MESSAGE_CHARS:
+            raise ValueError("The template values are too large.")
         return _PLACEHOLDER_RE.sub(
             lambda match: values.get(match.group(1), ""), self.body
         )

@@ -275,3 +275,16 @@ def test_modules_import_without_cycles_in_either_order(order: tuple[str, ...]) -
 def test_deleted_modules_are_gone() -> None:
     for name in ("schemas", "metadata", "annotations"):
         assert not (SRC_PATH / "hf_mcp" / f"{name}.py").exists()
+
+
+def test_every_free_text_property_publishes_a_max_length() -> None:
+    shared = {
+        registry.MAX_MESSAGE_CHARS,
+        registry.MAX_SHORT_TEXT_CHARS,
+        registry.MAX_PATH_CHARS,
+    }
+    for spec in TOOLS:
+        for name, prop in spec.input_schema["properties"].items():
+            if prop["type"] != "string" or "enum" in prop or "pattern" in prop:
+                continue
+            assert prop.get("maxLength") in shared, (spec.name, name)

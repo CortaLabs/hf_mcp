@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import time
+import tracemalloc
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
@@ -22,11 +24,19 @@ from hf_mcp.config import (
 )
 from hf_mcp.dispatcher import build_handlers
 from hf_mcp.mycode import markdown_to_mycode
-from hf_mcp.registry import MAX_MESSAGE_CHARS, TOOLS, get_tool_spec
+from hf_mcp.registry import (
+    MAX_MESSAGE_CHARS,
+    MAX_PATH_CHARS,
+    MAX_SHORT_TEXT_CHARS,
+    TOOLS,
+    get_tool_spec,
+)
 from hf_mcp.server import build_server
 from hf_mcp.templates import (
     MAX_TEMPLATE_BYTES,
     MAX_TEMPLATE_CANDIDATES,
+    Placeholder,
+    Template,
     load_templates,
 )
 from hf_mcp.token_store import TokenBundle
@@ -458,6 +468,92 @@ def test_render_values_summing_over_the_cap_are_refused_before_filling(
     error = result.structured_content["error"]
     assert error["code"] == "INVALID_ARGUMENT"
     assert "too large" in error["message"]
+
+
+def _repeating_template(count: int) -> Template:
+    return Template(
+        name="repeat",
+        description="d",
+        message_format="markdown",
+        placeholders=(Placeholder(key="a", description="d", required=True),),
+        body="{{a}}" * count,
+    )
+
+
+def test_fill_refuses_a_repeated_placeholder_before_substituting() -> None:
+    # 13,000 references to a 400,000-char value would build ~5 GB if filled.
+    template = _repeating_template(13_000)
+    tracemalloc.start()
+    started = time.perf_counter()
+    try:
+        with pytest.raises(ValueError, match="too large"):
+            template.fill({"a": "v" * 400_000})
+        peak = tracemalloc.get_traced_memory()[1]
+    finally:
+        tracemalloc.stop()
+    assert peak < 10_000_000
+    assert time.perf_counter() - started < 2.0
+
+
+def test_fill_projected_output_at_the_limit_succeeds_and_one_over_is_refused() -> None:
+    template = _repeating_template(5)
+    value = "z" * (MAX_MESSAGE_CHARS // 5)
+    assert MAX_MESSAGE_CHARS % 5 == 0
+    assert len(template.fill({"a": value})) == MAX_MESSAGE_CHARS
+    with pytest.raises(ValueError, match="too large"):
+        template.fill({"a": value + "z"})
+
+
+def test_fill_counts_missing_optional_values_as_empty_in_the_projection() -> None:
+    template = Template(
+        name="opt",
+        description="d",
+        message_format="markdown",
+        placeholders=(Placeholder(key="a", description="d", required=False),),
+        body="{{a}}" * 3 + "tail",
+    )
+    assert template.fill({}) == "tail"
+
+
+def test_render_repeated_placeholder_over_the_cap_is_invalid_argument(
+    templates_dir: Path,
+) -> None:
+    (templates_dir / "repeat.md").write_text(
+        "---\ndescription: d\nplaceholders:\n  a:\n    description: d\n"
+        "    required: true\n---\n" + "{{a}}" * 10_000,
+        encoding="utf-8",
+    )
+    result = _call(
+        _reader(templates_dir),
+        "templates_render",
+        {"name": "repeat", "values": {"a": "v" * 300_000}},
+    )
+    assert result.is_error
+    assert result.structured_content["error"]["code"] == "INVALID_ARGUMENT"
+
+
+@pytest.mark.parametrize(
+    ("tool", "field", "limit", "extra"),
+    [
+        ("drafts_list", "title", MAX_SHORT_TEXT_CHARS, {}),
+        ("drafts_list", "category", MAX_SHORT_TEXT_CHARS, {}),
+        ("formatting_preflight", "source_path", MAX_PATH_CHARS, {}),
+    ],
+)
+def test_new_text_limits_accept_the_limit_and_refuse_one_over(
+    templates_dir: Path,
+    tool: str,
+    field: str,
+    limit: int,
+    extra: dict[str, Any],
+) -> None:
+    server = _reader(templates_dir)
+    over = _call(server, tool, {field: "a" * (limit + 1), **extra})
+    assert over.is_error
+    assert over.structured_content["error"]["code"] == "INVALID_ARGUMENT"
+    at_limit = _call(server, tool, {field: "a" * limit, **extra})
+    error = (at_limit.structured_content or {}).get("error", {})
+    assert error.get("code") != "INVALID_ARGUMENT" or "maxLength" not in str(error)
 
 
 def test_name_collision_between_md_and_mycode_counts_as_invalid(
