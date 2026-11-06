@@ -47,15 +47,21 @@ def parse_read_output_defaults(raw_value: object) -> ReadOutputDefaults:
     body_format = defaults.body_format
 
     if "mode" in raw_value:
-        mode = _coerce_output_mode(raw_value["mode"], field_name="read_output_defaults.mode")
+        mode = _coerce_output_mode(
+            raw_value["mode"], field_name="read_output_defaults.mode"
+        )
     if "include_raw_payload" in raw_value:
         include_raw_payload = _coerce_bool(
             raw_value["include_raw_payload"],
             field_name="read_output_defaults.include_raw_payload",
         )
     if "body_format" in raw_value:
-        body_format = coerce_body_format(raw_value["body_format"], field_name="read_output_defaults.body_format")
-    return ReadOutputDefaults(mode=mode, include_raw_payload=include_raw_payload, body_format=body_format)
+        body_format = coerce_body_format(
+            raw_value["body_format"], field_name="read_output_defaults.body_format"
+        )
+    return ReadOutputDefaults(
+        mode=mode, include_raw_payload=include_raw_payload, body_format=body_format
+    )
 
 
 def resolve_read_output_defaults(

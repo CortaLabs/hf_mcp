@@ -1,15 +1,10 @@
 from __future__ import annotations
 
-import sys
 import json
 from pathlib import Path
 
 import pytest
 
-PRODUCT_ROOT = Path(__file__).resolve().parents[1]
-SRC_PATH = PRODUCT_ROOT / "src"
-if str(SRC_PATH) not in sys.path:
-    sys.path.insert(0, str(SRC_PATH))
 
 import hf_mcp.formatting_engine as formatting_engine
 from hf_mcp.formatting_engine import (
@@ -25,6 +20,9 @@ from hf_mcp.formatting_engine import (
 )
 from hf_mcp.tools.formatting import preflight_formatting
 
+PRODUCT_ROOT = Path(__file__).resolve().parents[1]
+SRC_PATH = PRODUCT_ROOT / "src"
+
 
 def test_formatting_report_models_known_hf_quote_mutations() -> None:
     report = prepare_formatting_report(
@@ -33,7 +31,10 @@ def test_formatting_report_models_known_hf_quote_mutations() -> None:
     )
 
     assert report.source_format == "markdown"
-    assert report.mycode == '[code]{"tool":"posts.reply","message_format":"markdown"}\n[/code]'
+    assert (
+        report.mycode
+        == '[code]{"tool":"posts.reply","message_format":"markdown"}\n[/code]'
+    )
     assert "&quot;tool&quot;" in report.simulated_hf_mycode
     assert report.integrity < 1.0
     assert {issue.code for issue in report.issues} >= {
@@ -43,11 +44,18 @@ def test_formatting_report_models_known_hf_quote_mutations() -> None:
 
 
 def test_formatting_report_models_angle_bracket_mutation() -> None:
-    report = prepare_formatting_report("Use draft.prepare -> draft.review -> draft.publish", "markdown")
+    report = prepare_formatting_report(
+        "Use draft.prepare -> draft.review -> draft.publish", "markdown"
+    )
 
     assert "-&gt;" in report.simulated_hf_mycode
-    assert "draft.prepare -> draft.review -> draft.publish" in report.simulated_agent_markdown
-    assert any(issue.code == "angle_bracket_canonicalization" for issue in report.issues)
+    assert (
+        "draft.prepare -> draft.review -> draft.publish"
+        in report.simulated_agent_markdown
+    )
+    assert any(
+        issue.code == "angle_bracket_canonicalization" for issue in report.issues
+    )
 
 
 def test_formatting_report_keeps_clean_list_posts_high_integrity() -> None:
@@ -82,7 +90,9 @@ def test_simulate_hf_canonicalization_is_predictable_and_narrow() -> None:
     )
 
 
-def test_write_draft_artifact_persists_full_report_and_returns_compact_summary(tmp_path: Path) -> None:
+def test_write_draft_artifact_persists_full_report_and_returns_compact_summary(
+    tmp_path: Path,
+) -> None:
     artifact = write_draft_artifact(
         "**Update**\n\n- body_format markdown\n- message_format markdown",
         "markdown",
@@ -107,7 +117,9 @@ def test_cached_source_file_can_be_preflighted_and_loaded_from_default_cache(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    monkeypatch.setattr(formatting_engine, "DEFAULT_DRAFT_DIR", tmp_path / "default-drafts")
+    monkeypatch.setattr(
+        formatting_engine, "DEFAULT_DRAFT_DIR", tmp_path / "default-drafts"
+    )
     source_path = formatting_engine.DEFAULT_DRAFT_DIR / "approval-draft.md"
     source_path.parent.mkdir(parents=True, exist_ok=True)
     source_path.write_text("**Approved**\n\n- posted from disk", encoding="utf-8")
@@ -117,14 +129,22 @@ def test_cached_source_file_can_be_preflighted_and_loaded_from_default_cache(
         source_path=source_path,
         draft_dir=formatting_engine.DEFAULT_DRAFT_DIR,
     )
-    loaded = read_draft_artifact(draft_id=artifact.draft_id, draft_dir=formatting_engine.DEFAULT_DRAFT_DIR)
+    loaded = read_draft_artifact(
+        draft_id=artifact.draft_id, draft_dir=formatting_engine.DEFAULT_DRAFT_DIR
+    )
 
-    assert read_cached_source_text(
-        source_path,
-        draft_dir=formatting_engine.DEFAULT_DRAFT_DIR,
-    ) == "**Approved**\n\n- posted from disk"
+    assert (
+        read_cached_source_text(
+            source_path,
+            draft_dir=formatting_engine.DEFAULT_DRAFT_DIR,
+        )
+        == "**Approved**\n\n- posted from disk"
+    )
     assert loaded.draft_id == artifact.draft_id
-    assert loaded.report.mycode == "[b]Approved[/b]\n\n[list]\n[*] posted from disk\n[/list]"
+    assert (
+        loaded.report.mycode
+        == "[b]Approved[/b]\n\n[list]\n[*] posted from disk\n[/list]"
+    )
 
 
 def test_draft_cache_rejects_paths_outside_tmp_cache(tmp_path: Path) -> None:
@@ -137,17 +157,23 @@ def test_draft_cache_rejects_paths_outside_tmp_cache(tmp_path: Path) -> None:
         read_cached_source_text(outside_path, draft_dir=draft_root)
 
 
-def test_source_path_rejects_disallowed_suffix_inside_configured_root(tmp_path: Path) -> None:
+def test_source_path_rejects_disallowed_suffix_inside_configured_root(
+    tmp_path: Path,
+) -> None:
     draft_root = tmp_path / "drafts"
     draft_root.mkdir(parents=True, exist_ok=True)
     source_path = draft_root / "approval-draft.html"
     source_path.write_text("<b>nope</b>", encoding="utf-8")
 
     with pytest.raises(ValueError, match=".md, .mycode, or .txt"):
-        write_draft_artifact(message_format="markdown", source_path=source_path, draft_dir=draft_root)
+        write_draft_artifact(
+            message_format="markdown", source_path=source_path, draft_dir=draft_root
+        )
 
 
-def test_read_draft_artifact_resolves_draft_id_within_configured_root(tmp_path: Path) -> None:
+def test_read_draft_artifact_resolves_draft_id_within_configured_root(
+    tmp_path: Path,
+) -> None:
     draft_root = tmp_path / "drafts"
     artifact = write_draft_artifact(
         "**Update**\n\n- draft metadata",
@@ -161,7 +187,9 @@ def test_read_draft_artifact_resolves_draft_id_within_configured_root(tmp_path: 
     assert loaded.draft_id == artifact.draft_id
 
 
-def test_read_draft_artifact_rejects_draft_path_traversal_outside_configured_root(tmp_path: Path) -> None:
+def test_read_draft_artifact_rejects_draft_path_traversal_outside_configured_root(
+    tmp_path: Path,
+) -> None:
     draft_root = tmp_path / "drafts"
     draft_root.mkdir(parents=True, exist_ok=True)
     outside_json = tmp_path / "outside.json"
@@ -171,14 +199,18 @@ def test_read_draft_artifact_rejects_draft_path_traversal_outside_configured_roo
         read_draft_artifact(draft_path=outside_json, draft_dir=draft_root)
 
 
-def test_read_draft_artifact_defaults_metadata_for_legacy_payload_shape(tmp_path: Path) -> None:
+def test_read_draft_artifact_defaults_metadata_for_legacy_payload_shape(
+    tmp_path: Path,
+) -> None:
     draft_root = tmp_path / "drafts"
     draft_root.mkdir(parents=True, exist_ok=True)
     artifact = write_draft_artifact("legacy payload", draft_dir=draft_root)
     artifact_path = Path(artifact.path)
     payload = json.loads(artifact_path.read_text(encoding="utf-8"))
     payload.pop("metadata", None)
-    artifact_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+    artifact_path.write_text(
+        json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8"
+    )
 
     loaded = read_draft_artifact(draft_id=artifact.draft_id, draft_dir=draft_root)
 
@@ -217,7 +249,11 @@ def test_list_draft_artifacts_filters_and_paginates(tmp_path: Path) -> None:
     )
 
     artifacts = list_draft_artifacts(draft_dir=draft_root)
-    assert [item.draft_id for item in artifacts] == [third.draft_id, second.draft_id, first.draft_id]
+    assert [item.draft_id for item in artifacts] == [
+        third.draft_id,
+        second.draft_id,
+        first.draft_id,
+    ]
 
     ready = list_draft_artifacts(draft_dir=draft_root, status="ready")
     assert [item.draft_id for item in ready] == [second.draft_id]
@@ -267,7 +303,9 @@ def test_update_draft_metadata_mutates_metadata_only(tmp_path: Path) -> None:
     assert before_payload["report"] == after_payload["report"]
 
 
-def test_update_draft_metadata_limits_status_to_exact_lifecycle_values(tmp_path: Path) -> None:
+def test_update_draft_metadata_limits_status_to_exact_lifecycle_values(
+    tmp_path: Path,
+) -> None:
     draft_root = tmp_path / "drafts"
     artifact = write_draft_artifact("status guard", draft_dir=draft_root)
 
@@ -287,7 +325,9 @@ def test_update_draft_metadata_limits_status_to_exact_lifecycle_values(tmp_path:
         )
 
 
-def test_delete_draft_artifact_requires_confirm_and_confines_paths(tmp_path: Path) -> None:
+def test_delete_draft_artifact_requires_confirm_and_confines_paths(
+    tmp_path: Path,
+) -> None:
     draft_root = tmp_path / "drafts"
     artifact = write_draft_artifact("delete me", draft_dir=draft_root)
     path = Path(artifact.path)
@@ -295,7 +335,9 @@ def test_delete_draft_artifact_requires_confirm_and_confines_paths(tmp_path: Pat
     with pytest.raises(ValueError, match="confirm_delete=True"):
         delete_draft_artifact(draft_id=artifact.draft_id, draft_dir=draft_root)
 
-    tombstone = delete_draft_artifact(draft_id=artifact.draft_id, draft_dir=draft_root, confirm_delete=True)
+    tombstone = delete_draft_artifact(
+        draft_id=artifact.draft_id, draft_dir=draft_root, confirm_delete=True
+    )
     assert tombstone["deleted"] is True
     assert tombstone["draft_id"] == artifact.draft_id
     assert tombstone["path"] == str(path)
@@ -304,7 +346,9 @@ def test_delete_draft_artifact_requires_confirm_and_confines_paths(tmp_path: Pat
     outside_json = tmp_path / "outside.json"
     outside_json.write_text("{}", encoding="utf-8")
     with pytest.raises(ValueError, match="configured draft directory"):
-        delete_draft_artifact(draft_path=outside_json, draft_dir=draft_root, confirm_delete=True)
+        delete_draft_artifact(
+            draft_path=outside_json, draft_dir=draft_root, confirm_delete=True
+        )
 
 
 def test_preflight_formatting_emits_local_hf_flow_actions_only(tmp_path: Path) -> None:

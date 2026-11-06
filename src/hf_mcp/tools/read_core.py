@@ -26,7 +26,7 @@ _DEFAULT_THREAD_FIELDS = (
     "lastpost",
     "sticky",
 )
-_DEFAULT_THREAD_FIRSTPOST_FIELDS = {
+_DEFAULT_THREAD_FIRSTPOST_FIELDS: dict[str, Any] = {
     "pid": True,
     "message": True,
     "author": {
@@ -120,7 +120,11 @@ def _build_users_asks(
     include_profile_fields: bool | None,
 ) -> dict[str, dict[str, Any]]:
     asks: dict[str, dict[str, Any]] = {
-        "users": {"_uid": uid, "_page": _coerce_page(page), "_perpage": _coerce_per_page(per_page)},
+        "users": {
+            "_uid": uid,
+            "_page": _coerce_page(page),
+            "_perpage": _coerce_per_page(per_page),
+        },
     }
     if include_profile_fields is not False:
         for field_name in _DEFAULT_USER_PROFILE_FIELDS:
@@ -128,9 +132,15 @@ def _build_users_asks(
     return asks
 
 
-def _build_forums_asks(*, fid: int, page: int | None, per_page: int | None) -> dict[str, dict[str, Any]]:
+def _build_forums_asks(
+    *, fid: int, page: int | None, per_page: int | None
+) -> dict[str, dict[str, Any]]:
     asks: dict[str, dict[str, Any]] = {
-        "forums": {"_fid": fid, "_page": _coerce_page(page), "_perpage": _coerce_per_page(per_page)}
+        "forums": {
+            "_fid": fid,
+            "_page": _coerce_page(page),
+            "_perpage": _coerce_per_page(per_page),
+        }
     }
     for field_name in _DEFAULT_FORUM_FIELDS:
         asks["forums"][field_name] = True
@@ -152,8 +162,14 @@ def _build_threads_asks(
         asks["threads"]["_tid"] = tid
     if uid is not None:
         asks["threads"]["_uid"] = uid
-    if "_fid" not in asks["threads"] and "_tid" not in asks["threads"] and "_uid" not in asks["threads"]:
-        raise ValueError("threads.read requires at least one selector: fid, tid, or uid")
+    if (
+        "_fid" not in asks["threads"]
+        and "_tid" not in asks["threads"]
+        and "_uid" not in asks["threads"]
+    ):
+        raise ValueError(
+            "threads.read requires at least one selector: fid, tid, or uid"
+        )
     asks["threads"]["_page"] = _coerce_page(page)
     asks["threads"]["_perpage"] = _coerce_per_page(per_page)
     for field_name in _DEFAULT_THREAD_FIELDS:
@@ -182,7 +198,11 @@ def _build_posts_asks(
         asks["posts"]["_pid"] = pid
     if uid is not None:
         asks["posts"]["_uid"] = uid
-    if "_pid" not in asks["posts"] and "_tid" not in asks["posts"] and "_uid" not in asks["posts"]:
+    if (
+        "_pid" not in asks["posts"]
+        and "_tid" not in asks["posts"]
+        and "_uid" not in asks["posts"]
+    ):
         raise ValueError("posts.read requires at least one selector: pid, tid, or uid")
     asks["posts"]["_page"] = _coerce_page(page)
     asks["posts"]["_perpage"] = _coerce_per_page(per_page)
@@ -278,7 +298,12 @@ def _coerce_per_page(per_page: int | None) -> int:
     return DEFAULT_PER_PAGE if per_page is None else per_page
 
 
-def _line_for_entry(entry: Mapping[str, Any], *, primary_keys: tuple[str, ...], message_key: str | None = None) -> str:
+def _line_for_entry(
+    entry: Mapping[str, Any],
+    *,
+    primary_keys: tuple[str, ...],
+    message_key: str | None = None,
+) -> str:
     segments: list[str] = []
     for key in primary_keys:
         value = entry.get(key)
@@ -309,7 +334,9 @@ def _as_rows(payload: Mapping[str, Any], key: str) -> list[Mapping[str, Any]]:
     return []
 
 
-def _build_content_summary(tool_name: str, payload: Mapping[str, Any], mode: ReadOutputMode) -> str:
+def _build_content_summary(
+    tool_name: str, payload: Mapping[str, Any], mode: ReadOutputMode
+) -> str:
     root_key = tool_name.split(".", 1)[0]
     rows = _as_rows(payload, root_key)
     if mode != "readable":
@@ -333,9 +360,13 @@ def _build_content_summary(tool_name: str, payload: Mapping[str, Any], mode: Rea
             f"{_line_for_entry(rows[0], primary_keys=profile_summary_keys)}"
         )
     if tool_name == "users.read":
-        return _build_rows_summary("users.read", rows, primary_keys=("uid", "username", "reputation"))
+        return _build_rows_summary(
+            "users.read", rows, primary_keys=("uid", "username", "reputation")
+        )
     if tool_name == "forums.read":
-        return _build_rows_summary("forums.read", rows, primary_keys=("fid", "name", "type"))
+        return _build_rows_summary(
+            "forums.read", rows, primary_keys=("fid", "name", "type")
+        )
     if tool_name == "threads.read":
         return _build_threads_readable_content(rows)
     if tool_name == "posts.read":
@@ -358,7 +389,9 @@ def _build_threads_readable_content(rows: list[Mapping[str, Any]]) -> str:
         title = subject if isinstance(subject, str) and subject else f"Thread {index}"
         lines.extend(("", f"## {title}"))
 
-        thread_fields = _flatten_readable_fields(row, exclude_keys=frozenset({"firstpost"}))
+        thread_fields = _flatten_readable_fields(
+            row, exclude_keys=frozenset({"firstpost"})
+        )
         if thread_fields:
             lines.extend(("", "### Thread fields"))
             lines.extend(f"- {key}: {value}" for key, value in thread_fields)
@@ -367,7 +400,9 @@ def _build_threads_readable_content(rows: list[Mapping[str, Any]]) -> str:
         if not isinstance(firstpost, Mapping):
             continue
 
-        firstpost_fields = _flatten_readable_fields(firstpost, prefix="firstpost", exclude_keys=frozenset({"message"}))
+        firstpost_fields = _flatten_readable_fields(
+            firstpost, prefix="firstpost", exclude_keys=frozenset({"message"})
+        )
         if firstpost_fields:
             lines.extend(("", "### First post fields"))
             lines.extend(f"- {key}: {value}" for key, value in firstpost_fields)
@@ -412,11 +447,15 @@ def _build_rows_summary(
         return f"{label} returned 0 row(s)."
     lines = [f"{label} returned {len(rows)} row(s):"]
     for row in rows:
-        lines.append(f"- {_line_for_entry(row, primary_keys=primary_keys, message_key=message_key)}")
+        lines.append(
+            f"- {_line_for_entry(row, primary_keys=primary_keys, message_key=message_key)}"
+        )
     return "\n".join(lines)
 
 
-def _build_raw_resource(tool_name: str, raw_payload: Mapping[str, Any]) -> dict[str, Any]:
+def _build_raw_resource(
+    tool_name: str, raw_payload: Mapping[str, Any]
+) -> dict[str, Any]:
     return {
         "type": "resource",
         "resource": {
@@ -437,7 +476,12 @@ def _build_read_tool_result(
     arguments: Mapping[str, Any] | None = None,
     source: str | None = None,
 ) -> dict[str, Any]:
-    content: list[dict[str, Any]] = [{"type": "text", "text": _build_content_summary(tool_name, normalized_payload, mode)}]
+    content: list[dict[str, Any]] = [
+        {
+            "type": "text",
+            "text": _build_content_summary(tool_name, normalized_payload, mode),
+        }
+    ]
     if raw_payload is not None and (mode == "raw" or include_raw_payload):
         content.append(_build_raw_resource(tool_name, raw_payload))
     flow = build_hf_flow(
@@ -452,7 +496,9 @@ def _build_read_tool_result(
     }
 
 
-def build_core_read_handlers(policy: CapabilityPolicy, transport: HFTransport) -> dict[str, ReadHandler]:
+def build_core_read_handlers(
+    policy: CapabilityPolicy, transport: HFTransport
+) -> dict[str, ReadHandler]:
     handlers: dict[str, ReadHandler] = {}
     settings = cast(HFMCPSettings, getattr(policy, "_settings"))
 
@@ -466,7 +512,9 @@ def build_core_read_handlers(policy: CapabilityPolicy, transport: HFTransport) -
         body_format: str | None,
         arguments: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
-        defaults = resolve_read_output_defaults(settings, output_mode, include_raw_payload, body_format)
+        defaults = resolve_read_output_defaults(
+            settings, output_mode, include_raw_payload, body_format
+        )
         need_raw = defaults.mode == "raw" or defaults.include_raw_payload
         raw_payload: dict[str, Any] | None = None
         # Core resources travel in asks; the generic endpoint is supported live.
@@ -475,7 +523,9 @@ def build_core_read_handlers(policy: CapabilityPolicy, transport: HFTransport) -
             normalized_payload = normalize_response(raw_payload)
         else:
             normalized_payload = transport.read(asks=asks, helper=None)
-        normalized_payload = format_body_fields(normalized_payload, defaults.body_format)
+        normalized_payload = format_body_fields(
+            normalized_payload, defaults.body_format
+        )
         return _build_read_tool_result(
             tool_name=tool_name,
             normalized_payload=normalized_payload,
@@ -490,7 +540,9 @@ def build_core_read_handlers(policy: CapabilityPolicy, transport: HFTransport) -
         if not policy.can_register(spec.tool_name):
             continue
         if spec.tool_name == "me.read":
-            allow_advanced = "fields.me.advanced" in policy.allowed_parameter_families("me.read")
+            allow_advanced = "fields.me.advanced" in policy.allowed_parameter_families(
+                "me.read"
+            )
 
             def _me_handler(
                 *,
@@ -520,6 +572,7 @@ def build_core_read_handlers(policy: CapabilityPolicy, transport: HFTransport) -
 
             handlers[spec.tool_name] = _me_handler
         elif spec.tool_name == "users.read":
+
             def _users_handler(
                 *,
                 uid: int,
@@ -552,6 +605,7 @@ def build_core_read_handlers(policy: CapabilityPolicy, transport: HFTransport) -
 
             handlers[spec.tool_name] = _users_handler
         elif spec.tool_name == "forums.read":
+
             def _forums_handler(
                 *,
                 fid: int,
@@ -578,6 +632,7 @@ def build_core_read_handlers(policy: CapabilityPolicy, transport: HFTransport) -
 
             handlers[spec.tool_name] = _forums_handler
         elif spec.tool_name == "threads.read":
+
             def _threads_handler(
                 *,
                 fid: int | None = None,
@@ -589,7 +644,9 @@ def build_core_read_handlers(policy: CapabilityPolicy, transport: HFTransport) -
                 include_raw_payload: bool | None = None,
                 body_format: str | None = None,
             ) -> dict[str, Any]:
-                asks = _build_threads_asks(fid=fid, tid=tid, uid=uid, page=page, per_page=per_page)
+                asks = _build_threads_asks(
+                    fid=fid, tid=tid, uid=uid, page=page, per_page=per_page
+                )
                 return _finalize_result(
                     tool_name="threads.read",
                     asks=asks,
@@ -608,6 +665,7 @@ def build_core_read_handlers(policy: CapabilityPolicy, transport: HFTransport) -
 
             handlers[spec.tool_name] = _threads_handler
         elif spec.tool_name == "posts.read":
+
             def _posts_handler(
                 *,
                 tid: int | None = None,

@@ -1,14 +1,12 @@
 from __future__ import annotations
 
-import sys
 from pathlib import Path
+
+
+from hf_mcp.flow import FLOW_KEY, attach_hf_flow, build_hf_flow
 
 PRODUCT_ROOT = Path(__file__).resolve().parents[1]
 SRC_PATH = PRODUCT_ROOT / "src"
-if str(SRC_PATH) not in sys.path:
-    sys.path.insert(0, str(SRC_PATH))
-
-from hf_mcp.flow import FLOW_KEY, attach_hf_flow, build_hf_flow
 
 
 def _action_tools(flow: dict[str, object]) -> list[str]:
@@ -17,7 +15,9 @@ def _action_tools(flow: dict[str, object]) -> list[str]:
     return [str(action.get("tool")) for action in actions if isinstance(action, dict)]
 
 
-def _actions_as_tuples(flow: dict[str, object]) -> set[tuple[str, tuple[tuple[str, int], ...]]]:
+def _actions_as_tuples(
+    flow: dict[str, object],
+) -> set[tuple[str, tuple[tuple[str, int], ...]]]:
     actions = flow.get("next_actions")
     assert isinstance(actions, list)
 
@@ -30,7 +30,9 @@ def _actions_as_tuples(flow: dict[str, object]) -> set[tuple[str, tuple[tuple[st
             continue
         if not isinstance(args, dict):
             continue
-        normalized.add((tool, tuple(sorted((str(key), int(value)) for key, value in args.items()))))
+        normalized.add(
+            (tool, tuple(sorted((str(key), int(value)) for key, value in args.items())))
+        )
     return normalized
 
 
@@ -40,7 +42,9 @@ def test_attach_hf_flow_preserves_endpoint_root_keys_and_adds_sibling() -> None:
         "page": "1",
     }
 
-    flow = build_hf_flow(tool_name="posts.read", normalized_payload=payload, arguments={"tid": 123})
+    flow = build_hf_flow(
+        tool_name="posts.read", normalized_payload=payload, arguments={"tid": 123}
+    )
     enriched = attach_hf_flow(payload, flow)
 
     assert FLOW_KEY == "_hf_flow"
@@ -61,7 +65,9 @@ def test_build_hf_flow_sets_version_and_breadcrumbs_from_source() -> None:
     assert flow["breadcrumbs"] == ["forums.index", "forums.read"]
 
 
-def test_forums_read_actions_include_threads_and_child_forums_only_with_real_child_fids() -> None:
+def test_forums_read_actions_include_threads_and_child_forums_only_with_real_child_fids() -> (
+    None
+):
     payload = {
         "forums": [
             {
@@ -76,7 +82,9 @@ def test_forums_read_actions_include_threads_and_child_forums_only_with_real_chi
         ]
     }
 
-    flow = build_hf_flow(tool_name="forums.read", normalized_payload=payload, arguments={"fid": 375})
+    flow = build_hf_flow(
+        tool_name="forums.read", normalized_payload=payload, arguments={"fid": 375}
+    )
 
     entities = flow["entities"]
     assert entities["forum_ids"] == [375, 901]
@@ -98,7 +106,9 @@ def test_threads_read_actions_include_posts_users_and_forums_when_ids_exist() ->
         ]
     }
 
-    flow = build_hf_flow(tool_name="threads.read", normalized_payload=payload, arguments={"fid": 12})
+    flow = build_hf_flow(
+        tool_name="threads.read", normalized_payload=payload, arguments={"fid": 12}
+    )
 
     entities = flow["entities"]
     assert entities["thread_ids"] == [6324346]
@@ -111,7 +121,9 @@ def test_threads_read_actions_include_posts_users_and_forums_when_ids_exist() ->
     assert ("forums.read", (("fid", 12),)) in actions
 
 
-def test_posts_read_actions_include_post_specific_rereads_only_when_pid_exists() -> None:
+def test_posts_read_actions_include_post_specific_rereads_only_when_pid_exists() -> (
+    None
+):
     flow_without_pid = build_hf_flow(
         tool_name="posts.read",
         normalized_payload={"posts": [{"subject": "No identifiers"}]},
@@ -121,7 +133,9 @@ def test_posts_read_actions_include_post_specific_rereads_only_when_pid_exists()
 
     flow_with_ids = build_hf_flow(
         tool_name="posts.read",
-        normalized_payload={"posts": [{"pid": "7", "tid": "6324346", "uid": "5", "fid": "12"}]},
+        normalized_payload={
+            "posts": [{"pid": "7", "tid": "6324346", "uid": "5", "fid": "12"}]
+        },
         arguments={},
     )
     actions = _actions_as_tuples(flow_with_ids)
@@ -131,7 +145,9 @@ def test_posts_read_actions_include_post_specific_rereads_only_when_pid_exists()
     assert ("forums.read", (("fid", 12),)) in actions
 
 
-def test_extended_flow_collects_contract_dispute_rating_and_sigmarket_entities() -> None:
+def test_extended_flow_collects_contract_dispute_rating_and_sigmarket_entities() -> (
+    None
+):
     contracts_flow = build_hf_flow(
         tool_name="contracts.read",
         normalized_payload={
@@ -159,14 +175,18 @@ def test_extended_flow_collects_contract_dispute_rating_and_sigmarket_entities()
 
     order_flow = build_hf_flow(
         tool_name="sigmarket.order.read",
-        normalized_payload={"sigmarket/order": [{"smid": "17", "buyer": "2047020", "seller": "1"}]},
+        normalized_payload={
+            "sigmarket/order": [{"smid": "17", "buyer": "2047020", "seller": "1"}]
+        },
         arguments={},
     )
     assert order_flow["entities"]["sigmarket_listing_ids"] == [17]
     assert order_flow["entities"]["user_ids"] == [1, 2047020]
 
 
-def test_extended_flow_next_actions_include_expected_read_pivots_and_confirmation_gate() -> None:
+def test_extended_flow_next_actions_include_expected_read_pivots_and_confirmation_gate() -> (
+    None
+):
     bytes_flow = build_hf_flow(
         tool_name="bytes.read",
         normalized_payload={"bytes": [{"uid": "42"}]},
@@ -175,13 +195,28 @@ def test_extended_flow_next_actions_include_expected_read_pivots_and_confirmatio
     bytes_actions = _actions_as_tuples(bytes_flow)
     assert ("users.read", (("uid", 42),)) in bytes_actions
     assert ("bytes.transfer", (("target_uid", 42),)) in bytes_actions
-    transfer_actions = [action for action in bytes_flow["next_actions"] if action["tool"] == "bytes.transfer"]
+    transfer_actions = [
+        action
+        for action in bytes_flow["next_actions"]
+        if action["tool"] == "bytes.transfer"
+    ]
     assert transfer_actions
-    assert all(action.get("requires_confirmation") is True for action in transfer_actions)
+    assert all(
+        action.get("requires_confirmation") is True for action in transfer_actions
+    )
 
     disputes_flow = build_hf_flow(
         tool_name="disputes.read",
-        normalized_payload={"disputes": [{"cdid": "11", "contractid": "7", "dispute_tid": "4321", "claimantuid": "9"}]},
+        normalized_payload={
+            "disputes": [
+                {
+                    "cdid": "11",
+                    "contractid": "7",
+                    "dispute_tid": "4321",
+                    "claimantuid": "9",
+                }
+            ]
+        },
         arguments={},
     )
     disputes_actions = _actions_as_tuples(disputes_flow)
@@ -236,7 +271,9 @@ def test_write_flow_next_actions_include_post_action_reads_when_ids_exist() -> N
     assert no_id_bytes_flow["next_actions"] == []
 
 
-def test_formatting_preflight_flow_targets_local_draft_tools_only_when_artifact_exists() -> None:
+def test_formatting_preflight_flow_targets_local_draft_tools_only_when_artifact_exists() -> (
+    None
+):
     flow = build_hf_flow(
         tool_name="formatting.preflight",
         normalized_payload={"draft_id": "a" * 32},
@@ -245,7 +282,9 @@ def test_formatting_preflight_flow_targets_local_draft_tools_only_when_artifact_
 
     action_tools = _action_tools(flow)
     assert set(action_tools) == {"drafts.list", "drafts.read", "drafts.update"}
-    assert all(not tool.startswith(("threads.", "posts.", "bytes.")) for tool in action_tools)
+    assert all(
+        not tool.startswith(("threads.", "posts.", "bytes.")) for tool in action_tools
+    )
 
     no_artifact_flow = build_hf_flow(
         tool_name="formatting.preflight",
@@ -260,7 +299,9 @@ def test_local_draft_flow_chain_emits_local_followups_only() -> None:
     draft_two = "b" * 32
     list_flow = build_hf_flow(
         tool_name="drafts.list",
-        normalized_payload={"drafts": [{"draft_id": draft_one}, {"draft_id": draft_two}]},
+        normalized_payload={
+            "drafts": [{"draft_id": draft_one}, {"draft_id": draft_two}]
+        },
         arguments={},
     )
     assert set(_action_tools(list_flow)) == {"drafts.read"}
@@ -270,7 +311,11 @@ def test_local_draft_flow_chain_emits_local_followups_only() -> None:
         normalized_payload={"draft_id": draft_one},
         arguments={},
     )
-    assert set(_action_tools(read_flow)) == {"drafts.update", "drafts.delete", "formatting.preflight"}
+    assert set(_action_tools(read_flow)) == {
+        "drafts.update",
+        "drafts.delete",
+        "formatting.preflight",
+    }
 
     update_flow = build_hf_flow(
         tool_name="drafts.update",

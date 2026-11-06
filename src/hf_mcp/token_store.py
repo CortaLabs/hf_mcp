@@ -25,17 +25,25 @@ class TokenBundle:
             raise ValueError("Token payload is missing a valid `access_token`.")
 
         raw_token_type = payload.get("token_type")
-        token_type = raw_token_type if isinstance(raw_token_type, str) and raw_token_type else "Bearer"
+        token_type = (
+            raw_token_type
+            if isinstance(raw_token_type, str) and raw_token_type
+            else "Bearer"
+        )
 
         raw_scope = payload.get("scope")
         if isinstance(raw_scope, str):
             scope = frozenset(part for part in raw_scope.split(" ") if part)
         elif isinstance(raw_scope, list):
-            scope = frozenset(str(part).strip() for part in raw_scope if str(part).strip())
+            scope = frozenset(
+                str(part).strip() for part in raw_scope if str(part).strip()
+            )
         else:
             scope = frozenset()
 
-        return cls(access_token=access_token.strip(), token_type=token_type, scope=scope)
+        return cls(
+            access_token=access_token.strip(), token_type=token_type, scope=scope
+        )
 
     @classmethod
     def from_record(cls, record: Mapping[str, object]) -> TokenBundle:
@@ -82,7 +90,9 @@ class TokenStore:
         self._path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         temp_path = self._path.with_suffix(self._path.suffix + ".tmp")
 
-        file_descriptor = os.open(temp_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        file_descriptor = os.open(
+            temp_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600
+        )
         with os.fdopen(file_descriptor, "w", encoding="utf-8") as handle:
             json.dump(bundle.to_record(), handle, indent=2, sort_keys=True)
             handle.write("\n")
@@ -96,8 +106,12 @@ class TokenStore:
 
 
 def load_token_store(settings: HFMCPSettings) -> TokenStore:
-    raw_override = settings.runtime_env.get("HF_MCP_TOKEN_PATH") or os.environ.get("HF_MCP_TOKEN_PATH")
-    selected_path = Path(raw_override).expanduser() if raw_override else settings.token_path
+    raw_override = settings.runtime_env.get("HF_MCP_TOKEN_PATH") or os.environ.get(
+        "HF_MCP_TOKEN_PATH"
+    )
+    selected_path = (
+        Path(raw_override).expanduser() if raw_override else settings.token_path
+    )
     if not selected_path.is_absolute():
         raise ValueError("HF_MCP_TOKEN_PATH must be an absolute path.")
 

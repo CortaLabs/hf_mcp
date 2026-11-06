@@ -8,7 +8,12 @@ from typing import Any, Mapping, Sequence
 
 from . import __version__
 from .auth import authorize_via_loopback
-from .config import HFMCPSettings, PRESET_CAPABILITIES, PRESET_PARAMETER_FAMILIES, load_settings
+from .config import (
+    HFMCPSettings,
+    PRESET_CAPABILITIES,
+    PRESET_PARAMETER_FAMILIES,
+    load_settings,
+)
 from .onboarding import (
     _HOSTED_CALLBACK_ARTIFACT_PATH,
     _HOSTED_EXTERNAL_REDIRECT_ENV,
@@ -34,8 +39,12 @@ def build_cli() -> Any:
     )
     subparsers = parser.add_subparsers(dest="command")
     serve_parser = subparsers.add_parser("serve", help="Start the MCP runtime")
-    serve_parser.add_argument("--config", type=Path, default=None, help="Path to config YAML")
-    serve_parser.add_argument("--token-path", type=Path, default=None, help="Absolute path for token JSON")
+    serve_parser.add_argument(
+        "--config", type=Path, default=None, help="Path to config YAML"
+    )
+    serve_parser.add_argument(
+        "--token-path", type=Path, default=None, help="Absolute path for token JSON"
+    )
     serve_parser.add_argument(
         "--profile",
         type=str,
@@ -58,8 +67,12 @@ def build_cli() -> Any:
             "keeps loopback-only bootstrap."
         ),
     )
-    bootstrap_parser.add_argument("--config", type=Path, default=None, help="Path to config YAML")
-    bootstrap_parser.add_argument("--token-path", type=Path, default=None, help="Absolute path for token JSON")
+    bootstrap_parser.add_argument(
+        "--config", type=Path, default=None, help="Path to config YAML"
+    )
+    bootstrap_parser.add_argument(
+        "--token-path", type=Path, default=None, help="Absolute path for token JSON"
+    )
     browser_group = bootstrap_parser.add_mutually_exclusive_group()
     browser_group.add_argument(
         "--open-browser",
@@ -75,17 +88,33 @@ def build_cli() -> Any:
     )
     bootstrap_parser.set_defaults(open_browser=None)
 
-    status_parser = auth_subparsers.add_parser("status", help="Show local token/config status")
-    status_parser.add_argument("--config", type=Path, default=None, help="Path to config YAML")
-    status_parser.add_argument("--token-path", type=Path, default=None, help="Absolute path for token JSON")
+    status_parser = auth_subparsers.add_parser(
+        "status", help="Show local token/config status"
+    )
+    status_parser.add_argument(
+        "--config", type=Path, default=None, help="Path to config YAML"
+    )
+    status_parser.add_argument(
+        "--token-path", type=Path, default=None, help="Absolute path for token JSON"
+    )
 
     setup_parser = subparsers.add_parser("setup", help="First-run local setup helpers")
     setup_subparsers = setup_parser.add_subparsers(dest="setup_command")
-    setup_init_parser = setup_subparsers.add_parser("init", help="Create first-run config and print next steps")
-    setup_init_parser.add_argument("--config", type=Path, default=None, help="Path to config YAML")
-    setup_init_parser.add_argument("--profile", type=str, default="reader", help="Profile to write into config")
-    setup_init_parser.add_argument("--token-path", type=Path, default=None, help="Absolute token path to persist")
-    setup_init_parser.add_argument("--force", action="store_true", help="Overwrite existing config file")
+    setup_init_parser = setup_subparsers.add_parser(
+        "init", help="Create first-run config and print next steps"
+    )
+    setup_init_parser.add_argument(
+        "--config", type=Path, default=None, help="Path to config YAML"
+    )
+    setup_init_parser.add_argument(
+        "--profile", type=str, default="reader", help="Profile to write into config"
+    )
+    setup_init_parser.add_argument(
+        "--token-path", type=Path, default=None, help="Absolute token path to persist"
+    )
+    setup_init_parser.add_argument(
+        "--force", action="store_true", help="Overwrite existing config file"
+    )
 
     doctor_parser = subparsers.add_parser(
         "doctor",
@@ -98,8 +127,12 @@ def build_cli() -> Any:
             f"and legacy {_LEGACY_REDIRECT_ENV} fallback."
         ),
     )
-    doctor_parser.add_argument("--config", type=Path, default=None, help="Path to config YAML")
-    doctor_parser.add_argument("--token-path", type=Path, default=None, help="Absolute path for token JSON")
+    doctor_parser.add_argument(
+        "--config", type=Path, default=None, help="Path to config YAML"
+    )
+    doctor_parser.add_argument(
+        "--token-path", type=Path, default=None, help="Absolute path for token JSON"
+    )
     doctor_parser.add_argument(
         "--profile",
         type=str,
@@ -111,7 +144,9 @@ def build_cli() -> Any:
     return parser
 
 
-def _resolve_settings_and_store(config_path: Path | None, token_path: Path | None) -> tuple[HFMCPSettings, TokenStore]:
+def _resolve_settings_and_store(
+    config_path: Path | None, token_path: Path | None
+) -> tuple[HFMCPSettings, TokenStore]:
     env_override: Mapping[str, str] | None = None
     if token_path is not None:
         selected_token_path = token_path.expanduser()
@@ -125,7 +160,9 @@ def _resolve_settings_and_store(config_path: Path | None, token_path: Path | Non
 
 def _run_auth_bootstrap(args: Namespace) -> int:
     try:
-        settings, store = _resolve_settings_and_store(config_path=args.config, token_path=args.token_path)
+        settings, store = _resolve_settings_and_store(
+            config_path=args.config, token_path=args.token_path
+        )
         bundle = authorize_via_loopback(
             settings=settings,
             open_browser=_resolve_auth_bootstrap_browser_setting(args.open_browser),
@@ -165,7 +202,9 @@ def _announce_authorize_url(authorize_url: str) -> None:
 
 def _run_auth_status(args: Namespace) -> int:
     try:
-        settings, store = _resolve_settings_and_store(config_path=args.config, token_path=args.token_path)
+        settings, store = _resolve_settings_and_store(
+            config_path=args.config, token_path=args.token_path
+        )
         bundle = store.load_bundle()
     except (OSError, RuntimeError, ValueError, PermissionError) as exc:
         print(f"Auth status failed: {exc}", file=sys.stderr)

@@ -24,8 +24,8 @@ def test_callback_asset_forwards_only_allowed_oauth_params() -> None:
     assert 'const ALLOWED_PARAMS = ["code", "state", "error"]' in html
     assert "searchParams.get(key)" in html
     assert "forwardParams.set(key, value)" in html
-    assert "searchParams.get(\"scope\")" not in html
-    assert "searchParams.get(\"token\")" not in html
+    assert 'searchParams.get("scope")' not in html
+    assert 'searchParams.get("token")' not in html
 
 
 def test_callback_asset_avoids_runtime_and_network_coupling() -> None:

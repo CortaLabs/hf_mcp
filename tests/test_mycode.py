@@ -1,23 +1,25 @@
 from __future__ import annotations
 
-import sys
 from pathlib import Path
+
+
+from hf_mcp.mycode import (
+    decode_double_quote_entities,
+    format_body_text,
+    markdown_to_mycode,
+)
 
 PRODUCT_ROOT = Path(__file__).resolve().parents[1]
 SRC_PATH = PRODUCT_ROOT / "src"
-if str(SRC_PATH) not in sys.path:
-    sys.path.insert(0, str(SRC_PATH))
-
-from hf_mcp.mycode import decode_double_quote_entities, format_body_text, markdown_to_mycode
 
 
 def test_format_body_text_converts_common_mycode_to_markdown() -> None:
     source = (
-        '[quote="alice" pid=\'1\'][b]Heads up[/b][/quote]\n'
+        "[quote=\"alice\" pid='1'][b]Heads up[/b][/quote]\n"
         "[url=https://example.test]link[/url]\n"
         "[img]https://example.test/a.png[/img]\n"
         "[list][*]one[*]two[/list]\n"
-        "[code]{\"keep\":\"exact\"}[/code]"
+        '[code]{"keep":"exact"}[/code]'
     )
 
     assert format_body_text(source, "markdown") == (
@@ -41,15 +43,17 @@ def test_format_body_text_can_strip_mycode_noise_without_markdown() -> None:
 
 
 def test_format_body_text_decodes_quote_entities_in_all_body_modes() -> None:
-    source = '[code]{&quot;mode&quot;:&#34;raw&#x22;}[/code] output_mode=&quot;structured&quot;'
+    source = "[code]{&quot;mode&quot;:&#34;raw&#x22;}[/code] output_mode=&quot;structured&quot;"
 
-    assert format_body_text(source, "raw") == '[code]{"mode":"raw"}[/code] output_mode="structured"'
-    assert format_body_text(source, "clean") == '{"mode":"raw"} output_mode="structured"'
+    assert (
+        format_body_text(source, "raw")
+        == '[code]{"mode":"raw"}[/code] output_mode="structured"'
+    )
+    assert (
+        format_body_text(source, "clean") == '{"mode":"raw"} output_mode="structured"'
+    )
     assert format_body_text(source, "markdown") == (
-        "```\n"
-        '{"mode":"raw"}\n'
-        "```\n"
-        ' output_mode="structured"'
+        '```\n{"mode":"raw"}\n```\n output_mode="structured"'
     )
 
 
@@ -67,7 +71,7 @@ def test_markdown_to_mycode_converts_common_agent_markdown() -> None:
         "- one\n"
         "- two\n"
         "> quoted\n\n"
-        "```json\n{\"keep\":\"exact\"}\n```"
+        '```json\n{"keep":"exact"}\n```'
     )
 
     assert markdown_to_mycode(source) == (
@@ -79,7 +83,7 @@ def test_markdown_to_mycode_converts_common_agent_markdown() -> None:
         "[*] two\n"
         "[/list]\n"
         "[quote]quoted[/quote]\n\n"
-        "[code]{\"keep\":\"exact\"}\n[/code]"
+        '[code]{"keep":"exact"}\n[/code]'
     )
 
 

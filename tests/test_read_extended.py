@@ -1,16 +1,11 @@
 from __future__ import annotations
 
 import json
-import sys
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-PRODUCT_ROOT = Path(__file__).resolve().parents[1]
-SRC_PATH = PRODUCT_ROOT / "src"
-if str(SRC_PATH) not in sys.path:
-    sys.path.insert(0, str(SRC_PATH))
 
 from hf_mcp.capabilities import CAPABILITY_PARAMETER_FAMILIES, CapabilityPolicy
 from hf_mcp.config import HFMCPSettings
@@ -31,14 +26,20 @@ from hf_mcp.tools.read_extended import (
 )
 from hf_mcp.transport import HFTransport
 
+PRODUCT_ROOT = Path(__file__).resolve().parents[1]
+SRC_PATH = PRODUCT_ROOT / "src"
+
 
 @pytest.mark.parametrize("output_mode", ["structured", "raw"])
 def test_bratings_handler_uses_generic_route_in_all_output_modes(
-    monkeypatch: pytest.MonkeyPatch, output_mode: str,
+    monkeypatch: pytest.MonkeyPatch,
+    output_mode: str,
 ) -> None:
     calls: list[dict[str, Any]] = []
 
-    def fake_post(self: HFTransport, route: str, payload: dict[str, Any], headers: dict[str, str]) -> dict[str, Any]:
+    def fake_post(
+        self: HFTransport, route: str, payload: dict[str, Any], headers: dict[str, str]
+    ) -> dict[str, Any]:
         calls.append({"route": route, "payload": payload})
         if route != "/read":
             raise RuntimeError("HF helper route failed with HTTP 404")
@@ -50,14 +51,18 @@ def test_bratings_handler_uses_generic_route_in_all_output_modes(
         enabled_parameter_families=set(CAPABILITY_PARAMETER_FAMILIES["bratings.read"]),
     )
     handlers = build_extended_read_handlers(policy, HFTransport(_StubTokenStore()))
-    result = handlers["bratings.read"](uid=5, page=2, per_page=3, output_mode=output_mode)
+    result = handlers["bratings.read"](
+        uid=5, page=2, per_page=3, output_mode=output_mode
+    )
     assert len(calls) == 1
     asks = calls[0]["payload"]["asks"]["bratings"]
     assert asks["_uid"] == 5
     assert asks["_page"] == 2
     assert asks["_perpage"] == 3
     assert asks["contract"] is True
-    assert result["structuredContent"]["bratings"][0]["crid"] == (7 if output_mode == "raw" else "7")
+    assert result["structuredContent"]["bratings"][0]["crid"] == (
+        7 if output_mode == "raw" else "7"
+    )
     if output_mode == "raw":
         raw = json.loads(result["content"][1]["resource"]["text"])
         assert raw["bratings"][0]["crid"] == 7
@@ -68,7 +73,9 @@ class _StubTokenStore:
         return TokenBundle(access_token="token", token_type="Bearer", scope=frozenset())
 
 
-def _policy(*, enabled_capabilities: set[str], enabled_parameter_families: set[str]) -> CapabilityPolicy:
+def _policy(
+    *, enabled_capabilities: set[str], enabled_parameter_families: set[str]
+) -> CapabilityPolicy:
     return CapabilityPolicy(
         HFMCPSettings(
             profile="test",
@@ -78,7 +85,9 @@ def _policy(*, enabled_capabilities: set[str], enabled_parameter_families: set[s
     )
 
 
-def _actions_as_tuples(flow: dict[str, object]) -> set[tuple[str, tuple[tuple[str, int], ...]]]:
+def _actions_as_tuples(
+    flow: dict[str, object],
+) -> set[tuple[str, tuple[tuple[str, int], ...]]]:
     actions = flow.get("next_actions")
     assert isinstance(actions, list)
     normalized: set[tuple[str, tuple[tuple[str, int], ...]]] = set()
@@ -88,7 +97,14 @@ def _actions_as_tuples(flow: dict[str, object]) -> set[tuple[str, tuple[tuple[st
         arguments = action.get("arguments")
         if not isinstance(tool, str) or not isinstance(arguments, dict):
             continue
-        normalized.add((tool, tuple(sorted((str(key), int(value)) for key, value in arguments.items()))))
+        normalized.add(
+            (
+                tool,
+                tuple(
+                    sorted((str(key), int(value)) for key, value in arguments.items())
+                ),
+            )
+        )
     return normalized
 
 
@@ -121,7 +137,10 @@ def test_extended_read_specs_match_registry_rows_and_parameter_families() -> Non
         expected = get_tool_spec(spec.tool_name)
         assert spec.helper_path == expected.helper_path
         if spec.capability_family in CAPABILITY_PARAMETER_FAMILIES:
-            assert set(spec.parameter_families) == CAPABILITY_PARAMETER_FAMILIES[spec.capability_family]
+            assert (
+                set(spec.parameter_families)
+                == CAPABILITY_PARAMETER_FAMILIES[spec.capability_family]
+            )
         else:
             # Admin/high-risk rows are preserved in the matrix even when no capability mapping exists yet.
             assert spec.parameter_families == ("filters.pagination",)
@@ -129,10 +148,20 @@ def test_extended_read_specs_match_registry_rows_and_parameter_families() -> Non
 
 def test_build_extended_handlers_registers_only_policy_allowed_rows() -> None:
     policy = _policy(
-        enabled_capabilities={"bytes.read", "sigmarket.order.read", "admin.high_risk.read"},
-        enabled_parameter_families={"selectors.bytes", "fields.bytes.amount", "selectors.sigmarket"},
+        enabled_capabilities={
+            "bytes.read",
+            "sigmarket.order.read",
+            "admin.high_risk.read",
+        },
+        enabled_parameter_families={
+            "selectors.bytes",
+            "fields.bytes.amount",
+            "selectors.sigmarket",
+        },
     )
-    transport = HFTransport(token_store=_StubTokenStore(), base_url="https://example.test")
+    transport = HFTransport(
+        token_store=_StubTokenStore(), base_url="https://example.test"
+    )
 
     handlers = build_extended_read_handlers(policy, transport)
 
@@ -185,7 +214,9 @@ def test_extended_handlers_accept_schema_surface_selector_names(
             "fields.bytes.amount",
         },
     )
-    transport = HFTransport(token_store=_StubTokenStore(), base_url="https://example.test")
+    transport = HFTransport(
+        token_store=_StubTokenStore(), base_url="https://example.test"
+    )
 
     handlers = build_extended_read_handlers(policy, transport)
 
@@ -195,7 +226,9 @@ def test_extended_handlers_accept_schema_surface_selector_names(
         structured_content=result["structuredContent"],
         expected_payload={response_key: []},
     )
-    assert result["content"] == [{"type": "text", "text": f"{tool_name} returned 0 row(s)."}]
+    assert result["content"] == [
+        {"type": "text", "text": f"{tool_name} returned 0 row(s)."}
+    ]
 
 
 @pytest.mark.parametrize(
@@ -240,7 +273,9 @@ def test_extended_handlers_keep_legacy_selector_aliases_for_compatibility(
             "filters.pagination",
         },
     )
-    transport = HFTransport(token_store=_StubTokenStore(), base_url="https://example.test")
+    transport = HFTransport(
+        token_store=_StubTokenStore(), base_url="https://example.test"
+    )
 
     handlers = build_extended_read_handlers(policy, transport)
 
@@ -250,13 +285,19 @@ def test_extended_handlers_keep_legacy_selector_aliases_for_compatibility(
         structured_content=result["structuredContent"],
         expected_payload={response_key: []},
     )
-    assert result["content"] == [{"type": "text", "text": f"{tool_name} returned 0 row(s)."}]
+    assert result["content"] == [
+        {"type": "text", "text": f"{tool_name} returned 0 row(s)."}
+    ]
 
 
-def test_sigmarket_order_legacy_oid_alias_maps_to_canonical_smid_payload(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_sigmarket_order_legacy_oid_alias_maps_to_canonical_smid_payload(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     captured: dict[str, Any] = {}
 
-    def _fake_read(self: HFTransport, asks: dict[str, Any], helper: str | None = None) -> dict[str, Any]:
+    def _fake_read(
+        self: HFTransport, asks: dict[str, Any], helper: str | None = None
+    ) -> dict[str, Any]:
         captured["asks"] = asks
         captured["helper"] = helper
         return {"sigmarket/order": []}
@@ -266,10 +307,14 @@ def test_sigmarket_order_legacy_oid_alias_maps_to_canonical_smid_payload(monkeyp
     settings = HFMCPSettings(
         profile="test",
         enabled_capabilities=frozenset({"sigmarket.order.read"}),
-        enabled_parameter_families=frozenset({"selectors.sigmarket", "filters.pagination"}),
+        enabled_parameter_families=frozenset(
+            {"selectors.sigmarket", "filters.pagination"}
+        ),
     )
     policy = CapabilityPolicy(settings)
-    transport = HFTransport(token_store=_StubTokenStore(), base_url="https://example.test")
+    transport = HFTransport(
+        token_store=_StubTokenStore(), base_url="https://example.test"
+    )
     handler = build_extended_read_handlers(policy, transport)["sigmarket.order.read"]
 
     result = handler(oid=17)
@@ -300,11 +345,15 @@ def test_registered_sigmarket_order_handler_supports_output_modes_and_raw_payloa
         ]
     }
 
-    def _fake_read(self: HFTransport, asks: dict[str, Any], helper: str | None = None) -> dict[str, Any]:
+    def _fake_read(
+        self: HFTransport, asks: dict[str, Any], helper: str | None = None
+    ) -> dict[str, Any]:
         captured["read"].append({"asks": asks, "helper": helper})
         return read_payload
 
-    def _fake_read_raw(self: HFTransport, asks: dict[str, Any], helper: str | None = None) -> dict[str, Any]:
+    def _fake_read_raw(
+        self: HFTransport, asks: dict[str, Any], helper: str | None = None
+    ) -> dict[str, Any]:
         captured["read_raw"].append({"asks": asks, "helper": helper})
         return raw_payload
 
@@ -314,14 +363,22 @@ def test_registered_sigmarket_order_handler_supports_output_modes_and_raw_payloa
     settings = HFMCPSettings(
         profile="test",
         enabled_capabilities=frozenset({"sigmarket.order.read"}),
-        enabled_parameter_families=frozenset({"selectors.sigmarket", "filters.pagination"}),
-        read_output_defaults=ReadOutputDefaults(mode="structured", include_raw_payload=True),
+        enabled_parameter_families=frozenset(
+            {"selectors.sigmarket", "filters.pagination"}
+        ),
+        read_output_defaults=ReadOutputDefaults(
+            mode="structured", include_raw_payload=True
+        ),
     )
     policy = CapabilityPolicy(settings)
-    transport = HFTransport(token_store=_StubTokenStore(), base_url="https://example.test")
+    transport = HFTransport(
+        token_store=_StubTokenStore(), base_url="https://example.test"
+    )
     handler = build_extended_read_handlers(policy, transport)["sigmarket.order.read"]
 
-    readable_result = handler(smid=17, output_mode="readable", include_raw_payload=False)
+    readable_result = handler(
+        smid=17, output_mode="readable", include_raw_payload=False
+    )
     _assert_structured_payload_with_flow(
         tool_name="sigmarket.order.read",
         structured_content=readable_result["structuredContent"],
@@ -334,13 +391,17 @@ def test_registered_sigmarket_order_handler_supports_output_modes_and_raw_payloa
     assert "amount=8" in readable_result["content"][0]["text"]
     assert len(readable_result["content"]) == 1
 
-    structured_result = handler(smid=17, output_mode="structured", include_raw_payload=False)
+    structured_result = handler(
+        smid=17, output_mode="structured", include_raw_payload=False
+    )
     _assert_structured_payload_with_flow(
         tool_name="sigmarket.order.read",
         structured_content=structured_result["structuredContent"],
         expected_payload=normalize_extended_payload(read_payload),
     )
-    assert structured_result["content"] == [{"type": "text", "text": "sigmarket.order.read returned 2 row(s)."}]
+    assert structured_result["content"] == [
+        {"type": "text", "text": "sigmarket.order.read returned 2 row(s)."}
+    ]
 
     raw_result = handler(smid=17, output_mode="raw", include_raw_payload=False)
     _assert_structured_payload_with_flow(
@@ -348,22 +409,37 @@ def test_registered_sigmarket_order_handler_supports_output_modes_and_raw_payloa
         structured_content=raw_result["structuredContent"],
         expected_payload=normalize_extended_payload(raw_payload),
     )
-    assert raw_result["content"][0] == {"type": "text", "text": "sigmarket.order.read returned 2 row(s)."}
+    assert raw_result["content"][0] == {
+        "type": "text",
+        "text": "sigmarket.order.read returned 2 row(s).",
+    }
     assert raw_result["content"][1]["type"] == "resource"
-    assert raw_result["content"][1]["resource"]["uri"] == "hf-mcp://raw/sigmarket.order.read"
+    assert (
+        raw_result["content"][1]["resource"]["uri"]
+        == "hf-mcp://raw/sigmarket.order.read"
+    )
     assert raw_result["content"][1]["resource"]["mimeType"] == "application/json"
     assert json.loads(raw_result["content"][1]["resource"]["text"]) == raw_payload
-    assert json.loads(raw_result["content"][1]["resource"]["text"])["sigmarket/order"][0]["smid"] == "3"
+    assert (
+        json.loads(raw_result["content"][1]["resource"]["text"])["sigmarket/order"][0][
+            "smid"
+        ]
+        == "3"
+    )
     assert raw_result["structuredContent"]["sigmarket/order"][0]["smid"] == "12"
 
-    readable_with_raw = handler(smid=17, output_mode="readable", include_raw_payload=True)
+    readable_with_raw = handler(
+        smid=17, output_mode="readable", include_raw_payload=True
+    )
     _assert_structured_payload_with_flow(
         tool_name="sigmarket.order.read",
         structured_content=readable_with_raw["structuredContent"],
         expected_payload=normalize_extended_payload(raw_payload),
     )
     assert readable_with_raw["content"][1]["type"] == "resource"
-    assert json.loads(readable_with_raw["content"][1]["resource"]["text"]) == raw_payload
+    assert (
+        json.loads(readable_with_raw["content"][1]["resource"]["text"]) == raw_payload
+    )
 
     defaults_result = handler(smid=17)
     _assert_structured_payload_with_flow(
@@ -371,7 +447,10 @@ def test_registered_sigmarket_order_handler_supports_output_modes_and_raw_payloa
         structured_content=defaults_result["structuredContent"],
         expected_payload=normalize_extended_payload(raw_payload),
     )
-    assert defaults_result["content"][0] == {"type": "text", "text": "sigmarket.order.read returned 2 row(s)."}
+    assert defaults_result["content"][0] == {
+        "type": "text",
+        "text": "sigmarket.order.read returned 2 row(s).",
+    }
     assert defaults_result["content"][1]["type"] == "resource"
     assert json.loads(defaults_result["content"][1]["resource"]["text"]) == raw_payload
 
@@ -379,8 +458,12 @@ def test_registered_sigmarket_order_handler_supports_output_modes_and_raw_payloa
     assert len(captured["read_raw"]) == 3
     assert all(call["helper"] == "sigmarket/order" for call in captured["read"])
     assert all(call["helper"] == "sigmarket/order" for call in captured["read_raw"])
-    assert all(call["asks"]["sigmarket/order"]["_smid"] == 17 for call in captured["read"])
-    assert all(call["asks"]["sigmarket/order"]["_smid"] == 17 for call in captured["read_raw"])
+    assert all(
+        call["asks"]["sigmarket/order"]["_smid"] == 17 for call in captured["read"]
+    )
+    assert all(
+        call["asks"]["sigmarket/order"]["_smid"] == 17 for call in captured["read_raw"]
+    )
 
 
 @pytest.mark.parametrize(
@@ -389,7 +472,17 @@ def test_registered_sigmarket_order_handler_supports_output_modes_and_raw_payloa
         (
             "contracts.read",
             {"cid": 7},
-            {"contracts": [{"cid": "7", "tid": "1234", "inituid": "99", "otheruid": "77", "idispute": "11"}]},
+            {
+                "contracts": [
+                    {
+                        "cid": "7",
+                        "tid": "1234",
+                        "inituid": "99",
+                        "otheruid": "77",
+                        "idispute": "11",
+                    }
+                ]
+            },
             {
                 ("disputes.read", (("cid", 7),)),
                 ("threads.read", (("tid", 1234),)),
@@ -400,7 +493,16 @@ def test_registered_sigmarket_order_handler_supports_output_modes_and_raw_payloa
         (
             "disputes.read",
             {"cdid": 11},
-            {"disputes": [{"cdid": "11", "contractid": "7", "claimantuid": "99", "dispute_tid": "4321"}]},
+            {
+                "disputes": [
+                    {
+                        "cdid": "11",
+                        "contractid": "7",
+                        "claimantuid": "99",
+                        "dispute_tid": "4321",
+                    }
+                ]
+            },
             {
                 ("contracts.read", (("cid", 7),)),
                 ("threads.read", (("tid", 4321),)),
@@ -410,7 +512,11 @@ def test_registered_sigmarket_order_handler_supports_output_modes_and_raw_payloa
         (
             "bratings.read",
             {"crid": 31},
-            {"bratings": [{"crid": "31", "contractid": "7", "fromid": "101", "toid": "202"}]},
+            {
+                "bratings": [
+                    {"crid": "31", "contractid": "7", "fromid": "101", "toid": "202"}
+                ]
+            },
             {
                 ("contracts.read", (("cid", 7),)),
                 ("users.read", (("uid", 101),)),
@@ -447,7 +553,9 @@ def test_extended_handlers_emit_hf_flow_with_expected_pivots(
     response_payload: dict[str, Any],
     expected_actions: set[tuple[str, tuple[tuple[str, int], ...]]],
 ) -> None:
-    def _fake_read(self: HFTransport, asks: dict[str, Any], helper: str | None = None) -> dict[str, Any]:
+    def _fake_read(
+        self: HFTransport, asks: dict[str, Any], helper: str | None = None
+    ) -> dict[str, Any]:
         del asks
         del helper
         return response_payload
@@ -469,7 +577,9 @@ def test_extended_handlers_emit_hf_flow_with_expected_pivots(
             "filters.pagination",
         },
     )
-    transport = HFTransport(token_store=_StubTokenStore(), base_url="https://example.test")
+    transport = HFTransport(
+        token_store=_StubTokenStore(), base_url="https://example.test"
+    )
     handler = build_extended_read_handlers(policy, transport)[tool_name]
 
     result = handler(**kwargs)
@@ -480,7 +590,9 @@ def test_extended_handlers_emit_hf_flow_with_expected_pivots(
     assert expected_actions <= _actions_as_tuples(flow)
 
 
-def test_admin_high_risk_read_result_does_not_emit_hf_flow_until_flow_is_designed() -> None:
+def test_admin_high_risk_read_result_does_not_emit_hf_flow_until_flow_is_designed() -> (
+    None
+):
     result = _build_read_tool_result(
         tool_name="admin.high_risk.read",
         normalized_payload={"admin/high-risk/read": [{"uid": "7", "risk_score": "99"}]},
@@ -491,12 +603,18 @@ def test_admin_high_risk_read_result_does_not_emit_hf_flow_until_flow_is_designe
         source="admin/high-risk/read",
     )
 
-    assert result["structuredContent"] == {"admin/high-risk/read": [{"uid": "7", "risk_score": "99"}]}
+    assert result["structuredContent"] == {
+        "admin/high-risk/read": [{"uid": "7", "risk_score": "99"}]
+    }
     assert "_hf_flow" not in result["structuredContent"]
 
 
-def test_readable_summary_omits_dispute_free_text_notes(monkeypatch: pytest.MonkeyPatch) -> None:
-    def _fake_read(self: HFTransport, asks: dict[str, Any], helper: str | None = None) -> dict[str, Any]:
+def test_readable_summary_omits_dispute_free_text_notes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def _fake_read(
+        self: HFTransport, asks: dict[str, Any], helper: str | None = None
+    ) -> dict[str, Any]:
         return {
             "disputes": [
                 {
@@ -513,11 +631,15 @@ def test_readable_summary_omits_dispute_free_text_notes(monkeypatch: pytest.Monk
     settings = HFMCPSettings(
         profile="test",
         enabled_capabilities=frozenset({"disputes.read"}),
-        enabled_parameter_families=frozenset({"selectors.dispute", "filters.pagination"}),
+        enabled_parameter_families=frozenset(
+            {"selectors.dispute", "filters.pagination"}
+        ),
         read_output_defaults=ReadOutputDefaults(mode="readable"),
     )
     policy = CapabilityPolicy(settings)
-    transport = HFTransport(token_store=_StubTokenStore(), base_url="https://example.test")
+    transport = HFTransport(
+        token_store=_StubTokenStore(), base_url="https://example.test"
+    )
     handler = build_extended_read_handlers(policy, transport)["disputes.read"]
 
     result = handler(cdid=11)
@@ -544,7 +666,9 @@ def test_extended_handlers_fail_closed_for_conflicting_dispute_selector_aliases(
         payload: dict[str, Any],
         headers: dict[str, str],
     ) -> dict[str, Any]:
-        pytest.fail("conflicting dispute selector aliases should fail closed before transport is called")
+        pytest.fail(
+            "conflicting dispute selector aliases should fail closed before transport is called"
+        )
 
     monkeypatch.setattr(HFTransport, "_post_json", _fake_post_json)
 
@@ -552,11 +676,15 @@ def test_extended_handlers_fail_closed_for_conflicting_dispute_selector_aliases(
         enabled_capabilities={"disputes.read"},
         enabled_parameter_families={"selectors.dispute", "filters.pagination"},
     )
-    transport = HFTransport(token_store=_StubTokenStore(), base_url="https://example.test")
+    transport = HFTransport(
+        token_store=_StubTokenStore(), base_url="https://example.test"
+    )
 
     handlers = build_extended_read_handlers(policy, transport)
 
-    with pytest.raises(TypeError, match="Conflicting selector values for 'disputes.read'"):
+    with pytest.raises(
+        TypeError, match="Conflicting selector values for 'disputes.read'"
+    ):
         handlers["disputes.read"](**kwargs)
 
 
@@ -578,7 +706,9 @@ def test_extended_handlers_fail_closed_for_sigmarket_legacy_listing_alias(
         payload: dict[str, Any],
         headers: dict[str, str],
     ) -> dict[str, Any]:
-        pytest.fail("sigmarket legacy alias should fail closed before transport is called")
+        pytest.fail(
+            "sigmarket legacy alias should fail closed before transport is called"
+        )
 
     monkeypatch.setattr(HFTransport, "_post_json", _fake_post_json)
 
@@ -592,7 +722,9 @@ def test_extended_handlers_fail_closed_for_sigmarket_legacy_listing_alias(
             "filters.pagination",
         },
     )
-    transport = HFTransport(token_store=_StubTokenStore(), base_url="https://example.test")
+    transport = HFTransport(
+        token_store=_StubTokenStore(), base_url="https://example.test"
+    )
 
     handlers = build_extended_read_handlers(policy, transport)
 
@@ -618,7 +750,9 @@ def test_list_entries_delegates_to_bytes_helper_and_coerces_amount(
 
     monkeypatch.setattr(HFTransport, "_post_json", _fake_post_json)
 
-    transport = HFTransport(token_store=_StubTokenStore(), base_url="https://example.test")
+    transport = HFTransport(
+        token_store=_StubTokenStore(), base_url="https://example.test"
+    )
     result = list_entries(
         transport=transport,
         id=7,
@@ -677,7 +811,9 @@ def test_list_bratings_uses_conservative_starter_bundle_and_preserves_mapping_ro
 
     monkeypatch.setattr(HFTransport, "_post_json", _fake_post_json)
 
-    transport = HFTransport(token_store=_StubTokenStore(), base_url="https://example.test")
+    transport = HFTransport(
+        token_store=_StubTokenStore(), base_url="https://example.test"
+    )
     result = list_bratings(transport=transport, uid=202, page=2, per_page=3)
 
     assert captured["route"] == "/read"
@@ -718,7 +854,9 @@ def test_list_bratings_supports_canonical_selectors_and_optional_expansions(
 
     monkeypatch.setattr(HFTransport, "_post_json", _fake_post_json)
 
-    transport = HFTransport(token_store=_StubTokenStore(), base_url="https://example.test")
+    transport = HFTransport(
+        token_store=_StubTokenStore(), base_url="https://example.test"
+    )
     result = list_bratings(
         transport=transport,
         crid=77,
@@ -781,7 +919,18 @@ def test_list_bratings_supports_canonical_selectors_and_optional_expansions(
                     }
                 ]
             },
-            {"_page": 2, "_perpage": 3, "_cid": 7, "_uid": 99, "inituser": True, "otheruser": True, "escrow": True, "thread": True, "ibrating": True, "obrating": True},
+            {
+                "_page": 2,
+                "_perpage": 3,
+                "_cid": 7,
+                "_uid": 99,
+                "inituser": True,
+                "otheruser": True,
+                "escrow": True,
+                "thread": True,
+                "ibrating": True,
+                "obrating": True,
+            },
         ),
         (
             "disputes",
@@ -851,7 +1000,9 @@ def test_contracts_and_disputes_use_conservative_starter_asks_and_preserve_mappi
 
     monkeypatch.setattr(HFTransport, "_post_json", _fake_post_json)
 
-    transport = HFTransport(token_store=_StubTokenStore(), base_url="https://example.test")
+    transport = HFTransport(
+        token_store=_StubTokenStore(), base_url="https://example.test"
+    )
     if tool_name == "contracts":
         result = list_contracts(transport=transport, **call_kwargs)
     else:
@@ -951,7 +1102,14 @@ def test_contracts_and_disputes_use_conservative_starter_asks_and_preserve_mappi
         ),
         (
             "sigmarket/order",
-            {"smid": 17, "uid": 2047020, "seller": 1, "buyer": 2047020, "page": 1, "per_page": 3},
+            {
+                "smid": 17,
+                "uid": 2047020,
+                "seller": 1,
+                "buyer": 2047020,
+                "page": 1,
+                "per_page": 3,
+            },
             {
                 "sigmarket/order": [
                     {
@@ -1007,7 +1165,9 @@ def test_sigmarket_market_and_order_use_docs_backed_asks_and_preserve_mapping_ro
 
     monkeypatch.setattr(HFTransport, "_post_json", _fake_post_json)
 
-    transport = HFTransport(token_store=_StubTokenStore(), base_url="https://example.test")
+    transport = HFTransport(
+        token_store=_StubTokenStore(), base_url="https://example.test"
+    )
     if tool_name == "sigmarket/market":
         result = list_market(transport=transport, **call_kwargs)
     else:
@@ -1026,8 +1186,16 @@ def test_sigmarket_market_and_order_use_docs_backed_asks_and_preserve_mapping_ro
 def test_shared_normalizers_handle_avatar_groups_and_ordering() -> None:
     payload = {
         "bratings": [
-            {"uid": "7", "avatar": "/uploads/avatars/a.png", "additionalgroups": "2, 4, ,6"},
-            {"uid": "3", "avatar": "https://cdn.example/avatar.png", "additionalgroups": ""},
+            {
+                "uid": "7",
+                "avatar": "/uploads/avatars/a.png",
+                "additionalgroups": "2, 4, ,6",
+            },
+            {
+                "uid": "3",
+                "avatar": "https://cdn.example/avatar.png",
+                "additionalgroups": "",
+            },
         ],
         "sigmarket/order": [
             {"smid": "3", "subject": "older"},
@@ -1038,7 +1206,10 @@ def test_shared_normalizers_handle_avatar_groups_and_ordering() -> None:
 
     result = normalize_extended_payload(payload)
 
-    assert result["bratings"][0]["avatar"] == "https://hackforums.net/uploads/avatars/a.png"
+    assert (
+        result["bratings"][0]["avatar"]
+        == "https://hackforums.net/uploads/avatars/a.png"
+    )
     assert result["bratings"][0]["additionalgroups"] == ["2", "4", "6"]
     assert result["bratings"][1]["avatar"] == "https://cdn.example/avatar.png"
     assert result["bratings"][1]["additionalgroups"] == []
@@ -1058,7 +1229,9 @@ def test_list_orders_preserves_missing_advanced_fields_without_injecting_values(
 
     monkeypatch.setattr(HFTransport, "_post_json", _fake_post_json)
 
-    transport = HFTransport(token_store=_StubTokenStore(), base_url="https://example.test")
+    transport = HFTransport(
+        token_store=_StubTokenStore(), base_url="https://example.test"
+    )
     result = list_orders(transport=transport, smid=5, uid=11, page=1, per_page=5)
 
     assert result["sigmarket/order"] == [{"smid": "5", "subject": "single-row"}]
@@ -1083,11 +1256,15 @@ def test_list_admin_high_risk_uses_expected_helper_route_and_returns_plain_norma
 
     monkeypatch.setattr(HFTransport, "_post_json", _fake_post_json)
 
-    transport = HFTransport(token_store=_StubTokenStore(), base_url="https://example.test")
+    transport = HFTransport(
+        token_store=_StubTokenStore(), base_url="https://example.test"
+    )
     result = list_admin_high_risk(transport=transport, page=2, per_page=9)
 
     assert captured["route"] == "/read/admin/high-risk/read"
-    assert captured["payload"]["asks"] == {"admin/high-risk/read": {"_page": 2, "_perpage": 9}}
+    assert captured["payload"]["asks"] == {
+        "admin/high-risk/read": {"_page": 2, "_perpage": 9}
+    }
     assert captured["headers"]["Authorization"] == "Bearer token"
     assert result == {"admin/high-risk/read": [{"uid": "7", "risk_score": "99"}]}
     assert "content" not in result

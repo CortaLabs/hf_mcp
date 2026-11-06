@@ -10,19 +10,37 @@ MessageFormat = Literal["mycode", "markdown"]
 
 _VALID_BODY_FORMATS: frozenset[str] = frozenset({"raw", "clean", "markdown"})
 _VALID_MESSAGE_FORMATS: frozenset[str] = frozenset({"mycode", "markdown"})
-_CODE_BLOCK_PATTERN = re.compile(r"\[(code|php)\](.*?)\[/\1\]", re.IGNORECASE | re.DOTALL)
-_MARKDOWN_CODE_BLOCK_PATTERN = re.compile(r"```(?:[a-zA-Z0-9_-]+)?\n?(.*?)```", re.DOTALL)
+_CODE_BLOCK_PATTERN = re.compile(
+    r"\[(code|php)\](.*?)\[/\1\]", re.IGNORECASE | re.DOTALL
+)
+_MARKDOWN_CODE_BLOCK_PATTERN = re.compile(
+    r"```(?:[a-zA-Z0-9_-]+)?\n?(.*?)```", re.DOTALL
+)
 _MARKDOWN_IMAGE_PATTERN = re.compile(r"!\[[^\]]*\]\(([^)\s]+)\)")
 _MARKDOWN_LINK_PATTERN = re.compile(r"(?<!!)\[([^\]]+)\]\(([^)\s]+)\)")
 _MARKDOWN_INLINE_CODE_PATTERN = re.compile(r"`([^`\n]+)`")
-_MARKDOWN_ASTERISK_EMPHASIS_PATTERN = re.compile(r"(?<![\w*])\*(?![\s*])(.+?)(?<![\s*])\*(?![\w*])", re.DOTALL)
-_MARKDOWN_UNDERSCORE_EMPHASIS_PATTERN = re.compile(r"(?<![\w_])_(?![\s_])(.+?)(?<![\s_])_(?![\w_])", re.DOTALL)
-_QUOTE_PATTERN = re.compile(r"\[quote(?P<attrs>[^\]]*)\](?P<body>.*?)\[/quote\]", re.IGNORECASE | re.DOTALL)
-_LIST_PATTERN = re.compile(r"\[list(?:=[^\]]*)?\](?P<body>.*?)\[/list\]", re.IGNORECASE | re.DOTALL)
-_URL_WITH_TARGET_PATTERN = re.compile(r"\[url=(?P<url>[^\]]+)\](?P<body>.*?)\[/url\]", re.IGNORECASE | re.DOTALL)
+_MARKDOWN_ASTERISK_EMPHASIS_PATTERN = re.compile(
+    r"(?<![\w*])\*(?![\s*])(.+?)(?<![\s*])\*(?![\w*])", re.DOTALL
+)
+_MARKDOWN_UNDERSCORE_EMPHASIS_PATTERN = re.compile(
+    r"(?<![\w_])_(?![\s_])(.+?)(?<![\s_])_(?![\w_])", re.DOTALL
+)
+_QUOTE_PATTERN = re.compile(
+    r"\[quote(?P<attrs>[^\]]*)\](?P<body>.*?)\[/quote\]", re.IGNORECASE | re.DOTALL
+)
+_LIST_PATTERN = re.compile(
+    r"\[list(?:=[^\]]*)?\](?P<body>.*?)\[/list\]", re.IGNORECASE | re.DOTALL
+)
+_URL_WITH_TARGET_PATTERN = re.compile(
+    r"\[url=(?P<url>[^\]]+)\](?P<body>.*?)\[/url\]", re.IGNORECASE | re.DOTALL
+)
 _URL_PATTERN = re.compile(r"\[url\](?P<url>.*?)\[/url\]", re.IGNORECASE | re.DOTALL)
-_IMAGE_PATTERN = re.compile(r"\[(?:img|uimg)\](?P<url>.*?)\[/\s*(?:img|uimg)\]", re.IGNORECASE | re.DOTALL)
-_UNKNOWN_TAG_PATTERN = re.compile(r"\[/?[a-zA-Z][a-zA-Z0-9_-]*(?:=[^\]]*)?\](?!\()|\[\*\]", re.DOTALL)
+_IMAGE_PATTERN = re.compile(
+    r"\[(?:img|uimg)\](?P<url>.*?)\[/\s*(?:img|uimg)\]", re.IGNORECASE | re.DOTALL
+)
+_UNKNOWN_TAG_PATTERN = re.compile(
+    r"\[/?[a-zA-Z][a-zA-Z0-9_-]*(?:=[^\]]*)?\](?!\()|\[\*\]", re.DOTALL
+)
 _DOUBLE_QUOTE_ENTITY_PATTERN = re.compile(r"&(quot|#34|#x22);", re.IGNORECASE)
 
 
@@ -117,8 +135,12 @@ def markdown_to_mycode(value: str) -> str:
 
     text = _MARKDOWN_CODE_BLOCK_PATTERN.sub(_stash_code_block, value)
     text = _MARKDOWN_INLINE_CODE_PATTERN.sub(_stash_inline_code, text)
-    text = _MARKDOWN_IMAGE_PATTERN.sub(lambda match: f"[img]{match.group(1)}[/img]", text)
-    text = _MARKDOWN_LINK_PATTERN.sub(lambda match: f"[url={match.group(2)}]{match.group(1)}[/url]", text)
+    text = _MARKDOWN_IMAGE_PATTERN.sub(
+        lambda match: f"[img]{match.group(1)}[/img]", text
+    )
+    text = _MARKDOWN_LINK_PATTERN.sub(
+        lambda match: f"[url={match.group(2)}]{match.group(1)}[/url]", text
+    )
     text = re.sub(r"\*\*(.+?)\*\*", r"[b]\1[/b]", text, flags=re.DOTALL)
     text = re.sub(r"__(.+?)__", r"[b]\1[/b]", text, flags=re.DOTALL)
     text = re.sub(r"~~(.+?)~~", r"[s]\1[/s]", text, flags=re.DOTALL)
@@ -222,7 +244,9 @@ def _apply_tag_rules(text: str, body_format: BodyFormat) -> str:
             re.IGNORECASE | re.DOTALL,
         )
         for _ in range(20):
-            updated = pattern.sub(lambda match: _render_rule(rule, match.group(1), body_format), text)
+            updated = pattern.sub(
+                lambda match: _render_rule(rule, match.group(1), body_format), text
+            )
             if updated == text:
                 break
             text = updated
@@ -273,7 +297,9 @@ def _convert_markdown_lists(text: str) -> str:
     def _flush_list() -> None:
         if not list_items:
             return
-        converted.append("[list]\n" + "\n".join(f"[*] {item}" for item in list_items) + "\n[/list]")
+        converted.append(
+            "[list]\n" + "\n".join(f"[*] {item}" for item in list_items) + "\n[/list]"
+        )
         list_items.clear()
 
     for line in lines:

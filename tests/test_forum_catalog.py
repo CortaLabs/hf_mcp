@@ -1,19 +1,17 @@
 from __future__ import annotations
 
 import json
-import sys
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-PRODUCT_ROOT = Path(__file__).resolve().parents[1]
-SRC_PATH = PRODUCT_ROOT / "src"
-if str(SRC_PATH) not in sys.path:
-    sys.path.insert(0, str(SRC_PATH))
 
 from hf_mcp import forum_catalog
 from hf_mcp.forum_catalog import build_forum_index_payload, load_forum_catalog
+
+PRODUCT_ROOT = Path(__file__).resolve().parents[1]
+SRC_PATH = PRODUCT_ROOT / "src"
 
 
 class _FakeCatalogResource:
@@ -34,8 +32,12 @@ class _FakePackageRoot:
         return _FakeCatalogResource(json.dumps(self._payload))
 
 
-def _patch_catalog_payload(monkeypatch: pytest.MonkeyPatch, payload: dict[str, Any]) -> None:
-    monkeypatch.setattr(forum_catalog, "files", lambda _package: _FakePackageRoot(payload))
+def _patch_catalog_payload(
+    monkeypatch: pytest.MonkeyPatch, payload: dict[str, Any]
+) -> None:
+    monkeypatch.setattr(
+        forum_catalog, "files", lambda _package: _FakePackageRoot(payload)
+    )
 
 
 def test_load_forum_catalog_returns_valid_nodes() -> None:
@@ -83,7 +85,13 @@ def test_build_forum_index_payload_include_inactive_true_retains_inactive_nodes(
         {
             "nodes": [
                 {"fid": 2, "name": "A", "is_category": True, "active": True},
-                {"fid": 3, "name": "B", "parent_fid": 2, "category_fid": 2, "active": False},
+                {
+                    "fid": 3,
+                    "name": "B",
+                    "parent_fid": 2,
+                    "category_fid": 2,
+                    "active": False,
+                },
             ]
         },
     )
@@ -96,7 +104,9 @@ def test_build_forum_index_payload_include_inactive_true_retains_inactive_nodes(
     assert 3 in fids
 
 
-def test_load_forum_catalog_rejects_duplicate_fid(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_load_forum_catalog_rejects_duplicate_fid(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     _patch_catalog_payload(
         monkeypatch,
         {
@@ -111,7 +121,9 @@ def test_load_forum_catalog_rejects_duplicate_fid(monkeypatch: pytest.MonkeyPatc
         load_forum_catalog()
 
 
-def test_load_forum_catalog_rejects_invalid_parent_reference(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_load_forum_catalog_rejects_invalid_parent_reference(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     _patch_catalog_payload(
         monkeypatch,
         {
@@ -126,7 +138,9 @@ def test_load_forum_catalog_rejects_invalid_parent_reference(monkeypatch: pytest
         load_forum_catalog()
 
 
-def test_load_forum_catalog_rejects_invalid_category_reference(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_load_forum_catalog_rejects_invalid_category_reference(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     _patch_catalog_payload(
         monkeypatch,
         {
@@ -141,7 +155,9 @@ def test_load_forum_catalog_rejects_invalid_category_reference(monkeypatch: pyte
         load_forum_catalog()
 
 
-def test_load_forum_catalog_rejects_missing_name(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_load_forum_catalog_rejects_missing_name(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     _patch_catalog_payload(monkeypatch, {"nodes": [{"fid": 2, "active": True}]})
 
     with pytest.raises(ValueError, match="non-empty `name`"):

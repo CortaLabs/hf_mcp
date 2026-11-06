@@ -46,7 +46,9 @@ def _tool_description(tool_name: str, operation: str) -> str:
     return get_tool_spec(tool_name).description
 
 
-def _shape_live_input_schema(tool_name: str, input_schema: dict[str, object], handler: Any) -> dict[str, object]:
+def _shape_live_input_schema(
+    tool_name: str, input_schema: dict[str, object], handler: Any
+) -> dict[str, object]:
     properties = input_schema.get("properties")
     if not isinstance(properties, dict):
         return input_schema
@@ -73,7 +75,11 @@ def _shape_live_input_schema(tool_name: str, input_schema: dict[str, object], ha
     schema["properties"] = shaped_properties
     required_values = schema.get("required")
     if isinstance(required_values, list):
-        required = [value for value in required_values if isinstance(value, str) and value in shaped_properties]
+        required = [
+            value
+            for value in required_values
+            if isinstance(value, str) and value in shaped_properties
+        ]
         if required:
             schema["required"] = required
         else:
@@ -106,8 +112,14 @@ def _register_via_register_tool(
     return True
 
 
-def register_tools(server: Any, policy: CapabilityPolicy, runtime: RuntimeBundle) -> None:
-    draft_dir = runtime.settings.draft_dir if runtime.settings is not None else DEFAULT_DRAFT_DIR
+def register_tools(
+    server: Any, policy: CapabilityPolicy, runtime: RuntimeBundle
+) -> None:
+    draft_dir = (
+        runtime.settings.draft_dir
+        if runtime.settings is not None
+        else DEFAULT_DRAFT_DIR
+    )
     concrete_handlers: dict[str, Any] = build_formatting_handlers(draft_dir=draft_dir)
     concrete_handlers.update(build_draft_handlers(draft_dir=draft_dir))
     concrete_handlers.update(build_forum_index_handlers())
@@ -116,13 +128,17 @@ def register_tools(server: Any, policy: CapabilityPolicy, runtime: RuntimeBundle
     if isinstance(transport, HFTransport):
         concrete_handlers.update(build_core_read_handlers(policy, transport))
         concrete_handlers.update(build_extended_read_handlers(policy, transport))
-        concrete_handlers.update(build_write_handlers(policy, transport, draft_dir=draft_dir))
+        concrete_handlers.update(
+            build_write_handlers(policy, transport, draft_dir=draft_dir)
+        )
 
     for spec in get_tool_specs(policy):
         handler = concrete_handlers.get(spec.tool_name)
         if handler is None:
             continue
-        schema = _shape_live_input_schema(spec.tool_name, build_tool_schema(spec, policy), handler)
+        schema = _shape_live_input_schema(
+            spec.tool_name, build_tool_schema(spec, policy), handler
+        )
         output_schema = build_tool_output_schema(spec)
         annotations = build_annotations(spec)
         registered = _register_via_register_tool(
@@ -135,7 +151,9 @@ def register_tools(server: Any, policy: CapabilityPolicy, runtime: RuntimeBundle
             handler=handler,
         )
         if not registered:
-            raise TypeError("Server does not expose a compatible register_tool(name=..., ...) API.")
+            raise TypeError(
+                "Server does not expose a compatible register_tool(name=..., ...) API."
+            )
 
 
 __all__ = ["RuntimeBundle", "register_tools", "resolve_runtime_bundle"]

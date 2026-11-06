@@ -99,7 +99,9 @@ UNVERIFIED_WRITE_CAPABILITIES: frozenset[str] = frozenset(
     }
 )
 
-VERIFIED_CONCRETE_CAPABILITIES: frozenset[str] = ALL_CAPABILITIES - UNVERIFIED_WRITE_CAPABILITIES
+VERIFIED_CONCRETE_CAPABILITIES: frozenset[str] = (
+    ALL_CAPABILITIES - UNVERIFIED_WRITE_CAPABILITIES
+)
 VERIFIED_CONCRETE_PARAMETER_FAMILIES: frozenset[str] = ALL_PARAMETER_FAMILIES
 
 READ_PARAMETER_FAMILIES: frozenset[str] = frozenset(
@@ -150,7 +152,13 @@ PARAMETER_FAMILY_CAPABILITY_PARENTS: dict[str, frozenset[str]] = {
     "selectors.thread": frozenset({"threads.read", "posts.read", "posts.reply"}),
     "selectors.post": frozenset({"posts.read"}),
     "selectors.bytes": frozenset(
-        {"bytes.read", "bytes.transfer", "bytes.deposit", "bytes.withdraw", "bytes.bump"}
+        {
+            "bytes.read",
+            "bytes.transfer",
+            "bytes.deposit",
+            "bytes.withdraw",
+            "bytes.bump",
+        }
     ),
     "selectors.contract": frozenset({"contracts.read", "contracts.write"}),
     "selectors.dispute": frozenset({"disputes.read"}),
@@ -219,33 +227,47 @@ def load_settings(
         valid = ", ".join(sorted(PRESET_CAPABILITIES))
         raise ValueError(f"Unknown profile '{profile}'. Valid profiles: {valid}.")
 
-    enabled_capabilities = _parse_string_set(raw_config.get("enabled_capabilities"), "enabled_capabilities")
+    enabled_capabilities = _parse_string_set(
+        raw_config.get("enabled_capabilities"), "enabled_capabilities"
+    )
     enabled_parameter_families = _parse_string_set(
         raw_config.get("enabled_parameter_families"),
         "enabled_parameter_families",
     )
-    disabled_capabilities = _parse_string_set(raw_config.get("disabled_capabilities"), "disabled_capabilities")
+    disabled_capabilities = _parse_string_set(
+        raw_config.get("disabled_capabilities"), "disabled_capabilities"
+    )
     disabled_parameter_families = _parse_string_set(
         raw_config.get("disabled_parameter_families"),
         "disabled_parameter_families",
     )
 
-    _validate_known_values(enabled_capabilities | disabled_capabilities, ALL_CAPABILITIES, "capability")
+    _validate_known_values(
+        enabled_capabilities | disabled_capabilities, ALL_CAPABILITIES, "capability"
+    )
     _validate_known_values(
         enabled_parameter_families | disabled_parameter_families,
         ALL_PARAMETER_FAMILIES,
         "parameter family",
     )
 
-    resolved_capabilities = (PRESET_CAPABILITIES[profile] | enabled_capabilities) - disabled_capabilities
+    resolved_capabilities = (
+        PRESET_CAPABILITIES[profile] | enabled_capabilities
+    ) - disabled_capabilities
     resolved_parameter_families = (
         PRESET_PARAMETER_FAMILIES[profile] | enabled_parameter_families
     ) - disabled_parameter_families
 
-    _validate_parameter_family_parents(resolved_capabilities, resolved_parameter_families)
-    token_path = _resolve_token_path(raw_config.get("token_path", merged_env.get("HF_MCP_TOKEN_PATH")))
+    _validate_parameter_family_parents(
+        resolved_capabilities, resolved_parameter_families
+    )
+    token_path = _resolve_token_path(
+        raw_config.get("token_path", merged_env.get("HF_MCP_TOKEN_PATH"))
+    )
     draft_dir = _resolve_draft_dir(raw_config.get("draft_dir"), merged_env)
-    read_output_defaults = parse_read_output_defaults(raw_config.get("read_output_defaults"))
+    read_output_defaults = parse_read_output_defaults(
+        raw_config.get("read_output_defaults")
+    )
 
     return HFMCPSettings(
         profile=profile,
@@ -374,7 +396,9 @@ def _parse_string_set(raw_value: object, field_name: str) -> frozenset[str]:
     return frozenset(parsed)
 
 
-def _validate_known_values(values: frozenset[str], known_values: frozenset[str], label: str) -> None:
+def _validate_known_values(
+    values: frozenset[str], known_values: frozenset[str], label: str
+) -> None:
     unknown = values - known_values
     if unknown:
         listed = ", ".join(sorted(unknown))

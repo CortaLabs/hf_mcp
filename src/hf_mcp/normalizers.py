@@ -51,7 +51,9 @@ def normalize_response(payload: dict[str, Any]) -> dict[str, Any]:
     return normalized
 
 
-def format_body_fields(payload: dict[str, Any], body_format: BodyFormat) -> dict[str, Any]:
+def format_body_fields(
+    payload: dict[str, Any], body_format: BodyFormat
+) -> dict[str, Any]:
     if body_format == "raw":
         return payload
     return _format_body_value(payload, body_format)
@@ -91,7 +93,9 @@ def _format_body_value(value: Any, body_format: BodyFormat) -> Any:
     return value
 
 
-def _normalize_endpoint_rows(endpoint: str, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _normalize_endpoint_rows(
+    endpoint: str, rows: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
     normalized_rows = [_normalize_endpoint_row(endpoint, row) for row in rows]
     return _order_endpoint_rows(endpoint, normalized_rows)
 
@@ -103,11 +107,15 @@ def _normalize_endpoint_row(endpoint: str, row: dict[str, Any]) -> dict[str, Any
     if "avatar" in normalized:
         normalized["avatar"] = _normalize_avatar_path(normalized["avatar"])
     if "additionalgroups" in normalized:
-        normalized["additionalgroups"] = _normalize_additional_groups(normalized["additionalgroups"])
+        normalized["additionalgroups"] = _normalize_additional_groups(
+            normalized["additionalgroups"]
+        )
     return normalized
 
 
-def _order_endpoint_rows(endpoint: str, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _order_endpoint_rows(
+    endpoint: str, rows: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
     keys = _ORDERING_KEYS.get(endpoint)
     if not keys:
         return rows
@@ -172,7 +180,9 @@ def normalize_extended_payload(payload: dict[str, Any]) -> dict[str, Any]:
             normalized[endpoint] = _normalize_endpoint_rows(endpoint, [dict(value)])
             continue
         if isinstance(value, list) and all(isinstance(item, Mapping) for item in value):
-            normalized[endpoint] = _normalize_endpoint_rows(endpoint, [dict(item) for item in value])
+            normalized[endpoint] = _normalize_endpoint_rows(
+                endpoint, [dict(item) for item in value]
+            )
             continue
         normalized[endpoint] = value
     return normalized
@@ -198,4 +208,9 @@ def _cap_perpage(value: Any) -> int:
     return min(numeric, MAX_PERPAGE)
 
 
-__all__ = ["format_body_fields", "normalize_asks", "normalize_response", "normalize_extended_payload"]
+__all__ = [
+    "format_body_fields",
+    "normalize_asks",
+    "normalize_response",
+    "normalize_extended_payload",
+]

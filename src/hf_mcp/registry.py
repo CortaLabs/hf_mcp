@@ -29,7 +29,11 @@ class ToolSpec:
     @property
     def description(self) -> str:
         return next(
-            (row.description for row in _MATRIX_ROWS if row.tool_name == self.tool_name),
+            (
+                row.description
+                for row in _MATRIX_ROWS
+                if row.tool_name == self.tool_name
+            ),
             "",
         )
 
@@ -97,7 +101,11 @@ _MATRIX_ROWS: tuple[_MatrixRow, ...] = (
         operation="read",
         helper_path="users",
         transport_kind="helper",
-        parameter_families=("fields.users.profile", "filters.pagination", "selectors.user"),
+        parameter_families=(
+            "fields.users.profile",
+            "filters.pagination",
+            "selectors.user",
+        ),
         description="Read a public user profile by user ID, with optional profile fields, pagination, and readable, structured, or raw output.",
     ),
     _MatrixRow(
@@ -128,7 +136,11 @@ _MATRIX_ROWS: tuple[_MatrixRow, ...] = (
         operation="read",
         helper_path="threads",
         transport_kind="helper",
-        parameter_families=("filters.pagination", "selectors.forum", "selectors.thread"),
+        parameter_families=(
+            "filters.pagination",
+            "selectors.forum",
+            "selectors.thread",
+        ),
         description="Browse threads by forum, thread, or user selector; optionally include first-post content. Supports pagination and readable, structured, or raw output.",
     ),
     _MatrixRow(
@@ -138,7 +150,12 @@ _MATRIX_ROWS: tuple[_MatrixRow, ...] = (
         operation="read",
         helper_path="posts",
         transport_kind="helper",
-        parameter_families=("fields.posts.body", "filters.pagination", "selectors.post", "selectors.thread"),
+        parameter_families=(
+            "fields.posts.body",
+            "filters.pagination",
+            "selectors.post",
+            "selectors.thread",
+        ),
         description="Read posts by thread, post, or user selector; optionally include post bodies. Supports pagination and readable, structured, or raw output.",
     ),
     _MatrixRow(
@@ -373,7 +390,9 @@ def mcp_tool_name(canonical_tool_name: str) -> str:
 
 def _validate_registry(specs: list[ToolSpec]) -> None:
     tool_names = [spec.tool_name for spec in specs]
-    duplicate_tool_names = sorted(name for name in set(tool_names) if tool_names.count(name) > 1)
+    duplicate_tool_names = sorted(
+        name for name in set(tool_names) if tool_names.count(name) > 1
+    )
     if duplicate_tool_names:
         dupes = ", ".join(duplicate_tool_names)
         raise ValueError(f"Duplicate tool_name entries in registry: {dupes}")
@@ -388,7 +407,9 @@ def _validate_registry(specs: list[ToolSpec]) -> None:
 
     coverage_families = [spec.coverage_family for spec in specs]
     duplicate_coverage_families = sorted(
-        family for family in set(coverage_families) if coverage_families.count(family) > 1
+        family
+        for family in set(coverage_families)
+        if coverage_families.count(family) > 1
     )
     if duplicate_coverage_families:
         dupes = ", ".join(duplicate_coverage_families)
@@ -400,7 +421,9 @@ def _validate_registry(specs: list[ToolSpec]) -> None:
     if missing or extras:
         details: list[str] = []
         if missing:
-            details.append(f"Missing documented coverage families: {', '.join(missing)}")
+            details.append(
+                f"Missing documented coverage families: {', '.join(missing)}"
+            )
         if extras:
             details.append(f"Unexpected coverage families: {', '.join(extras)}")
         raise ValueError("; ".join(details))
@@ -420,8 +443,16 @@ def get_tool_spec(tool_name: str) -> ToolSpec:
 
 
 def get_core_read_specs() -> tuple[ToolSpec, ...]:
-    core_families = {"me.read", "users.read", "forums.read", "threads.read", "posts.read"}
-    return tuple(spec for spec in build_registry() if spec.coverage_family in core_families)
+    core_families = {
+        "me.read",
+        "users.read",
+        "forums.read",
+        "threads.read",
+        "posts.read",
+    }
+    return tuple(
+        spec for spec in build_registry() if spec.coverage_family in core_families
+    )
 
 
 def get_extended_read_specs() -> tuple[ToolSpec, ...]:
@@ -434,12 +465,22 @@ def get_extended_read_specs() -> tuple[ToolSpec, ...]:
         "sigmarket.order.read",
         "admin.high_risk.read",
     }
-    return tuple(spec for spec in build_registry() if spec.coverage_family in extended_families)
+    return tuple(
+        spec for spec in build_registry() if spec.coverage_family in extended_families
+    )
 
 
 def get_local_formatting_specs() -> tuple[ToolSpec, ...]:
-    local_families = {"formatting.preflight", "drafts.list", "drafts.read", "drafts.update", "drafts.delete"}
-    return tuple(spec for spec in build_registry() if spec.coverage_family in local_families)
+    local_families = {
+        "formatting.preflight",
+        "drafts.list",
+        "drafts.read",
+        "drafts.update",
+        "drafts.delete",
+    }
+    return tuple(
+        spec for spec in build_registry() if spec.coverage_family in local_families
+    )
 
 
 def get_documented_write_specs() -> tuple[ToolSpec, ...]:
@@ -454,7 +495,8 @@ def get_documented_write_specs() -> tuple[ToolSpec, ...]:
     return tuple(
         spec
         for spec in build_registry()
-        if spec.coverage_family in write_families and has_concrete_handler(spec.tool_name)
+        if spec.coverage_family in write_families
+        and has_concrete_handler(spec.tool_name)
     )
 
 

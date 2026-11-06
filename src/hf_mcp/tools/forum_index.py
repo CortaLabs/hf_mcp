@@ -41,7 +41,9 @@ def _iter_nodes(nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return flattened
 
 
-def _build_summary(*, nodes: list[dict[str, Any]], view: str, include_inactive: bool) -> str:
+def _build_summary(
+    *, nodes: list[dict[str, Any]], view: str, include_inactive: bool
+) -> str:
     flattened_nodes = _iter_nodes(nodes)
     categories = sum(1 for node in flattened_nodes if bool(node.get("is_category")))
     forums = sum(1 for node in flattened_nodes if not bool(node.get("is_category")))

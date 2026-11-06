@@ -22,30 +22,227 @@ pytestmark = [pytest.mark.core, pytest.mark.registry]
 
 
 EXPECTED_FACTS = {
-    "me.read": ("me.read", "me.read", "read", "me", "helper", ("fields.me.advanced", "fields.me.basic", "selectors.user"), "remote"),
-    "users.read": ("users.read", "users.read", "read", "users", "helper", ("fields.users.profile", "filters.pagination", "selectors.user"), "remote"),
-    "forums.index": ("forums.read", "forums.index", "read", None, "generic", (), "local"),
-    "forums.read": ("forums.read", "forums.read", "read", "forums", "helper", ("filters.pagination", "selectors.forum"), "remote"),
-    "threads.read": ("threads.read", "threads.read", "read", "threads", "helper", ("filters.pagination", "selectors.forum", "selectors.thread"), "remote"),
-    "posts.read": ("posts.read", "posts.read", "read", "posts", "helper", ("fields.posts.body", "filters.pagination", "selectors.post", "selectors.thread"), "remote"),
-    "bytes.read": ("bytes.read", "bytes.read", "read", "bytes", "helper", ("fields.bytes.amount", "selectors.bytes"), "remote"),
-    "contracts.read": ("contracts.read", "contracts.read", "read", "contracts", "helper", ("filters.pagination", "selectors.contract"), "remote"),
-    "disputes.read": ("disputes.read", "disputes.read", "read", "disputes", "helper", ("filters.pagination", "selectors.dispute"), "remote"),
-    "bratings.read": ("bratings.read", "bratings.read", "read", "bratings", "helper", ("filters.pagination", "selectors.user"), "remote"),
-    "sigmarket.market.read": ("sigmarket.market.read", "sigmarket.market.read", "read", "sigmarket/market", "helper", ("filters.pagination", "selectors.sigmarket"), "remote"),
-    "sigmarket.order.read": ("sigmarket.order.read", "sigmarket.order.read", "read", "sigmarket/order", "helper", ("filters.pagination", "selectors.sigmarket"), "remote"),
-    "admin.high_risk.read": ("admin.high_risk.read", "admin.high_risk.read", "read", "admin/high-risk/read", "helper", ("filters.pagination",), "remote"),
-    "formatting.preflight": ("formatting.preflight", "formatting.preflight", "read", None, "generic", ("formatting.content",), "local"),
-    "drafts.list": ("formatting.preflight", "drafts.list", "read", None, "generic", ("drafts.filters",), "local"),
-    "drafts.read": ("formatting.preflight", "drafts.read", "read", None, "generic", ("drafts.selector",), "local"),
-    "drafts.update": ("formatting.preflight", "drafts.update", "write", None, "generic", ("drafts.metadata", "drafts.selector"), "local"),
-    "drafts.delete": ("formatting.preflight", "drafts.delete", "write", None, "generic", ("drafts.confirm_delete", "drafts.selector"), "local"),
-    "threads.create": ("threads.create", "threads.create", "write", "threads", "helper", ("confirm.live", "selectors.forum", "writes.content"), "remote"),
-    "posts.reply": ("posts.reply", "posts.reply", "write", "posts", "helper", ("confirm.live", "selectors.thread", "writes.content"), "remote"),
-    "bytes.transfer": ("bytes.transfer", "bytes.transfer", "write", "bytes", "helper", ("confirm.live", "selectors.bytes", "writes.bytes"), "remote"),
-    "bytes.deposit": ("bytes.deposit", "bytes.deposit", "write", "bytes/deposit", "helper", ("confirm.live", "selectors.bytes", "writes.bytes"), "remote"),
-    "bytes.withdraw": ("bytes.withdraw", "bytes.withdraw", "write", "bytes/withdraw", "helper", ("confirm.live", "selectors.bytes", "writes.bytes"), "remote"),
-    "bytes.bump": ("bytes.bump", "bytes.bump", "write", "bytes/bump", "helper", ("confirm.live", "selectors.bytes", "writes.bytes"), "remote"),
+    "me.read": (
+        "me.read",
+        "me.read",
+        "read",
+        "me",
+        "helper",
+        ("fields.me.advanced", "fields.me.basic", "selectors.user"),
+        "remote",
+    ),
+    "users.read": (
+        "users.read",
+        "users.read",
+        "read",
+        "users",
+        "helper",
+        ("fields.users.profile", "filters.pagination", "selectors.user"),
+        "remote",
+    ),
+    "forums.index": (
+        "forums.read",
+        "forums.index",
+        "read",
+        None,
+        "generic",
+        (),
+        "local",
+    ),
+    "forums.read": (
+        "forums.read",
+        "forums.read",
+        "read",
+        "forums",
+        "helper",
+        ("filters.pagination", "selectors.forum"),
+        "remote",
+    ),
+    "threads.read": (
+        "threads.read",
+        "threads.read",
+        "read",
+        "threads",
+        "helper",
+        ("filters.pagination", "selectors.forum", "selectors.thread"),
+        "remote",
+    ),
+    "posts.read": (
+        "posts.read",
+        "posts.read",
+        "read",
+        "posts",
+        "helper",
+        (
+            "fields.posts.body",
+            "filters.pagination",
+            "selectors.post",
+            "selectors.thread",
+        ),
+        "remote",
+    ),
+    "bytes.read": (
+        "bytes.read",
+        "bytes.read",
+        "read",
+        "bytes",
+        "helper",
+        ("fields.bytes.amount", "selectors.bytes"),
+        "remote",
+    ),
+    "contracts.read": (
+        "contracts.read",
+        "contracts.read",
+        "read",
+        "contracts",
+        "helper",
+        ("filters.pagination", "selectors.contract"),
+        "remote",
+    ),
+    "disputes.read": (
+        "disputes.read",
+        "disputes.read",
+        "read",
+        "disputes",
+        "helper",
+        ("filters.pagination", "selectors.dispute"),
+        "remote",
+    ),
+    "bratings.read": (
+        "bratings.read",
+        "bratings.read",
+        "read",
+        "bratings",
+        "helper",
+        ("filters.pagination", "selectors.user"),
+        "remote",
+    ),
+    "sigmarket.market.read": (
+        "sigmarket.market.read",
+        "sigmarket.market.read",
+        "read",
+        "sigmarket/market",
+        "helper",
+        ("filters.pagination", "selectors.sigmarket"),
+        "remote",
+    ),
+    "sigmarket.order.read": (
+        "sigmarket.order.read",
+        "sigmarket.order.read",
+        "read",
+        "sigmarket/order",
+        "helper",
+        ("filters.pagination", "selectors.sigmarket"),
+        "remote",
+    ),
+    "admin.high_risk.read": (
+        "admin.high_risk.read",
+        "admin.high_risk.read",
+        "read",
+        "admin/high-risk/read",
+        "helper",
+        ("filters.pagination",),
+        "remote",
+    ),
+    "formatting.preflight": (
+        "formatting.preflight",
+        "formatting.preflight",
+        "read",
+        None,
+        "generic",
+        ("formatting.content",),
+        "local",
+    ),
+    "drafts.list": (
+        "formatting.preflight",
+        "drafts.list",
+        "read",
+        None,
+        "generic",
+        ("drafts.filters",),
+        "local",
+    ),
+    "drafts.read": (
+        "formatting.preflight",
+        "drafts.read",
+        "read",
+        None,
+        "generic",
+        ("drafts.selector",),
+        "local",
+    ),
+    "drafts.update": (
+        "formatting.preflight",
+        "drafts.update",
+        "write",
+        None,
+        "generic",
+        ("drafts.metadata", "drafts.selector"),
+        "local",
+    ),
+    "drafts.delete": (
+        "formatting.preflight",
+        "drafts.delete",
+        "write",
+        None,
+        "generic",
+        ("drafts.confirm_delete", "drafts.selector"),
+        "local",
+    ),
+    "threads.create": (
+        "threads.create",
+        "threads.create",
+        "write",
+        "threads",
+        "helper",
+        ("confirm.live", "selectors.forum", "writes.content"),
+        "remote",
+    ),
+    "posts.reply": (
+        "posts.reply",
+        "posts.reply",
+        "write",
+        "posts",
+        "helper",
+        ("confirm.live", "selectors.thread", "writes.content"),
+        "remote",
+    ),
+    "bytes.transfer": (
+        "bytes.transfer",
+        "bytes.transfer",
+        "write",
+        "bytes",
+        "helper",
+        ("confirm.live", "selectors.bytes", "writes.bytes"),
+        "remote",
+    ),
+    "bytes.deposit": (
+        "bytes.deposit",
+        "bytes.deposit",
+        "write",
+        "bytes/deposit",
+        "helper",
+        ("confirm.live", "selectors.bytes", "writes.bytes"),
+        "remote",
+    ),
+    "bytes.withdraw": (
+        "bytes.withdraw",
+        "bytes.withdraw",
+        "write",
+        "bytes/withdraw",
+        "helper",
+        ("confirm.live", "selectors.bytes", "writes.bytes"),
+        "remote",
+    ),
+    "bytes.bump": (
+        "bytes.bump",
+        "bytes.bump",
+        "write",
+        "bytes/bump",
+        "helper",
+        ("confirm.live", "selectors.bytes", "writes.bytes"),
+        "remote",
+    ),
     "hf.doctor": ("hf.doctor", "hf.doctor", "read", None, "generic", (), "local"),
 }
 
@@ -56,7 +253,9 @@ def test_registry_preserves_existing_facts_and_adds_doctor() -> None:
     assert len(specs) == 25
     assert {spec.tool_name for spec in specs} == set(EXPECTED_FACTS)
     for spec in specs:
-        capability, coverage, operation, helper, transport, families, locality = EXPECTED_FACTS[spec.tool_name]
+        capability, coverage, operation, helper, transport, families, locality = (
+            EXPECTED_FACTS[spec.tool_name]
+        )
         assert (
             spec.capability_family,
             spec.coverage_family,
@@ -79,7 +278,9 @@ def test_tool_spec_description_is_read_only_and_does_not_change_constructor() ->
 
 
 def test_tool_spec_keeps_seven_argument_compatibility_and_is_frozen_slotted() -> None:
-    spec = ToolSpec("custom.read", "custom.read", "custom.read", "read", None, "generic", ())
+    spec = ToolSpec(
+        "custom.read", "custom.read", "custom.read", "read", None, "generic", ()
+    )
     assert spec.locality == "remote"
     assert spec.name == "custom.read"
     assert not hasattr(spec, "__dict__")
@@ -89,19 +290,35 @@ def test_tool_spec_keeps_seven_argument_compatibility_and_is_frozen_slotted() ->
 
 def test_parameter_families_are_sorted_and_deduplicated() -> None:
     row = registry_module._MatrixRow(
-        "custom.read", "custom.read", "custom.read", "read", None, "generic",
+        "custom.read",
+        "custom.read",
+        "custom.read",
+        "read",
+        None,
+        "generic",
         parameter_families=("selectors.user", "fields.me.basic", "selectors.user"),
     )
-    assert registry_module._resolve_parameter_families(row) == ("fields.me.basic", "selectors.user")
+    assert registry_module._resolve_parameter_families(row) == (
+        "fields.me.basic",
+        "selectors.user",
+    )
 
 
-def test_registry_rejects_duplicate_public_names_invalid_names_and_unknown_tools() -> None:
-    base = ToolSpec("first.tool", "first.tool", "first.tool", "read", None, "generic", ())
-    collision = ToolSpec("first_tool", "first_tool", "first_tool", "read", None, "generic", ())
+def test_registry_rejects_duplicate_public_names_invalid_names_and_unknown_tools() -> (
+    None
+):
+    base = ToolSpec(
+        "first.tool", "first.tool", "first.tool", "read", None, "generic", ()
+    )
+    collision = ToolSpec(
+        "first_tool", "first_tool", "first_tool", "read", None, "generic", ()
+    )
     with pytest.raises(ValueError, match="Duplicate MCP tool name"):
         registry_module._validate_registry([base, collision])
 
-    invalid = ToolSpec("invalid/tool", "invalid/tool", "invalid/tool", "read", None, "generic", ())
+    invalid = ToolSpec(
+        "invalid/tool", "invalid/tool", "invalid/tool", "read", None, "generic", ()
+    )
     with pytest.raises(ValueError, match="invalid MCP tool name"):
         registry_module._validate_registry([invalid])
 
@@ -110,7 +327,9 @@ def test_registry_rejects_duplicate_public_names_invalid_names_and_unknown_tools
 
 
 @pytest.mark.regression
-def test_locality_drives_metadata_and_annotations_without_losing_behavior_hints() -> None:
+def test_locality_drives_metadata_and_annotations_without_losing_behavior_hints() -> (
+    None
+):
     expected_hints = {
         "forums.index": (True, False, True, False, 1),
         "hf.doctor": (True, False, True, False, 1),
@@ -122,7 +341,13 @@ def test_locality_drives_metadata_and_annotations_without_losing_behavior_hints(
         "threads.read": (True, False, True, True, 4),
         "threads.create": (False, True, False, True, 4),
     }
-    for name, (read_only, destructive, idempotent, open_world, tier) in expected_hints.items():
+    for name, (
+        read_only,
+        destructive,
+        idempotent,
+        open_world,
+        tier,
+    ) in expected_hints.items():
         spec = get_tool_spec(name)
         annotations = build_annotations(spec)
         assert (
@@ -138,9 +363,16 @@ def test_locality_drives_metadata_and_annotations_without_losing_behavior_hints(
         assert metadata["x-hf-transport-kind"] == spec.transport_kind
 
     assert set(build_tool_meta(get_tool_spec("hf.doctor"))) == {
-        "x-hf-locality", "x-hf-runtime-tier", "x-hf-operation", "x-hf-capability-family",
-        "x-hf-coverage-family", "x-hf-helper-path", "x-hf-transport-kind", "x-hf-output-default",
-        "x-hf-output-readable", "x-hf-output-field-bundles",
+        "x-hf-locality",
+        "x-hf-runtime-tier",
+        "x-hf-operation",
+        "x-hf-capability-family",
+        "x-hf-coverage-family",
+        "x-hf-helper-path",
+        "x-hf-transport-kind",
+        "x-hf-output-default",
+        "x-hf-output-readable",
+        "x-hf-output-field-bundles",
     }
 
 
@@ -301,10 +533,14 @@ def test_sdk_tools_list_uses_registry_descriptions_without_runtime_effects(
                 )
             )
         )
-        expected = {mcp_tool_name(spec.tool_name): spec.description for spec in expected_specs}
+        expected = {
+            mcp_tool_name(spec.tool_name): spec.description for spec in expected_specs
+        }
         actual = {tool.name: tool.description for tool in listed.tools}
         assert actual == expected
-        assert all(description and len(description) > 40 for description in actual.values())
+        assert all(
+            description and len(description) > 40 for description in actual.values()
+        )
         if profile == "full_api":
             assert len(actual) == 24
             assert "hf_doctor" not in actual

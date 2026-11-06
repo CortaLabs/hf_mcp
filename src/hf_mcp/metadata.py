@@ -13,7 +13,9 @@ _OUTPUT_FIELD_BUNDLES = "separate_from_rendering"
 
 
 def build_tool_meta(spec: ToolSpec) -> dict[str, object]:
-    output_default = _READ_OUTPUT_DEFAULT if spec.operation == "read" else _WRITE_OUTPUT_DEFAULT
+    output_default = (
+        _READ_OUTPUT_DEFAULT if spec.operation == "read" else _WRITE_OUTPUT_DEFAULT
+    )
     locality = spec.locality
     if locality == "remote":
         runtime_tier = _REMOTE_RUNTIME_TIER
@@ -36,7 +38,9 @@ def build_tool_meta(spec: ToolSpec) -> dict[str, object]:
 
 
 def get_tool_specs(policy: CapabilityPolicy | None = None) -> list[ToolSpec]:
-    concrete_specs = [spec for spec in build_registry() if has_concrete_handler(spec.tool_name)]
+    concrete_specs = [
+        spec for spec in build_registry() if has_concrete_handler(spec.tool_name)
+    ]
     if policy is None:
         return concrete_specs
 
@@ -44,7 +48,8 @@ def get_tool_specs(policy: CapabilityPolicy | None = None) -> list[ToolSpec]:
     return [
         spec
         for spec in concrete_specs
-        if policy.can_register(spec.tool_name) or (allow_local_drafts and spec.tool_name.startswith("drafts."))
+        if policy.can_register(spec.tool_name)
+        or (allow_local_drafts and spec.tool_name.startswith("drafts."))
     ]
 
 

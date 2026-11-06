@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterator
@@ -15,8 +14,6 @@ _CORE_SOURCE_TEST_MODULES = {
     "test_entrypoints.py",
     "test_onboarding_cli.py",
 }
-if str(SRC_PATH) not in sys.path:
-    sys.path.insert(0, str(SRC_PATH))
 
 
 def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:

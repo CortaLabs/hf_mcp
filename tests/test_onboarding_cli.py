@@ -2,19 +2,19 @@ from __future__ import annotations
 
 import json
 import stat
-import sys
 from pathlib import Path
 
 import yaml
 
-PRODUCT_ROOT = Path(__file__).resolve().parents[1]
-SRC_PATH = PRODUCT_ROOT / "src"
-if str(SRC_PATH) not in sys.path:
-    sys.path.insert(0, str(SRC_PATH))
 
 from hf_mcp.onboarding import run_doctor, run_setup_init
 
-_HOSTED_EXTERNAL_REDIRECT_EXAMPLE_URI = "https://cortalabs.github.io/hf_mcp/oauth_callback.html"
+PRODUCT_ROOT = Path(__file__).resolve().parents[1]
+SRC_PATH = PRODUCT_ROOT / "src"
+
+_HOSTED_EXTERNAL_REDIRECT_EXAMPLE_URI = (
+    "https://cortalabs.github.io/hf_mcp/oauth_callback.html"
+)
 
 
 def _load_yaml(path: Path) -> dict[str, object]:
@@ -22,10 +22,14 @@ def _load_yaml(path: Path) -> dict[str, object]:
     return content if isinstance(content, dict) else {}
 
 
-def test_setup_init_writes_reader_first_yaml_and_next_steps(tmp_path: Path, capsys) -> None:
+def test_setup_init_writes_reader_first_yaml_and_next_steps(
+    tmp_path: Path, capsys
+) -> None:
     config_path = tmp_path / "config.yaml"
 
-    exit_code = run_setup_init(config_path=config_path, token_path=None, profile="reader")
+    exit_code = run_setup_init(
+        config_path=config_path, token_path=None, profile="reader"
+    )
     out = capsys.readouterr().out
 
     assert exit_code == 0
@@ -47,7 +51,9 @@ def test_setup_init_respects_force_before_overwrite(tmp_path: Path, capsys) -> N
     config_path = tmp_path / "config.yaml"
     config_path.write_text("profile: full_api\n", encoding="utf-8")
 
-    exit_code = run_setup_init(config_path=config_path, token_path=None, profile="reader", force=False)
+    exit_code = run_setup_init(
+        config_path=config_path, token_path=None, profile="reader", force=False
+    )
     out = capsys.readouterr().out
 
     assert exit_code == 0
@@ -69,12 +75,17 @@ def test_setup_init_force_overwrites_and_persists_token_path(tmp_path: Path) -> 
     )
 
     assert exit_code == 0
-    assert _load_yaml(config_path) == {"profile": "reader", "token_path": str(token_path)}
+    assert _load_yaml(config_path) == {
+        "profile": "reader",
+        "token_path": str(token_path),
+    }
     assert "HF_MCP_CLIENT_ID" not in config_path.read_text(encoding="utf-8")
     assert "HF_MCP_CLIENT_SECRET" not in config_path.read_text(encoding="utf-8")
 
 
-def test_doctor_reports_missing_config_secrets_and_token(tmp_path: Path, monkeypatch, capsys) -> None:
+def test_doctor_reports_missing_config_secrets_and_token(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
     config_path = tmp_path / "missing-config.yaml"
     token_path = (tmp_path / "token.json").resolve()
     monkeypatch.delenv("HF_MCP_CLIENT_ID", raising=False)
@@ -98,10 +109,14 @@ def test_doctor_reports_missing_config_secrets_and_token(tmp_path: Path, monkeyp
     assert _HOSTED_EXTERNAL_REDIRECT_EXAMPLE_URI in out
 
 
-def test_doctor_reports_ready_to_serve_with_local_state(tmp_path: Path, monkeypatch, capsys) -> None:
+def test_doctor_reports_ready_to_serve_with_local_state(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
     config_path = (tmp_path / "config.yaml").resolve()
     token_path = (tmp_path / "token.json").resolve()
-    run_setup_init(config_path=config_path, token_path=token_path, profile="reader", force=False)
+    run_setup_init(
+        config_path=config_path, token_path=token_path, profile="reader", force=False
+    )
     capsys.readouterr()
 
     token_path.parent.mkdir(parents=True, exist_ok=True)
@@ -134,10 +149,14 @@ def test_doctor_reports_ready_to_serve_with_local_state(tmp_path: Path, monkeypa
 
 def test_doctor_profile_override_is_validated(tmp_path: Path, capsys) -> None:
     config_path = (tmp_path / "config.yaml").resolve()
-    run_setup_init(config_path=config_path, token_path=None, profile="reader", force=False)
+    run_setup_init(
+        config_path=config_path, token_path=None, profile="reader", force=False
+    )
     capsys.readouterr()
 
-    exit_code = run_doctor(config_path=config_path, token_path=None, profile="not-a-profile")
+    exit_code = run_doctor(
+        config_path=config_path, token_path=None, profile="not-a-profile"
+    )
     out = capsys.readouterr().out
 
     assert exit_code == 2

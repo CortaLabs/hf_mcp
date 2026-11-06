@@ -8,7 +8,12 @@ import re
 from typing import Literal, cast
 from uuid import uuid4
 
-from .mycode import MessageFormat, coerce_message_format, format_body_text, format_write_text
+from .mycode import (
+    MessageFormat,
+    coerce_message_format,
+    format_body_text,
+    format_write_text,
+)
 from .write_preflight import WritePreflightError, validate_write_body
 
 IssueSeverity = Literal["info", "warn", "error"]
@@ -19,7 +24,9 @@ _SOURCE_SUFFIXES = frozenset({".md", ".mycode", ".txt"})
 _MAX_DRAFT_SOURCE_BYTES = 500_000
 _DRAFT_STATUSES = {"draft", "ready", "approved", "archived"}
 
-_JSON_LIKE_CODE_PATTERN = re.compile(r"\[(?:code|php)\](?P<body>.*?)\[/\s*(?:code|php)\]", re.IGNORECASE | re.DOTALL)
+_JSON_LIKE_CODE_PATTERN = re.compile(
+    r"\[(?:code|php)\](?P<body>.*?)\[/\s*(?:code|php)\]", re.IGNORECASE | re.DOTALL
+)
 _DOUBLE_QUOTE_PATTERN = re.compile(r'"')
 _GREATER_THAN_PATTERN = re.compile(r">")
 _LESS_THAN_PATTERN = re.compile(r"<")
@@ -73,7 +80,9 @@ class DraftArtifact:
             "issues": [asdict(issue) for issue in self.report.issues],
             "issue_summary": _issue_summary(self.report.issues),
             "mycode_preview": _preview(self.report.mycode),
-            "simulated_agent_markdown_preview": _preview(self.report.simulated_agent_markdown),
+            "simulated_agent_markdown_preview": _preview(
+                self.report.simulated_agent_markdown
+            ),
         }
 
 
@@ -93,7 +102,9 @@ class DraftMetadata:
         }
 
 
-def prepare_formatting_report(value: str, message_format: str = "mycode") -> FormattingReport:
+def prepare_formatting_report(
+    value: str, message_format: str = "mycode"
+) -> FormattingReport:
     source_format = coerce_message_format(message_format, field_name="message_format")
     mycode = format_write_text(value, source_format)
     validation_issues = _validation_issues(mycode, source_format)
@@ -146,9 +157,13 @@ def write_draft_artifact(
     )
 
 
-def read_cached_source_text(source_path: str | Path, *, draft_dir: str | Path | None = None) -> str:
+def read_cached_source_text(
+    source_path: str | Path, *, draft_dir: str | Path | None = None
+) -> str:
     root = _resolve_draft_root(draft_dir)
-    path = _resolve_confined_path(path=source_path, draft_root=root, require_exists=True)
+    path = _resolve_confined_path(
+        path=source_path, draft_root=root, require_exists=True
+    )
     if path.suffix.lower() not in _SOURCE_SUFFIXES:
         raise ValueError("Draft source path must be a .md, .mycode, or .txt file.")
     if path.stat().st_size > _MAX_DRAFT_SOURCE_BYTES:
@@ -162,7 +177,9 @@ def read_draft_artifact(
     draft_path: str | Path | None = None,
     draft_dir: str | Path | None = None,
 ) -> DraftArtifact:
-    path = _resolve_draft_path(draft_id=draft_id, draft_path=draft_path, draft_dir=draft_dir)
+    path = _resolve_draft_path(
+        draft_id=draft_id, draft_path=draft_path, draft_dir=draft_dir
+    )
     payload = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
         raise ValueError("Draft artifact payload must be an object.")
@@ -171,7 +188,11 @@ def read_draft_artifact(
     stored_created_at = payload.get("created_at")
     metadata_payload = payload.get("metadata")
     report_payload = payload.get("report")
-    if not isinstance(stored_draft_id, str) or not isinstance(report_payload, dict) or not isinstance(stored_created_at, str):
+    if (
+        not isinstance(stored_draft_id, str)
+        or not isinstance(report_payload, dict)
+        or not isinstance(stored_created_at, str)
+    ):
         raise ValueError("Draft artifact is missing draft_id, created_at, or report.")
     if draft_id is not None and stored_draft_id != draft_id:
         raise ValueError("Draft artifact id does not match the requested draft_id.")
@@ -188,7 +209,7 @@ def read_draft_artifact(
 def list_draft_artifacts(
     *,
     draft_dir: str | Path | None = None,
-    status: DraftStatus | None = None,
+    status: str | None = None,
     category: str | None = None,
     title: str | None = None,
     scheduled_before: str | None = None,
@@ -229,7 +250,9 @@ def list_draft_artifacts(
             if title.lower() not in current_title.lower():
                 continue
         if before_dt is not None or after_dt is not None:
-            scheduled_dt = _parse_optional_iso8601(artifact.metadata.scheduled_at, field_name="scheduled_at")
+            scheduled_dt = _parse_optional_iso8601(
+                artifact.metadata.scheduled_at, field_name="scheduled_at"
+            )
             if scheduled_dt is None:
                 continue
             if before_dt is not None and not scheduled_dt < before_dt:
@@ -249,15 +272,21 @@ def update_draft_metadata(
     draft_dir: str | Path | None = None,
     title: str | None = None,
     category: str | None = None,
-    status: DraftStatus | None = None,
+    status: str | None = None,
     scheduled_at: str | None = None,
 ) -> DraftArtifact:
-    artifact = read_draft_artifact(draft_id=draft_id, draft_path=draft_path, draft_dir=draft_dir)
+    artifact = read_draft_artifact(
+        draft_id=draft_id, draft_path=draft_path, draft_dir=draft_dir
+    )
     metadata = DraftMetadata(
         title=artifact.metadata.title if title is None else title,
         category=artifact.metadata.category if category is None else category,
-        status=artifact.metadata.status if status is None else _coerce_draft_status(status),
-        scheduled_at=artifact.metadata.scheduled_at if scheduled_at is None else _normalize_optional_iso8601(
+        status=artifact.metadata.status
+        if status is None
+        else _coerce_draft_status(status),
+        scheduled_at=artifact.metadata.scheduled_at
+        if scheduled_at is None
+        else _normalize_optional_iso8601(
             scheduled_at,
             field_name="scheduled_at",
         ),
@@ -281,7 +310,9 @@ def delete_draft_artifact(
     if confirm_delete is not True:
         raise ValueError("delete_draft_artifact requires confirm_delete=True.")
 
-    artifact = read_draft_artifact(draft_id=draft_id, draft_path=draft_path, draft_dir=draft_dir)
+    artifact = read_draft_artifact(
+        draft_id=draft_id, draft_path=draft_path, draft_dir=draft_dir
+    )
     path = Path(artifact.path)
     path.unlink(missing_ok=False)
     tombstone = artifact.summary()
@@ -298,7 +329,9 @@ def simulate_hf_canonicalization(value: str) -> str:
     return simulated
 
 
-def _validation_issues(mycode: str, source_format: MessageFormat) -> tuple[FormattingIssue, ...]:
+def _validation_issues(
+    mycode: str, source_format: MessageFormat
+) -> tuple[FormattingIssue, ...]:
     try:
         validate_write_body(mycode, source_format=source_format)
     except WritePreflightError as exc:
@@ -340,7 +373,9 @@ def _mutation_issues(mycode: str) -> tuple[FormattingIssue, ...]:
     json_like_blocks = [
         match.group("body")
         for match in _JSON_LIKE_CODE_PATTERN.finditer(mycode)
-        if '"' in match.group("body") or "{" in match.group("body") or "}" in match.group("body")
+        if '"' in match.group("body")
+        or "{" in match.group("body")
+        or "}" in match.group("body")
     ]
     if json_like_blocks:
         issues.append(
@@ -389,7 +424,9 @@ def _metadata_from_payload(payload: object) -> DraftMetadata:
     if not isinstance(payload, dict):
         raise ValueError("Draft artifact metadata must be an object when present.")
     status = _coerce_draft_status(str(payload.get("status", "draft")))
-    scheduled_at = _normalize_optional_iso8601(payload.get("scheduled_at"), field_name="scheduled_at")
+    scheduled_at = _normalize_optional_iso8601(
+        payload.get("scheduled_at"), field_name="scheduled_at"
+    )
     title = payload.get("title")
     category = payload.get("category")
     if title is not None and not isinstance(title, str):
@@ -432,7 +469,9 @@ def _parse_iso8601(value: str, *, field_name: str) -> datetime:
     try:
         parsed = datetime.fromisoformat(normalized)
     except ValueError as exc:
-        raise ValueError(f"{field_name} must be a valid ISO-8601 datetime string.") from exc
+        raise ValueError(
+            f"{field_name} must be a valid ISO-8601 datetime string."
+        ) from exc
     if parsed.tzinfo is None:
         return parsed.replace(tzinfo=timezone.utc)
     return parsed.astimezone(timezone.utc)
@@ -447,7 +486,12 @@ def _coerce_draft_status(status: str) -> DraftStatus:
 def _draft_sort_key(artifact: DraftArtifact) -> tuple[int, float, str, str]:
     created_at = _parse_optional_iso8601(artifact.created_at, field_name="created_at")
     if created_at is not None:
-        return (0, -created_at.timestamp(), Path(artifact.path).name.lower(), artifact.path.lower())
+        return (
+            0,
+            -created_at.timestamp(),
+            Path(artifact.path).name.lower(),
+            artifact.path.lower(),
+        )
     return (1, 0.0, Path(artifact.path).name.lower(), artifact.path.lower())
 
 
@@ -465,8 +509,10 @@ def _resolve_draft_path(
     root = _resolve_draft_root(draft_dir)
     if draft_id is not None:
         path = root / f"{draft_id}.json"
-    else:
+    elif draft_path is not None:
         path = Path(draft_path).expanduser()
+    else:
+        raise ValueError("A draft_id or draft_path is required.")
 
     resolved = _resolve_confined_path(path=path, draft_root=root, require_exists=True)
     if resolved.suffix != ".json":
@@ -481,7 +527,9 @@ def _resolve_draft_root(draft_dir: str | Path | None) -> Path:
     return root.resolve(strict=False)
 
 
-def _resolve_confined_path(*, path: str | Path, draft_root: Path, require_exists: bool) -> Path:
+def _resolve_confined_path(
+    *, path: str | Path, draft_root: Path, require_exists: bool
+) -> Path:
     candidate = Path(path).expanduser()
     resolved = candidate.resolve(strict=False)
     if draft_root != resolved and draft_root not in resolved.parents:
@@ -511,14 +559,16 @@ def _report_from_payload(payload: dict[str, object]) -> FormattingReport:
             )
         )
 
-    source_format = coerce_message_format(str(payload.get("source_format", "mycode")), field_name="source_format")
+    source_format = coerce_message_format(
+        str(payload.get("source_format", "mycode")), field_name="source_format"
+    )
     return FormattingReport(
         source_format=source_format,
         source_text=str(payload.get("source_text", "")),
         mycode=str(payload.get("mycode", "")),
         simulated_hf_mycode=str(payload.get("simulated_hf_mycode", "")),
         simulated_agent_markdown=str(payload.get("simulated_agent_markdown", "")),
-        integrity=float(payload.get("integrity", 0.0)),
+        integrity=float(cast("str | float", payload.get("integrity", 0.0))),
         issues=tuple(issues),
     )
 

@@ -8,7 +8,9 @@ def build_annotations(spec: ToolSpec) -> dict[str, object]:
     is_local_tool = spec.locality == "local"
     is_read = spec.operation == "read"
     is_read_only = is_read and spec.tool_name != "formatting.preflight"
-    is_destructive = spec.tool_name == "drafts.delete" or (not is_local_tool and not is_read)
+    is_destructive = spec.tool_name == "drafts.delete" or (
+        not is_local_tool and not is_read
+    )
     return {
         "readOnlyHint": is_read_only,
         "destructiveHint": is_destructive,

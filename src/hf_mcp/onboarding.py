@@ -17,7 +17,9 @@ from .token_store import TokenBundle, TokenStore, load_token_store
 
 _HOSTED_CALLBACK_ARTIFACT_PATH = "docs/oauth_callback.html"
 _HOSTED_EXTERNAL_REDIRECT_ENV = "HF_MCP_EXTERNAL_REDIRECT_URI"
-_HOSTED_EXTERNAL_REDIRECT_EXAMPLE_URI = "https://cortalabs.github.io/hf_mcp/oauth_callback.html"
+_HOSTED_EXTERNAL_REDIRECT_EXAMPLE_URI = (
+    "https://cortalabs.github.io/hf_mcp/oauth_callback.html"
+)
 _LEGACY_REDIRECT_ENV = "HF_MCP_REDIRECT_URI"
 _HOSTED_LOCAL_CALLBACK_URI = "http://127.0.0.1:8765/callback"
 
@@ -30,12 +32,16 @@ def run_setup_init(
 ) -> int:
     selected_config_path = _resolve_config_path(config_path)
     selected_profile = _validate_profile(profile)
-    selected_token_path = _normalize_token_path(token_path) if token_path is not None else None
+    selected_token_path = (
+        _normalize_token_path(token_path) if token_path is not None else None
+    )
 
     if selected_config_path.exists() and not force:
         print(f"Config already exists: {selected_config_path}")
         print("Use --force to overwrite it.")
-        _print_next_steps(config_path=selected_config_path, token_path=selected_token_path)
+        _print_next_steps(
+            config_path=selected_config_path, token_path=selected_token_path
+        )
         return 0
 
     payload: dict[str, object] = {"profile": selected_profile}
@@ -54,7 +60,9 @@ def run_setup_init(
     return 0
 
 
-def run_doctor(config_path: Path | None, token_path: Path | None, profile: str | None = None) -> int:
+def run_doctor(
+    config_path: Path | None, token_path: Path | None, profile: str | None = None
+) -> int:
     selected_config_path = _resolve_config_path(config_path)
     env_override: Mapping[str, str] | None = None
     issues: list[str] = []
@@ -88,7 +96,9 @@ def run_doctor(config_path: Path | None, token_path: Path | None, profile: str |
     client_secret_status = "missing"
     if settings is not None:
         client_id_status = _env_status(settings.runtime_env.get("HF_MCP_CLIENT_ID"))
-        client_secret_status = _env_status(settings.runtime_env.get("HF_MCP_CLIENT_SECRET"))
+        client_secret_status = _env_status(
+            settings.runtime_env.get("HF_MCP_CLIENT_SECRET")
+        )
         if client_id_status == "missing":
             issues.append("Missing required environment variable: HF_MCP_CLIENT_ID")
         if client_secret_status == "missing":
@@ -107,8 +117,18 @@ def run_doctor(config_path: Path | None, token_path: Path | None, profile: str |
             token_status = "invalid"
             issues.append(f"Token state invalid: {exc}")
 
-    effective_profile = profile.strip() if profile is not None else (settings.profile if settings is not None else "(unknown)")
-    effective_token_path = store.path if store is not None else (selected_token_path if selected_token_path is not None else "(unresolved)")
+    effective_profile = (
+        profile.strip()
+        if profile is not None
+        else (settings.profile if settings is not None else "(unknown)")
+    )
+    effective_token_path = (
+        store.path
+        if store is not None
+        else (
+            selected_token_path if selected_token_path is not None else "(unresolved)"
+        )
+    )
 
     print("hf-mcp doctor (local-only)")
     print(f"Config path: {selected_config_path}")
@@ -127,15 +147,23 @@ def run_doctor(config_path: Path | None, token_path: Path | None, profile: str |
             print(f"- {issue}")
         print("Next steps:")
         _print_callback_guidance()
-        print(f"- Run: {_command_with_paths('hf-mcp setup init', selected_config_path, selected_token_path)}")
+        print(
+            f"- Run: {_command_with_paths('hf-mcp setup init', selected_config_path, selected_token_path)}"
+        )
         print("- Set: HF_MCP_CLIENT_ID")
         print("- Set: HF_MCP_CLIENT_SECRET")
-        print(f"- Run: {_command_with_paths('hf-mcp auth bootstrap', selected_config_path, selected_token_path)}")
-        print(f"- Re-run: {_command_with_paths('hf-mcp doctor', selected_config_path, selected_token_path)}")
+        print(
+            f"- Run: {_command_with_paths('hf-mcp auth bootstrap', selected_config_path, selected_token_path)}"
+        )
+        print(
+            f"- Re-run: {_command_with_paths('hf-mcp doctor', selected_config_path, selected_token_path)}"
+        )
         return 2
 
     print("Ready to serve: yes")
-    print(f"Run: {_command_with_paths('hf-mcp serve', selected_config_path, selected_token_path)}")
+    print(
+        f"Run: {_command_with_paths('hf-mcp serve', selected_config_path, selected_token_path)}"
+    )
     return 0
 
 
@@ -170,7 +198,9 @@ def _build_env_override(token_path: Path) -> Mapping[str, str]:
     return env_override
 
 
-def _apply_profile_override(settings: HFMCPSettings, profile: str | None) -> HFMCPSettings:
+def _apply_profile_override(
+    settings: HFMCPSettings, profile: str | None
+) -> HFMCPSettings:
     if profile is None:
         return settings
 
@@ -207,16 +237,22 @@ def _print_next_steps(config_path: Path, token_path: Path | None) -> None:
     print("- Set required environment variables:")
     print("  HF_MCP_CLIENT_ID=your_client_id")
     print("  HF_MCP_CLIENT_SECRET=your_client_secret")
-    print(f"- Run: {_command_with_paths('hf-mcp auth bootstrap', config_path, token_path)}")
+    print(
+        f"- Run: {_command_with_paths('hf-mcp auth bootstrap', config_path, token_path)}"
+    )
     print(f"- Run: {_command_with_paths('hf-mcp doctor', config_path, token_path)}")
     print(f"- Run: {_command_with_paths('hf-mcp serve', config_path, token_path)}")
 
 
 def _print_callback_guidance() -> None:
     print(f"- Hosted callback artifact: {_HOSTED_CALLBACK_ARTIFACT_PATH}")
-    print(f"- Hosted mode: set {_HOSTED_EXTERNAL_REDIRECT_ENV} to your hosted HTTPS callback page URL.")
+    print(
+        f"- Hosted mode: set {_HOSTED_EXTERNAL_REDIRECT_ENV} to your hosted HTTPS callback page URL."
+    )
     print(f"  Example: {_HOSTED_EXTERNAL_REDIRECT_EXAMPLE_URI}")
-    print(f"- Hosted page forwards to fixed local callback target: {_HOSTED_LOCAL_CALLBACK_URI}")
+    print(
+        f"- Hosted page forwards to fixed local callback target: {_HOSTED_LOCAL_CALLBACK_URI}"
+    )
     print(
         f"- Legacy fallback: if {_HOSTED_EXTERNAL_REDIRECT_ENV} is unset, use {_LEGACY_REDIRECT_ENV} "
         f"for loopback-only auth (for example {_HOSTED_LOCAL_CALLBACK_URI})."
@@ -230,6 +266,7 @@ def _command_with_paths(base: str, config_path: Path, token_path: Path | None) -
     if token_path is not None:
         parts.extend(["--token-path", str(token_path)])
     return " ".join(parts)
+
 
 __all__ = [
     "run_setup_init",
