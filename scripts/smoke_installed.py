@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import select
 import subprocess
 import tempfile
 import tomllib
@@ -14,12 +15,20 @@ from pathlib import Path
 
 PROFILES = ("reader", "full_api")
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+RESPONSE_TIMEOUT_SECONDS = 30.0
 
 
 def exchange(
-    process: subprocess.Popen[str], method: str, params: dict, id_: int | None
+    process: subprocess.Popen[str],
+    method: str,
+    params: dict,
+    id_: int | None,
+    timeout: float = RESPONSE_TIMEOUT_SECONDS,
 ) -> dict:
-    """Send one JSON-RPC message; read the response when it has an id."""
+    """Send one JSON-RPC message; read the response when it has an id.
+
+    The wait is bounded: a server that never answers fails the smoke run.
+    """
     message = {"jsonrpc": "2.0", "method": method, "params": params}
     if id_ is not None:
         message["id"] = id_
@@ -28,6 +37,10 @@ def exchange(
     process.stdin.flush()
     if id_ is None:
         return {}
+    ready, _, _ = select.select([process.stdout], [], [], timeout)
+    if not ready:
+        process.kill()
+        raise SystemExit(f"server gave no answer to {method} within {timeout:g}s")
     line = process.stdout.readline()
     if not line:
         raise SystemExit(f"server exited before answering {method}")

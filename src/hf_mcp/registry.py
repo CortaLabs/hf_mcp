@@ -20,8 +20,9 @@ Group = Literal["core_read", "extended_read", "write", "local"]
 
 DRAFT_ID_PATTERN = "^[a-f0-9]{32}$"
 TEMPLATE_NAME_PATTERN = "^[a-z0-9][a-z0-9_-]{0,63}$"
-# Same ceiling as a draft source file (draft_store._MAX_DRAFT_SOURCE_BYTES).
-MAX_CONVERT_CHARS = 500_000
+# One ceiling for every free-text message/source: tool arguments, converter
+# input, rendered templates and draft source files.
+MAX_MESSAGE_CHARS = 500_000
 
 FAMILY_KEY = "x-hf-family"
 WIRE_KEY = "x-hf-wire"
@@ -144,7 +145,7 @@ def _write_content(*, subject: bool = False) -> dict[str, Any]:
     if subject:
         props["subject"] = _p(family, "string", minLength=1)
     props.update(
-        message=_p(family, "string", minLength=1),
+        message=_p(family, "string", minLength=1, maxLength=MAX_MESSAGE_CHARS),
         draft_id=_p(
             family,
             "string",
@@ -421,7 +422,12 @@ TOOLS: tuple[ToolSpec, ...] = (
         "local",
         "Check how MyCode or Markdown formats as Hack Forums MyCode and report conversion findings; preflight can save a local draft.",
         {
-            "message": _p("formatting.content", "string", minLength=1),
+            "message": _p(
+                "formatting.content",
+                "string",
+                minLength=1,
+                maxLength=MAX_MESSAGE_CHARS,
+            ),
             "source_path": _p(
                 "formatting.content",
                 "string",
@@ -451,7 +457,7 @@ TOOLS: tuple[ToolSpec, ...] = (
                 "formatting.convert",
                 "string",
                 minLength=1,
-                maxLength=MAX_CONVERT_CHARS,
+                maxLength=MAX_MESSAGE_CHARS,
             ),
             "message_format": _p(
                 "formatting.convert",
@@ -485,7 +491,7 @@ TOOLS: tuple[ToolSpec, ...] = (
             "values": _p(
                 "templates.render",
                 "object",
-                additionalProperties={"type": "string", "maxLength": MAX_CONVERT_CHARS},
+                additionalProperties={"type": "string", "maxLength": MAX_MESSAGE_CHARS},
                 default={},
             ),
         },
@@ -643,7 +649,7 @@ def get_specs(group: Group) -> tuple[ToolSpec, ...]:
 __all__ = [
     "DRAFT_ID_PATTERN",
     "FAMILY_KEY",
-    "MAX_CONVERT_CHARS",
+    "MAX_MESSAGE_CHARS",
     "TEMPLATE_NAME_PATTERN",
     "TOOLS",
     "WIRE_KEY",

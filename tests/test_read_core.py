@@ -11,7 +11,7 @@ from hf_mcp.capabilities import CapabilityPolicy
 from hf_mcp.config import HFMCPSettings
 from hf_mcp.dispatcher import build_handlers
 from hf_mcp.output_modes import ReadOutputDefaults
-from hf_mcp.registry import get_specs, get_tool_spec
+from hf_mcp.registry import WIRE_KEY, get_specs, get_tool_spec
 from hf_mcp.token_store import TokenBundle
 from hf_mcp.tools.read_core import (
     build_core_read_handlers,
@@ -21,6 +21,7 @@ from hf_mcp.tools.read_core import (
     list_posts,
     list_threads,
 )
+from hf_mcp.tools.read_extended import build_extended_read_handlers
 from hf_mcp.transport import HFTransport
 
 PRODUCT_ROOT = Path(__file__).resolve().parents[1]
@@ -1186,3 +1187,81 @@ def test_core_read_flow_chain_adds_hf_flow_and_preserves_endpoint_root_payloads(
     assert ("users.read", (("uid", 5),)) in post_actions
     assert ("forums.read", (("fid", 375),)) in post_actions
     assert ("posts.read", (("pid", 7),)) in post_actions
+
+
+_TOGGLE_SELECTORS: dict[str, dict[str, Any]] = {
+    "users.read": {"uid": 5},
+    "posts.read": {"tid": 7},
+}
+
+
+def _wire_include_toggles() -> list[tuple[str, str]]:
+    return [
+        (spec.name, name)
+        for spec in get_specs("core_read") + get_specs("extended_read")
+        for name, prop in spec.input_schema["properties"].items()
+        if name.startswith("include_")
+        and name != "include_raw_payload"
+        and prop.get(WIRE_KEY)
+    ]
+
+
+class _AsksRecorder(HFTransport):
+    def __init__(self) -> None:
+        super().__init__(token_store=_StubTokenStore(), base_url="https://x.test")
+        self.asks: dict[str, Any] = {}
+
+    def read_raw(self, asks: Any, helper: str | None = None) -> dict[str, Any]:  # type: ignore[override]
+        self.asks = asks
+        return {}
+
+
+def _toggle_asks(tool_name: str, toggle: str, value: bool) -> dict[str, Any]:
+    recorder = _AsksRecorder()
+    policy = _policy(
+        enabled_capabilities={tool_name},
+        enabled_parameter_families=set(get_tool_spec(tool_name).families),
+    )
+    handlers = build_core_read_handlers(policy, recorder)
+    handlers.update(build_extended_read_handlers(policy, recorder))
+    handlers[tool_name](**_TOGGLE_SELECTORS.get(tool_name, {}), **{toggle: value})
+    (body,) = recorder.asks.values()
+    return dict(body)
+
+
+# The exact request fields each include_* toggle adds, written out independently
+# of the client's field table (the 0.7.2 wire contract).
+_TOGGLE_FIELDS: dict[tuple[str, str], frozenset[str]] = {
+    ("me.read", "include_basic_fields"): frozenset(
+        "uid username usergroup displaygroup additionalgroups postnum awards bytes "
+        "vault threadnum avatar avatardimensions avatartype lastvisit usertitle "
+        "website timeonline reputation referrals".split()
+    ),
+    ("me.read", "include_advanced_fields"): frozenset(
+        "invisible lastactive totalpms unreadpms warningpoints".split()
+    ),
+    ("users.read", "include_profile_fields"): frozenset(
+        "uid username usergroup displaygroup additionalgroups postnum awards myps "
+        "threadnum avatar avatardimensions avatartype usertitle website timeonline "
+        "reputation referrals".split()
+    ),
+    ("posts.read", "include_post_body"): frozenset({"message"}),
+    ("bytes.read", "include_amount"): frozenset({"amount"}),
+}
+
+
+def test_every_include_toggle_in_the_registry_has_an_expected_field_set() -> None:
+    assert set(_wire_include_toggles()) == set(_TOGGLE_FIELDS)
+
+
+@pytest.mark.parametrize(("tool_name", "toggle"), sorted(_TOGGLE_FIELDS))
+def test_include_toggle_adds_exactly_its_request_fields(
+    tool_name: str, toggle: str
+) -> None:
+    on = _toggle_asks(tool_name, toggle, True)
+    off = _toggle_asks(tool_name, toggle, False)
+
+    assert set(on) - set(off) == _TOGGLE_FIELDS[(tool_name, toggle)]
+    assert set(off) - set(on) == set()
+    assert all(on[field] is True for field in _TOGGLE_FIELDS[(tool_name, toggle)])
+    assert {key: off[key] for key in off} == {key: on[key] for key in off}

@@ -6,7 +6,7 @@ from typing import Any
 
 from hf_mcp.config import DEFAULT_TEMPLATES_DIR
 from hf_mcp.draft_store import write_draft_artifact
-from hf_mcp.registry import MAX_CONVERT_CHARS
+from hf_mcp.registry import MAX_MESSAGE_CHARS
 from hf_mcp.flow import attach_hf_flow, build_hf_flow
 from hf_mcp.formatting_engine import FormattingReport, prepare_formatting_report
 from hf_mcp.templates import TemplateUnavailable, get_template, load_templates
@@ -108,7 +108,7 @@ def render_template(
             )
         ) from None
     source_text = template.fill(values or {})
-    if len(source_text) > MAX_CONVERT_CHARS:
+    if len(source_text) > MAX_MESSAGE_CHARS:
         raise ValueError("The rendered template is too large.")
     report = prepare_formatting_report(source_text, template.message_format)
     return _local_result(

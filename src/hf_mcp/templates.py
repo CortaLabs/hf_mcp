@@ -19,9 +19,10 @@ from typing import Any, Literal
 
 import yaml
 
-from .registry import TEMPLATE_NAME_PATTERN
+from .registry import MAX_MESSAGE_CHARS, TEMPLATE_NAME_PATTERN
 
 MAX_TEMPLATE_BYTES = 64 * 1024
+MAX_TEMPLATE_CANDIDATES = 256
 PLACEHOLDER_KEY_PATTERN = "^[a-z][a-z0-9_]{0,31}$"
 
 _NAME_RE = re.compile(TEMPLATE_NAME_PATTERN)
@@ -80,6 +81,8 @@ class Template:
         for item in self.placeholders:
             if item.required and item.key not in values:
                 raise ValueError(f"Missing required template value: {item.key}.")
+        if sum(len(value) for value in values.values()) > MAX_MESSAGE_CHARS:
+            raise ValueError("The template values are too large.")
         return _PLACEHOLDER_RE.sub(
             lambda match: values.get(match.group(1), ""), self.body
         )
@@ -90,7 +93,8 @@ def load_templates(templates_dir: str | Path) -> tuple[tuple[Template, ...], int
 
     A missing or unreadable directory means zero templates. Only entries named
     ``*.md`` or ``*.mycode`` are candidates; each candidate that cannot be loaded
-    counts once as invalid.
+    counts once as invalid, as does every candidate past ``MAX_TEMPLATE_CANDIDATES``
+    (those are never read).
     """
     root = Path(templates_dir)
     try:
@@ -99,9 +103,14 @@ def load_templates(templates_dir: str | Path) -> tuple[tuple[Template, ...], int
         return (), 0
     templates: dict[str, Template] = {}
     invalid = 0
+    candidates = 0
     for entry in entries:
         suffix = Path(entry.name).suffix
         if suffix not in _SUFFIX_FORMATS:
+            continue
+        candidates += 1
+        if candidates > MAX_TEMPLATE_CANDIDATES:
+            invalid += 1
             continue
         template = _load_one(entry, _SUFFIX_FORMATS[suffix])
         if template is None or template.name in templates:
@@ -173,7 +182,7 @@ def _parse(text: str) -> tuple[str, tuple[Placeholder, ...], str] | None:
     raw_front, body = split
     try:
         front = yaml.safe_load(raw_front)
-    except yaml.YAMLError:
+    except (yaml.YAMLError, RecursionError):
         return None
     if not isinstance(front, dict) or not set(front) <= _TOP_KEYS:
         return None
@@ -203,6 +212,7 @@ def _parse(text: str) -> tuple[str, tuple[Placeholder, ...], str] | None:
 
 __all__ = [
     "MAX_TEMPLATE_BYTES",
+    "MAX_TEMPLATE_CANDIDATES",
     "PLACEHOLDER_KEY_PATTERN",
     "Placeholder",
     "Template",

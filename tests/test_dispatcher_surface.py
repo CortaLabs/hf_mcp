@@ -6,6 +6,7 @@ import os
 import re
 import sys
 from collections.abc import Awaitable, Callable
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -21,7 +22,7 @@ import hf_mcp
 from hf_mcp.capabilities import CapabilityPolicy
 from hf_mcp.config import HFMCPSettings, PRESET_CAPABILITIES, PRESET_PARAMETER_FAMILIES
 from hf_mcp.dispatcher import Handler, build_handlers
-from hf_mcp.registry import TOOLS, get_specs, mcp_tool_name
+from hf_mcp.registry import MAX_MESSAGE_CHARS, TOOLS, get_specs, mcp_tool_name
 from hf_mcp.server import build_server, create_server, serve_stdio
 from hf_mcp.token_store import TokenBundle
 from hf_mcp.tools.read_core import build_core_read_handlers
@@ -1077,6 +1078,35 @@ def test_confirm_live_const_rejects_everything_except_exact_true(value: Any) -> 
 
 @pytest.mark.core
 @pytest.mark.regression
+def test_write_message_is_capped_at_the_shared_limit() -> None:
+    settings = _write_settings()
+    message = _validation_case(
+        settings,
+        "posts_reply",
+        {
+            "tid": 1,
+            "message": "a" * (MAX_MESSAGE_CHARS + 1),
+            "confirm_live": True,
+        },
+        message_has=("message",),
+    )
+    assert "a" * 50 not in message
+    handlers = _handlers(settings, _CountingTransport())
+    handlers["posts.reply"] = lambda **kwargs: {
+        "content": [{"type": "text", "text": "ok"}],
+        "structuredContent": {"length": len(kwargs["message"])},
+    }
+    result = _call(
+        _server(settings, handlers=handlers),
+        "posts_reply",
+        {"tid": 1, "message": "a" * MAX_MESSAGE_CHARS, "confirm_live": True},
+    )
+    assert result.is_error is False
+    assert result.structured_content == {"length": MAX_MESSAGE_CHARS}
+
+
+@pytest.mark.core
+@pytest.mark.regression
 def test_confirm_live_exact_true_reaches_the_handler() -> None:
     settings = _write_settings()
     counter: dict[str, int] = {}
@@ -1193,12 +1223,89 @@ def test_additional_properties_false_rejects_unknown_parameters() -> None:
         settings,
         "threads_read",
         {"tid": 1, "include_everything": True},
-        message_has=("(unknown parameter)",),
+        message_has=("include_everything",),
     )
     transport = _CountingTransport()
     result = _call(_server(settings, transport), "threads_read", {"tid": 1})
     assert result.is_error is False
     assert transport.calls == 1
+
+
+@pytest.mark.core
+@pytest.mark.regression
+@pytest.mark.parametrize(
+    ("name", "named"),
+    [
+        ("typo_param", True),
+        ("a" + "b" * 63, True),
+        ("a" + "b" * 64, False),
+        ("Upper", False),
+        ("9lives", False),
+        ("has-dash", False),
+        ("sp ace", False),
+        ("naïve", False),
+    ],
+)
+def test_unknown_parameter_is_named_only_when_it_looks_like_a_name(
+    name: str, named: bool
+) -> None:
+    settings = _settings({"threads.read"}, {"selectors.thread"})
+    secret = "test-UNTRUSTED-VALUE-DO-NOT-ECHO"
+    transport = _CountingTransport()
+
+    result = _call(
+        _server(settings, transport), "threads_read", {"tid": 1, name: secret}
+    )
+
+    error = _assert_error(result, "INVALID_ARGUMENT", "threads_read")
+    assert transport.calls == 0
+    assert (name in error["message"]) is named
+    assert ("(unknown parameter)" in error["message"]) is not named
+    assert secret not in json.dumps(result.model_dump(mode="json"))
+
+
+class _AsyncCallable:
+    async def __call__(self, **arguments: Any) -> dict[str, Any]:
+        await anyio.sleep(0)
+        return _ok_envelope("async-callable-object")
+
+
+async def _async_tool(label: str, **arguments: Any) -> dict[str, Any]:
+    await anyio.sleep(0)
+    return _ok_envelope(label)
+
+
+def _ok_envelope(label: str) -> dict[str, Any]:
+    return {
+        "content": [{"type": "text", "text": label}],
+        "structuredContent": {"label": label},
+    }
+
+
+@pytest.mark.core
+@pytest.mark.regression
+@pytest.mark.parametrize(
+    ("handler", "label"),
+    [
+        (_AsyncCallable(), "async-callable-object"),
+        (partial(_async_tool, "partial-coroutine"), "partial-coroutine"),
+        (lambda **_: _ok_envelope("sync"), "sync"),
+    ],
+    ids=["async-callable-object", "partial-of-coroutine-function", "plain-sync"],
+)
+def test_server_awaits_every_awaitable_handler_shape(
+    handler: Handler, label: str
+) -> None:
+    settings = _settings({"threads.read"}, {"selectors.thread"})
+
+    result = _call(
+        _server(settings, handlers={"threads.read": handler}),
+        "threads_read",
+        {"tid": 1},
+    )
+
+    assert result.is_error is False
+    assert result.structured_content == {"label": label}
 
 
 @pytest.mark.core
