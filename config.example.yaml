@@ -9,12 +9,11 @@
 # IMPORTANT:
 # Presets are exposure control for a user/deployment. They do not reduce product
 # scope. docs/coverage_matrix.md contains both:
-# - concrete shipped helpers (usable now), including core reads plus
+# - tools that are available, including core reads plus
 #   `bytes.read`, `contracts.read`, `disputes.read`, `bratings.read`,
 #   `sigmarket.market.read`, `sigmarket.order.read`, and `admin.high_risk.read`
-# - documented API rows that remain intentionally unexposed in presets:
+# - documented API rows that no preset exposes:
 #   `contracts.write`, `sigmarket.write`, `admin.high_risk.write`
-#   (not concrete helper behavior in this tranche)
 
 profile: reader
 
@@ -26,11 +25,11 @@ profile: reader
 # disabled_parameter_families: []
 
 # Optional runtime path override. Must be absolute and outside this repository.
-# token_path: /home/you/.config/hf_mcp/token.json
+# token_path: /home/user/.config/hf_mcp/token.json
 
 # Optional draft artifact root. Must be absolute.
 # Defaults to ~/.config/hf_mcp/drafts
-# draft_dir: /home/you/.config/hf_mcp/drafts
+# draft_dir: /home/user/.config/hf_mcp/drafts
 
 # Read output defaults for all read tools.
 # Valid modes: readable, structured, raw
@@ -61,15 +60,10 @@ read_output_defaults:
 # - Structured mode keeps script-friendly structuredContent
 # - Raw payload is additive via output_mode=raw or include_raw_payload=true
 #
-# Live test boundary:
-# - no automated live writes
+# Write safety:
+# - no automated live writes: hf-mcp never posts on its own
 # - concrete writes require confirm_live=true
-# - manual live checks in this wave are limited to:
-#   - posts.reply on TID 6083735
-#   - at most one threads.create in FID 375
-# - no Bytes live writes in this wave
-# - placeholder writes remain out of scope in this wave:
-#   contracts.write, sigmarket.write, admin.high_risk.write
+# - contracts.write, sigmarket.write, and admin.high_risk.write are not available
 
 # Parameter families currently exposed by profile = "full_api":
 # selectors.user, selectors.forum, selectors.thread, selectors.post,

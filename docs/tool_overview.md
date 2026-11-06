@@ -1,7 +1,7 @@
 # Tool Overview
 
 This page summarizes the shipped MCP tool surface defined in
-`src/hf_mcp/registry.py` for operator use.
+`src/hf_mcp/registry.py` for users and operators.
 
 ## Availability labels
 
@@ -122,7 +122,7 @@ Content writes (`threads.create`, `posts.reply`) also accept `message_format`.
 
 ## Not exposed boundaries
 
-- `contracts.write` is not exposed because sandbox proof is unavailable.
+- `contracts.write` is not exposed because there is no verified contract for it.
 - Signature Market write operations are unsupported and not exposed.
 - Admin-only high-risk write operations are unsupported and not exposed.
 

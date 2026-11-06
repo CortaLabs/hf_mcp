@@ -471,7 +471,7 @@ not a guaranteed contract shape.
 ```
 
 `contracts.write` is intentionally excluded from runnable examples because it is
-not exposed without operator-approved sandbox proof. Signature Market writes and
+not available because there is no verified contract for it. Signature Market writes and
 admin-only high-risk writes are also unsupported and unexposed in the current
 registered surface.
 

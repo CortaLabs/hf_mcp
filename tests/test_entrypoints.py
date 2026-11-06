@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -208,3 +209,45 @@ def test_serve_startup_failure_returns_clear_launch_error(
     assert exit_code == 2
     assert "Launch error: Missing runtime dependency 'mcp'" in captured.err
     assert "council" not in captured.err.lower()
+
+
+def test_mcp_initialize_reports_package_name_and_version(tmp_path: Path) -> None:
+    import anyio
+    from mcp import ClientSession
+    from mcp.client.stdio import StdioServerParameters, stdio_client
+
+    expected_version = tomllib.loads(PYPROJECT_PATH.read_text(encoding="utf-8"))[
+        "project"
+    ]["version"]
+    token_path = tmp_path / "token.json"
+    token_path.write_text(
+        json.dumps(
+            {"access_token": "test-token", "token_type": "Bearer", "scope": ["read"]}
+        ),
+        encoding="utf-8",
+    )
+    token_path.chmod(0o600)
+    env = os.environ.copy()
+    env.update(
+        {
+            "PYTHONPATH": str(SRC_PATH),
+            "HF_MCP_CONFIG": str(tmp_path / "config.yaml"),
+            "HF_MCP_TOKEN_PATH": str(token_path),
+            "HF_MCP_CLIENT_ID": "test-client",
+            "HF_MCP_CLIENT_SECRET": "test-secret",
+        }
+    )
+    params = StdioServerParameters(
+        command=sys.executable,
+        args=["-m", "hf_mcp", "serve"],
+        env=env,
+        cwd=str(tmp_path),
+    )
+
+    async def _initialize() -> tuple[str, str]:
+        async with stdio_client(params) as (read_stream, write_stream):
+            async with ClientSession(read_stream, write_stream) as session:
+                result = await session.initialize()
+                return result.server_info.name, result.server_info.version
+
+    assert anyio.run(_initialize) == ("hf-mcp", expected_version)

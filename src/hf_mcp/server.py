@@ -10,6 +10,7 @@ from urllib.parse import urljoin
 from pydantic import ConfigDict, PrivateAttr, RootModel, ValidationError
 from pydantic_core import InitErrorDetails
 
+from . import __version__
 from .capabilities import CapabilityPolicy
 from .config import HFMCPSettings, load_settings
 from .dispatcher import register_tools, resolve_runtime_bundle
@@ -615,7 +616,7 @@ def serve_stdio(settings: HFMCPSettings | None = None) -> None:
     policy = CapabilityPolicy(resolved_settings)
     runtime = resolve_runtime_bundle(resolved_settings)
     fastmcp_class = _load_mcpserver_class()
-    app = fastmcp_class(name="hf-mcp")
+    app = fastmcp_class(name="hf-mcp", version=__version__)
     register_tools(_MCPServerToolAdapter(app), policy, runtime)
     app.run(transport="stdio")
 

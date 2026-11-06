@@ -4,7 +4,7 @@ description: Index and routing skill for using the hf-mcp package safely and cho
 user-invocable: true
 context: full
 visibility: exported
-owner: hackforums-council
+owner: hf-mcp
 ---
 
 # HF MCP

@@ -4,7 +4,7 @@ description: Work with the Hack Forums API v2 for OAuth app design, scope select
 user-invocable: true
 context: full
 visibility: exported
-owner: hackforums-council
+owner: hf-mcp
 ---
 
 # HF API v2

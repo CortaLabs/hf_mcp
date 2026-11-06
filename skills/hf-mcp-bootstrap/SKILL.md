@@ -4,7 +4,7 @@ description: Install and local bootstrap workflow for hf-mcp including config pr
 user-invocable: true
 context: full
 visibility: exported
-owner: hackforums-council
+owner: hf-mcp
 ---
 
 # HF MCP Bootstrap

@@ -4,7 +4,7 @@ description: Guarded write usage skill for hf-mcp covering concrete live-write h
 user-invocable: true
 context: full
 visibility: exported
-owner: hackforums-council
+owner: hf-mcp
 ---
 
 # HF MCP Writes
@@ -29,7 +29,7 @@ misread as callable operations.
 
 1. Separate concrete write helpers from unexposed write families before any command drafting.
    - Concrete helpers: `threads.create`, `posts.reply`, `bytes.transfer`, `bytes.deposit`, `bytes.withdraw`, `bytes.bump`.
-   - Not exposed: `contracts.write` (blocked until operator-approved sandbox proof exists), Signature Market writes, and admin-only high-risk writes.
+   - Not exposed: `contracts.write` (not available), Signature Market writes, and admin-only high-risk writes.
 
 2. Require explicit live-write confirmation on concrete helpers.
    - Concrete helpers require `confirm_live=true`.

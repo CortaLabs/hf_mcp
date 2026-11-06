@@ -4,7 +4,7 @@ description: Author, convert, and troubleshoot MyBB/Hack Forums MyCode with cons
 user-invocable: true
 context: full
 visibility: exported
-owner: hackforums-council
+owner: hf-mcp
 ---
 
 # HF MyCode

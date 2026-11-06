@@ -33,7 +33,8 @@ EXPORT_MANIFEST_PATH = PRODUCT_ROOT / "export_manifest.toml"
 SDIST_MANIFEST_PATH = PRODUCT_ROOT / "MANIFEST.in"
 PYPROJECT_PATH = PRODUCT_ROOT / "pyproject.toml"
 CONFIGURATION_DOC_PATH = PRODUCT_ROOT / "docs/configuration.md"
-EXPORT_BOUNDARY_DOC_PATH = PRODUCT_ROOT / "docs/export_boundary.md"
+SECURITY_MODEL_DOC_PATH = PRODUCT_ROOT / "docs/security_model.md"
+README_PATH = PRODUCT_ROOT / "README.md"
 PUBLISH_WORKFLOW_PATH = PRODUCT_ROOT / ".github/workflows/publish-hf-mcp-pypi.yml"
 ALLOWED_PREFIX = "products/hf_mcp/"
 YAML_EXAMPLE = "products/hf_mcp/config.example.yaml"
@@ -141,7 +142,6 @@ def test_publisher_trigger_containment() -> None:
 @pytest.mark.build
 def test_docs_define_yaml_env_and_token_path_responsibilities() -> None:
     configuration_doc = CONFIGURATION_DOC_PATH.read_text(encoding="utf-8")
-    export_boundary_doc = EXPORT_BOUNDARY_DOC_PATH.read_text(encoding="utf-8")
 
     assert (
         "YAML is the canonical runtime config input for non-secret policy"
@@ -153,33 +153,16 @@ def test_docs_define_yaml_env_and_token_path_responsibilities() -> None:
         in configuration_doc
     )
 
-    assert (
-        "Runtime policy is YAML-first: non-secret policy belongs in `config.yaml`."
-        in export_boundary_doc
-    )
-    assert "reserved for secrets and machine-local overrides" in export_boundary_doc
-    assert "must not define" in export_boundary_doc
-    assert "profile/capability/parameter policy" in export_boundary_doc
-    assert (
-        "Token-store location must be an absolute path outside the tracked repository"
-        in export_boundary_doc
-    )
-
 
 @pytest.mark.core
 @pytest.mark.build
 def test_live_write_boundary_language_is_published_in_docs_and_config() -> None:
-    export_boundary_doc = EXPORT_BOUNDARY_DOC_PATH.read_text(encoding="utf-8")
+    security_doc = SECURITY_MODEL_DOC_PATH.read_text(encoding="utf-8")
+    readme = README_PATH.read_text(encoding="utf-8")
     config_yaml = _allowlist_product_path(YAML_EXAMPLE).read_text(encoding="utf-8")
 
-    required_boundary_markers = [
-        "Live-write validation stays manual: no automated live writes.",
-        "Concrete writes require `confirm_live=true`.",
-        "Root-level repository assets are outside the export boundary.",
-        "Token-store location must be an absolute path outside the tracked repository",
-    ]
-    for marker in required_boundary_markers:
-        assert marker in export_boundary_doc
+    assert "`confirm_live=true`" in security_doc
+    assert "`confirm_live=true`" in readme
 
     assert "profile: reader" in config_yaml
     assert "enabled_capabilities: []" in config_yaml
@@ -211,11 +194,21 @@ def test_pyproject_release_contract_and_metadata_boundary() -> None:
 
     assert "setuptools>=77.0.3" in pyproject["build-system"]["requires"]
     assert project["name"] == "hf-mcp"
-    assert project["version"] == "0.6.1"
+    assert project["version"] == "0.6.2"
     assert isinstance(project["version"], str) and project["version"].strip()
     assert project["scripts"]["hf-mcp"] == "hf_mcp.cli:main"
     assert project["keywords"] == ["hackforums", "mcp", "model-context-protocol"]
-    assert "Programming Language :: Python :: 3.11" in project["classifiers"]
+    for python_minor in ("3.11", "3.12", "3.13"):
+        assert (
+            f"Programming Language :: Python :: {python_minor}"
+            in project["classifiers"]
+        )
+    assert any(c.startswith("Development Status ::") for c in project["classifiers"])
+    assert project["description"].strip()
+    assert project["authors"]
+    assert set(project["urls"]) >= {"Homepage", "Repository", "Issues", "Changelog"}
+    for url in project["urls"].values():
+        assert url.startswith("https://github.com/CortaLabs/hf_mcp")
     assert pyproject["tool"]["setuptools"]["package-data"]["hf_mcp"] == ["data/*.json"]
     assert pyproject["tool"]["setuptools"]["data-files"][
         "skills/hf-mycode/references"
@@ -888,12 +881,77 @@ def test_smoke_failure_receipt_binds_safe_check_exit_and_argv(
 
 @pytest.mark.core
 @pytest.mark.build
-def test_release_metadata_describes_build_smoke_scope() -> None:
+def test_release_metadata_describes_current_release() -> None:
+    version = tomllib.loads(PYPROJECT_PATH.read_text(encoding="utf-8"))["project"][
+        "version"
+    ]
     changelog = (PRODUCT_ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
-    readme = (PRODUCT_ROOT / "README.md").read_text(encoding="utf-8")
+    readme = README_PATH.read_text(encoding="utf-8")
 
-    assert "## 0.6.1" in changelog
-    assert "## 0.6.0" in changelog
-    assert "## 0.4.6" in changelog
-    assert "## 0.4.5" in changelog
-    assert "Current release line: `0.6.1`." in readme
+    assert f"## {version}" in changelog
+    assert changelog.index(f"## {version}") < changelog.index("## 0.6.1")
+    assert "Version 0.4" not in readme
+    assert "Current release line" not in readme
+
+
+@pytest.mark.core
+@pytest.mark.build
+def test_public_docs_have_no_internal_process_language() -> None:
+    banned = (
+        "this wave",
+        "6083735",
+        "fid 375",
+        "operator-approved",
+        "hackforums-council",
+        "export boundary",
+    )
+    public_files = [
+        README_PATH,
+        PRODUCT_ROOT / "config.example.yaml",
+        *sorted((PRODUCT_ROOT / "docs").glob("*.md")),
+        *sorted((PRODUCT_ROOT / "docs").glob("*.html")),
+        *sorted((PRODUCT_ROOT / "skills").rglob("*.md")),
+    ]
+    for path in public_files:
+        text = path.read_text(encoding="utf-8").lower()
+        for term in banned:
+            assert term not in text, f"{term!r} found in {path.name}"
+
+
+@pytest.mark.core
+@pytest.mark.build
+def test_packaging_files_reference_only_existing_files() -> None:
+    pyproject = tomllib.loads(PYPROJECT_PATH.read_text(encoding="utf-8"))
+    data_files = pyproject["tool"]["setuptools"]["data-files"]
+    for patterns in data_files.values():
+        for pattern in patterns:
+            assert list(PRODUCT_ROOT.glob(pattern)), (
+                f"data-files matches nothing: {pattern}"
+            )
+
+    for line in SDIST_MANIFEST_PATH.read_text(encoding="utf-8").splitlines():
+        if line.startswith("include "):
+            assert (PRODUCT_ROOT / line.removeprefix("include ")).exists(), line
+
+    assert not (PRODUCT_ROOT / "docs" / "export_boundary.md").exists()
+    assert not list((PRODUCT_ROOT / "docs").glob("*.mycode"))
+    assert ".council/" in (PRODUCT_ROOT / ".gitignore").read_text(encoding="utf-8")
+
+
+@pytest.mark.core
+@pytest.mark.build
+@pytest.mark.regression
+def test_version_ignores_unrelated_pyproject_outside_a_source_tree(
+    tmp_path: Path,
+) -> None:
+    site = tmp_path / "lib" / "python3.12" / "site-packages" / "hf_mcp"
+    site.mkdir(parents=True)
+    (site / "__init__.py").write_bytes(
+        (PRODUCT_ROOT / "src" / "hf_mcp" / "__init__.py").read_bytes()
+    )
+    (tmp_path / "lib" / "pyproject.toml").write_text(
+        '[project]\nname = "hf-mcp"\nversion = "9.9.9"\n', encoding="utf-8"
+    )
+    namespace = runpy.run_path(str(site / "__init__.py"))
+    assert namespace["_read_local_pyproject_version"]() is None
+    assert namespace["__version__"] == installed_version("hf-mcp")

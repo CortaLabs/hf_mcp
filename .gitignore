@@ -132,3 +132,6 @@ Thumbs.db
 tool_calls.jsonl
 
 
+
+# Local tooling state must never be committed.
+.council/

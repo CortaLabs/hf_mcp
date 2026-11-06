@@ -33,7 +33,7 @@ This matrix tracks final public endpoint-family status for `hf-mcp`.
 | `bytes.deposit` | write | available now | OpenAPI-confirmed | unproven | `confirm_live=true` required |
 | `bytes.withdraw` | write | available now | OpenAPI-confirmed | unproven | `confirm_live=true` required |
 | `bytes.bump` | write | available now | OpenAPI-confirmed | unproven | `confirm_live=true` required |
-| `contracts.write` | write | not exposed | PHP-source-confirmed, HF_API_REFERENCE-confirmed | unproven | OpenAPI-absent and blocked until operator-approved sandbox proof exists |
+| `contracts.write` | write | not exposed | PHP-source-confirmed, HF_API_REFERENCE-confirmed | unproven | not in the OpenAPI spec and no verified contract, so it is not offered |
 | Signature Market write family | write | not exposed | HF_API_REFERENCE-confirmed | unproven | no current concrete helper evidence for exposure |
 | Admin-only high-risk write family | write | not exposed | unproven | unproven | no verified concrete contract for exposure |
 | PM content-management family | write | not exposed | unproven | unproven | only `me.read` counters are supported today |
@@ -43,5 +43,5 @@ This matrix tracks final public endpoint-family status for `hf-mcp`.
 - `available now` rows are concrete and registered in the current MCP surface.
 - `not exposed` rows are explicit unsupported boundaries, not callable tools.
 - Capability policy may disable available rows, but this table tracks final exposure eligibility.
-- Manual live validation remains intentionally narrower than full write availability in this wave.
+- Write tools are registered only when the active profile enables them, and every live write needs `confirm_live=true`.
 - `forums.index` is package-catalog truth for zero-ID entry; treat it as a maintained local index, not authoritative live HF state.
