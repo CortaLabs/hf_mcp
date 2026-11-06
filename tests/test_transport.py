@@ -459,7 +459,7 @@ class _BrokenTokenStore:
     "error",
     [
         RuntimeError(f"No token {SEED_TOKEN}"),
-        PermissionError(f"/home/{SEED_TOKEN}/token.json too broad"),
+        PermissionError(f"/mnt/seeded/{SEED_TOKEN}/token.json too broad"),
         ValueError(SEED_TOKEN),
         json.JSONDecodeError(SEED_TOKEN, "doc", 0),
         OSError(SEED_TOKEN),
