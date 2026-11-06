@@ -45,7 +45,7 @@ the MCP server.
 ## Use all supported tools by default
 
 For the ChatGPT connection, use a dedicated per-consumer YAML with
-`profile: full_api`. This profile exposes all 24 supported tools
+`profile: full_api`. This profile exposes all 27 supported tools
 through this profile; check `hf-mcp --version` and the release notes when using
 another release. The package's general fallback profile is `reader`, so select
 `full_api` explicitly for this connection. Keep ChatGPT's config separate from
@@ -93,13 +93,16 @@ enabled_parameter_families:
   - selectors.post
   - filters.pagination
   - fields.posts.body
+  - output.options
 read_output_defaults:
   mode: readable
   include_raw_payload: false
   body_format: markdown
 ```
 
-This optional profile excludes write capabilities and the `confirm.live`
+The `output.options` family keeps `output_mode`, `include_raw_payload` and
+`body_format` on these reads (and `view` and `include_inactive` on `forums_index`); a `custom` profile without it drops them from the tool
+schemas. This optional profile excludes write capabilities and the `confirm.live`
 parameter family. Do not pass `--profile custom` on the command line when using
 this YAML: the CLI override replaces its capability overlays. If another agent
 also uses `hf-mcp`, preserve its settings in its own config. Sharing an existing
@@ -255,7 +258,7 @@ Use ChatGPT web in the workspace associated with the tunnel:
    plugin. Do not enter HF OAuth credentials into ChatGPT. Tunnel authorization
    and HF server authentication are separate layers.
 4. Install or enable the resulting private app in that workspace and refresh
-   its available tools. With the default `full_api` profile, expect all 24
+   its available tools. With the default `full_api` profile, expect all 27
    currently supported tools. If you deliberately selected the optional custom
    read profile, expect only `forums_index`, `forums_read`, `threads_read`, and
    `posts_read`.

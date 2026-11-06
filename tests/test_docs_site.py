@@ -149,3 +149,45 @@ def test_relative_links_in_readme_docs_and_skills_resolve() -> None:
             assert (page.parent / target).resolve().exists(), (
                 f"{page.name} links to missing {target}"
             )
+
+
+def test_docs_list_exactly_the_registered_tools_and_profile_sizes() -> None:
+    from hf_mcp.config import PRESET_CAPABILITIES
+    from hf_mcp.registry import TOOLS
+
+    tool_names = {spec.name for spec in TOOLS}
+    readme = _read(README_PAGE)
+    overview = _read(TOOL_OVERVIEW_PAGE)
+    coverage = _read(COVERAGE_MATRIX_PAGE)
+
+    listed = set(re.findall(r"^\| `([a-z_.]+)` \| available now", overview, re.M))
+    assert listed == tool_names
+    for name in tool_names:
+        assert f"`{name}`" in readme, f"README omits {name}"
+        assert name in coverage, f"coverage_matrix omits {name}"
+
+    sizes = {
+        profile: sum(1 for spec in TOOLS if spec.capability in capabilities)
+        for profile, capabilities in PRESET_CAPABILITIES.items()
+    }
+    assert f"all {sizes['full_api']} tools" in readme
+    assert f"all {sizes['full_api']} supported tools" in _read(
+        DOCS_DIR / "chatgpt_tunnel.md"
+    )
+    for profile in ("reader", "forum_operator"):
+        assert f"({sizes[profile]} tools:" in readme
+        assert f"| {sizes[profile]}: " in overview
+    assert (
+        f"`reader` registers {sizes['reader']} tools, `forum_operator` "
+        f"{sizes['forum_operator']} and `full_api` {sizes['full_api']}"
+    ) in _read(DOCS_DIR / "configuration.md")
+
+
+def test_docs_describe_templates_dir_and_output_options_requirement() -> None:
+    configuration = _read(DOCS_DIR / "configuration.md")
+
+    assert "templates_dir" in configuration
+    assert "HF_MCP_TEMPLATES_DIR" in configuration
+    assert "64 KiB" in configuration
+    assert "output.options" in configuration
+    assert "output.options" in _read(DOCS_DIR / "chatgpt_tunnel.md")

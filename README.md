@@ -62,6 +62,8 @@ Full details and selectors are in [`docs/tool_overview.md`](docs/tool_overview.m
 **Draft** (local only, nothing is sent to Hack Forums)
 
 - `formatting.preflight` checks how MyCode or Markdown converts to Hack Forums MyCode and can save a draft
+- `formatting.convert` converts Markdown or MyCode to Hack Forums MyCode and reports what could not be carried over; nothing is saved
+- `templates.list`, `templates.render` list and fill your own named post templates from `templates_dir`
 - `drafts.list`, `drafts.read`, `drafts.update`, `drafts.delete`
 
 **Write** (live requests, each requires `confirm_live=true`)
@@ -75,16 +77,18 @@ advanced account fields are enabled.
 
 ## Safety model
 
-A profile in your config decides which tools the server registers: `reader` (reads
-and local drafts, the default), `forum_operator` (adds `threads.create` and
-`posts.reply`), `full_api` (all 24 tools), or `custom` (start empty, opt in per
-capability). Tools outside the profile are not registered at all. Write tools fail
+A profile in your config decides which tools the server registers: `reader` (18 tools:
+reads, `formatting.convert`, the template tools and `drafts.list`/`drafts.read`; the
+default), `forum_operator` (23 tools: adds `formatting.preflight`, `drafts.update`,
+`drafts.delete`, `threads.create` and `posts.reply`), `full_api` (all 27 tools), or
+`custom` (start empty, opt in per capability and parameter family). Tools outside the profile are not registered at all. Write tools fail
 closed: without `confirm_live=true` no request leaves your machine. Drafts are local
 files, and a draft's `scheduled_at` is only a note; `hf-mcp` has no scheduler and never
 posts on its own. Failures come back as MCP errors with a stable code, such as
 `RATE_LIMITED` or `WRITE_OUTCOME_UNKNOWN`, and never echo tokens or upstream error
 text. Links and images with unsafe schemes such as `javascript:` are rejected before
-anything is posted. See [`docs/security_model.md`](docs/security_model.md).
+anything is posted. Free-text messages and sources are limited to 500,000 characters
+and anything over that is refused. See [`docs/security_model.md`](docs/security_model.md).
 
 ## Reading output
 
@@ -102,7 +106,9 @@ Examples are in [`docs/examples.md`](docs/examples.md).
 Config lives at `~/.config/hf_mcp/config.yaml` and the token at
 `~/.config/hf_mcp/token.json`. Override them with `HF_MCP_CONFIG`, `HF_MCP_ENV_FILE`,
 and `HF_MCP_TOKEN_PATH`. Policy goes in YAML and secrets stay in `.env` or the
-environment. See [`docs/configuration.md`](docs/configuration.md) and
+environment. Your own post templates live in `templates_dir` (default
+`~/.config/hf_mcp/templates`, setting `templates_dir` or `HF_MCP_TEMPLATES_DIR`); the
+file rules are in [`docs/configuration.md`](docs/configuration.md#post-templates). See [`docs/configuration.md`](docs/configuration.md) and
 [`config.example.yaml`](config.example.yaml).
 
 ## ChatGPT

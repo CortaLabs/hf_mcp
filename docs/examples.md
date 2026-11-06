@@ -508,6 +508,41 @@ Response (illustrative):
 Use fake transport/local test lanes for routine verification. Live mutations
 stay operator-controlled.
 
+## Local content tools: `formatting.convert`, `templates.list`, `templates.render`
+
+These three tools run locally. They never contact Hack Forums, never save anything and
+never need `confirm_live`.
+
+`formatting.convert` request:
+
+```json
+{"message": "# Update\n\n- first\n- second", "message_format": "markdown"}
+```
+
+The result carries `mycode` (the converted Hack Forums MyCode), `conversion_findings`
+(each construct that could not be carried over) and `issues`, all in `structuredContent`.
+`message_format` is `markdown` (default) or `mycode`.
+
+`templates.list` takes no arguments and returns the valid templates from `templates_dir`:
+
+```json
+{"templates": [{"name": "weekly", "description": "Weekly update post",
+  "message_format": "markdown",
+  "placeholders": [{"key": "week", "description": "Week number", "required": true}]}],
+ "invalid_count": 0}
+```
+
+`templates.render` request:
+
+```json
+{"name": "weekly", "values": {"week": "12"}}
+```
+
+The result carries `name`, `source_text` (the template with your values inserted),
+`mycode` and `conversion_findings`. An unknown template name returns the
+`RESOURCE_UNAVAILABLE` error; unknown or missing required values are refused. The
+template file rules are in [`configuration.md`](configuration.md#post-templates).
+
 ## Draft metadata and scheduling
 
 Draft artifacts may include metadata fields such as `scheduled_at`, but this is
