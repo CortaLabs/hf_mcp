@@ -81,7 +81,10 @@ and local drafts, the default), `forum_operator` (adds `threads.create` and
 capability). Tools outside the profile are not registered at all. Write tools fail
 closed: without `confirm_live=true` no request leaves your machine. Drafts are local
 files, and a draft's `scheduled_at` is only a note; `hf-mcp` has no scheduler and never
-posts on its own. See [`docs/security_model.md`](docs/security_model.md).
+posts on its own. Failures come back as MCP errors with a stable code, such as
+`RATE_LIMITED` or `WRITE_OUTCOME_UNKNOWN`, and never echo tokens or upstream error
+text. Links and images with unsafe schemes such as `javascript:` are rejected before
+anything is posted. See [`docs/security_model.md`](docs/security_model.md).
 
 ## Reading output
 

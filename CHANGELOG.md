@@ -2,6 +2,21 @@
 
 All notable changes to hf-mcp are listed here, newest first.
 
+## 0.7.0
+
+Errors are now honest and safe. Hack Forums failures, including HTTP 200 responses that report a failure, come back as MCP errors with a stable code instead of looking like success. A write that times out is reported as "outcome unknown" and never retried. Upstream error bodies and tokens are no longer echoed. Lists and byte amounts come back exactly as Hack Forums sent them. Links and images with unsafe schemes such as `javascript:` or `data:` are rejected before posting. The token file is used only when it is a private regular file you own.
+
+- Login refuses `HF_MCP_AUTHORIZE_URL` and `HF_MCP_TOKEN_URL` overrides that are not `https` URLs with a host, before it opens a browser or sends anything.
+- A failed login token exchange now names the cause: rate limited, Hack Forums unavailable, rejected credentials, or another rejection.
+
+Breaking:
+
+- Error results are now `isError` with a `structuredContent.error` object, not free-text exception messages.
+- Bytes amounts are returned as exact strings and are no longer truncated to integers.
+- List rows keep Hack Forums order and are no longer re-sorted.
+- Token files that are symlinks, not owned by you, or not mode 0600 are refused.
+- In `raw` output mode, `structuredContent` values now use the same normalized string form as the other modes.
+
 ## 0.6.2
 
 - Rewrote the README around installing, authorizing, and running the server, with the tools grouped as read, draft, and write and a short safety model.

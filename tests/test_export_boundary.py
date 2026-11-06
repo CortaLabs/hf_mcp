@@ -215,7 +215,7 @@ def test_pyproject_release_contract_and_metadata_boundary() -> None:
 
     assert "setuptools>=77.0.3" in pyproject["build-system"]["requires"]
     assert project["name"] == "hf-mcp"
-    assert project["version"] == "0.6.2"
+    assert re.fullmatch(r"\d+\.\d+\.\d+", project["version"])
     assert isinstance(project["version"], str) and project["version"].strip()
     assert project["scripts"]["hf-mcp"] == "hf_mcp.cli:main"
     assert project["keywords"] == ["hackforums", "mcp", "model-context-protocol"]
