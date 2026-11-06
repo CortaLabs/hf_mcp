@@ -82,10 +82,10 @@ EXPECTED_WIRE_PAIRS = {
 }
 
 
-def test_table_declares_the_24_published_tools_once() -> None:
-    assert len(TOOLS) == 24
-    assert len({spec.name for spec in TOOLS}) == 24
-    assert len({spec.mcp_name for spec in TOOLS}) == 24
+def test_table_declares_the_27_published_tools_once() -> None:
+    assert len(TOOLS) == 27
+    assert len({spec.name for spec in TOOLS}) == 27
+    assert len({spec.mcp_name for spec in TOOLS}) == 27
     assert get_tool_spec("threads.read").mcp_name == "threads_read"
     with pytest.raises(KeyError):
         get_tool_spec("hf.doctor")
@@ -111,6 +111,9 @@ def test_groups_select_the_handler_modules() -> None:
     assert {s.name for s in get_specs("local")} == {
         "forums.index",
         "formatting.preflight",
+        "formatting.convert",
+        "templates.list",
+        "templates.render",
         "drafts.list",
         "drafts.read",
         "drafts.update",

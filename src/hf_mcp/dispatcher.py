@@ -44,7 +44,11 @@ def build_handlers(
     """
     draft_dir = settings.draft_dir
     available: dict[str, Handler] = {}
-    available.update(build_formatting_handlers(draft_dir=draft_dir))
+    available.update(
+        build_formatting_handlers(
+            draft_dir=draft_dir, templates_dir=settings.templates_dir
+        )
+    )
     available.update(build_draft_handlers(draft_dir=draft_dir))
     available.update(build_forum_index_handlers())
     if transport is not None:

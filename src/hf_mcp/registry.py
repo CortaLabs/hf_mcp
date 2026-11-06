@@ -19,6 +19,9 @@ Operation = Literal["read", "write", "local"]
 Group = Literal["core_read", "extended_read", "write", "local"]
 
 DRAFT_ID_PATTERN = "^[a-f0-9]{32}$"
+TEMPLATE_NAME_PATTERN = "^[a-z0-9][a-z0-9_-]{0,63}$"
+# Same ceiling as a draft source file (draft_store._MAX_DRAFT_SOURCE_BYTES).
+MAX_CONVERT_CHARS = 500_000
 
 FAMILY_KEY = "x-hf-family"
 WIRE_KEY = "x-hf-wire"
@@ -439,6 +442,59 @@ TOOLS: tuple[ToolSpec, ...] = (
         flags=(False, False, False, False),
     ),
     _tool(
+        "formatting.convert",
+        "formatting.convert",
+        "local",
+        "Convert Markdown or MyCode to Hack Forums MyCode and report conversion findings and issues; nothing is saved and nothing is sent.",
+        {
+            "message": _p(
+                "formatting.convert",
+                "string",
+                minLength=1,
+                maxLength=MAX_CONVERT_CHARS,
+            ),
+            "message_format": _p(
+                "formatting.convert",
+                "string",
+                enum=_MESSAGE_FORMATS,
+                default="markdown",
+                description="Input format of message.",
+            ),
+        },
+        operation="read",
+        required=("message",),
+        required_families=("formatting.convert",),
+        flags=_LOCAL_READ,
+    ),
+    _tool(
+        "templates.list",
+        "templates.read",
+        "local",
+        "List the named post templates in the local templates directory with their placeholders; invalid template files are only counted.",
+        {},
+        operation="read",
+        flags=_LOCAL_READ,
+    ),
+    _tool(
+        "templates.render",
+        "templates.read",
+        "local",
+        "Fill a named local template with string values and return its source text and Hack Forums MyCode; nothing is saved and nothing is sent.",
+        {
+            "name": _p("templates.render", "string", pattern=TEMPLATE_NAME_PATTERN),
+            "values": _p(
+                "templates.render",
+                "object",
+                additionalProperties={"type": "string", "maxLength": MAX_CONVERT_CHARS},
+                default={},
+            ),
+        },
+        operation="read",
+        required=("name",),
+        required_families=("templates.render",),
+        flags=_LOCAL_READ,
+    ),
+    _tool(
         "drafts.list",
         "drafts.read",
         "local",
@@ -587,6 +643,8 @@ def get_specs(group: Group) -> tuple[ToolSpec, ...]:
 __all__ = [
     "DRAFT_ID_PATTERN",
     "FAMILY_KEY",
+    "MAX_CONVERT_CHARS",
+    "TEMPLATE_NAME_PATTERN",
     "TOOLS",
     "WIRE_KEY",
     "ToolSpec",
