@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 import re
+from dataclasses import dataclass
 from typing import Literal
-
-from .capabilities import CAPABILITY_PARAMETER_FAMILIES
 
 Operation = Literal["read", "write"]
 TransportKind = Literal["generic", "helper"]
+Locality = Literal["local", "remote"]
 
 _MCP_TOOL_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
 
@@ -21,10 +20,18 @@ class ToolSpec:
     helper_path: str | None
     transport_kind: TransportKind
     parameter_families: tuple[str, ...]
+    locality: Locality = "remote"
 
     @property
     def name(self) -> str:
         return self.tool_name
+
+    @property
+    def description(self) -> str:
+        return next(
+            (row.description for row in _MATRIX_ROWS if row.tool_name == self.tool_name),
+            "",
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,7 +42,9 @@ class _MatrixRow:
     operation: Operation
     helper_path: str | None
     transport_kind: TransportKind
-    parameter_families: tuple[str, ...] | None = None
+    parameter_families: tuple[str, ...] = ()
+    locality: Locality = "remote"
+    description: str = ""
 
 
 _EXPECTED_COVERAGE_FAMILIES = frozenset(
@@ -64,6 +73,7 @@ _EXPECTED_COVERAGE_FAMILIES = frozenset(
         "bytes.deposit",
         "bytes.withdraw",
         "bytes.bump",
+        "hf.doctor",
     }
 )
 
@@ -77,6 +87,8 @@ _MATRIX_ROWS: tuple[_MatrixRow, ...] = (
         operation="read",
         helper_path="me",
         transport_kind="helper",
+        parameter_families=("fields.me.advanced", "fields.me.basic", "selectors.user"),
+        description="Read the current account's profile; advanced fields are optional. Output supports readable, structured, or raw modes.",
     ),
     _MatrixRow(
         tool_name="users.read",
@@ -85,6 +97,8 @@ _MATRIX_ROWS: tuple[_MatrixRow, ...] = (
         operation="read",
         helper_path="users",
         transport_kind="helper",
+        parameter_families=("fields.users.profile", "filters.pagination", "selectors.user"),
+        description="Read a public user profile by user ID, with optional profile fields, pagination, and readable, structured, or raw output.",
     ),
     _MatrixRow(
         tool_name="forums.index",
@@ -94,6 +108,8 @@ _MATRIX_ROWS: tuple[_MatrixRow, ...] = (
         helper_path=None,
         transport_kind="generic",
         parameter_families=(),
+        locality="local",
+        description="Discover root forums and categories from the packaged local catalog without a selector. Entries may lag live forum changes; output can be readable, structured, or raw.",
     ),
     _MatrixRow(
         tool_name="forums.read",
@@ -102,6 +118,8 @@ _MATRIX_ROWS: tuple[_MatrixRow, ...] = (
         operation="read",
         helper_path="forums",
         transport_kind="helper",
+        parameter_families=("filters.pagination", "selectors.forum"),
+        description="Read forum details by forum ID, with pagination and readable, structured, or raw output.",
     ),
     _MatrixRow(
         tool_name="threads.read",
@@ -110,6 +128,8 @@ _MATRIX_ROWS: tuple[_MatrixRow, ...] = (
         operation="read",
         helper_path="threads",
         transport_kind="helper",
+        parameter_families=("filters.pagination", "selectors.forum", "selectors.thread"),
+        description="Browse threads by forum, thread, or user selector; optionally include first-post content. Supports pagination and readable, structured, or raw output.",
     ),
     _MatrixRow(
         tool_name="posts.read",
@@ -118,6 +138,8 @@ _MATRIX_ROWS: tuple[_MatrixRow, ...] = (
         operation="read",
         helper_path="posts",
         transport_kind="helper",
+        parameter_families=("fields.posts.body", "filters.pagination", "selectors.post", "selectors.thread"),
+        description="Read posts by thread, post, or user selector; optionally include post bodies. Supports pagination and readable, structured, or raw output.",
     ),
     _MatrixRow(
         tool_name="bytes.read",
@@ -126,6 +148,8 @@ _MATRIX_ROWS: tuple[_MatrixRow, ...] = (
         operation="read",
         helper_path="bytes",
         transport_kind="helper",
+        parameter_families=("fields.bytes.amount", "selectors.bytes"),
+        description="Read a user's Bytes account or transaction entries with supported filters, pagination, and optional amount fields; output can be readable, structured, or raw.",
     ),
     _MatrixRow(
         tool_name="contracts.read",
@@ -134,6 +158,8 @@ _MATRIX_ROWS: tuple[_MatrixRow, ...] = (
         operation="read",
         helper_path="contracts",
         transport_kind="helper",
+        parameter_families=("filters.pagination", "selectors.contract"),
+        description="Browse contract records by supported contract or user selector, with pagination and readable, structured, or raw output.",
     ),
     _MatrixRow(
         tool_name="disputes.read",
@@ -142,6 +168,8 @@ _MATRIX_ROWS: tuple[_MatrixRow, ...] = (
         operation="read",
         helper_path="disputes",
         transport_kind="helper",
+        parameter_families=("filters.pagination", "selectors.dispute"),
+        description="Browse disputes by supported dispute or participant selector, with pagination and readable, structured, or raw output.",
     ),
     _MatrixRow(
         tool_name="bratings.read",
@@ -150,6 +178,8 @@ _MATRIX_ROWS: tuple[_MatrixRow, ...] = (
         operation="read",
         helper_path="bratings",
         transport_kind="helper",
+        parameter_families=("filters.pagination", "selectors.user"),
+        description="Browse b-rating records by supported user or contract selector, with pagination and readable, structured, or raw output.",
     ),
     _MatrixRow(
         tool_name="sigmarket.market.read",
@@ -158,6 +188,8 @@ _MATRIX_ROWS: tuple[_MatrixRow, ...] = (
         operation="read",
         helper_path="sigmarket/market",
         transport_kind="helper",
+        parameter_families=("filters.pagination", "selectors.sigmarket"),
+        description="Browse Signature Market listings by supported listing or user selector, with pagination and readable, structured, or raw output.",
     ),
     _MatrixRow(
         tool_name="sigmarket.order.read",
@@ -166,6 +198,8 @@ _MATRIX_ROWS: tuple[_MatrixRow, ...] = (
         operation="read",
         helper_path="sigmarket/order",
         transport_kind="helper",
+        parameter_families=("filters.pagination", "selectors.sigmarket"),
+        description="Browse Signature Market orders by supported order, listing, or user selector, with pagination and readable, structured, or raw output.",
     ),
     _MatrixRow(
         tool_name="admin.high_risk.read",
@@ -175,6 +209,7 @@ _MATRIX_ROWS: tuple[_MatrixRow, ...] = (
         helper_path="admin/high-risk/read",
         transport_kind="helper",
         parameter_families=("filters.pagination",),
+        description="Read high-risk admin data when enabled. Supports pagination and readable, structured, or raw output.",
     ),
     _MatrixRow(
         tool_name="formatting.preflight",
@@ -184,6 +219,8 @@ _MATRIX_ROWS: tuple[_MatrixRow, ...] = (
         helper_path=None,
         transport_kind="generic",
         parameter_families=("formatting.content",),
+        locality="local",
+        description="Check how MyCode or Markdown formats as Hack Forums MyCode and report conversion findings; preflight can save a local draft.",
     ),
     _MatrixRow(
         tool_name="drafts.list",
@@ -193,6 +230,8 @@ _MATRIX_ROWS: tuple[_MatrixRow, ...] = (
         helper_path=None,
         transport_kind="generic",
         parameter_families=("drafts.filters",),
+        locality="local",
+        description="List local drafts with optional status, category, title, or schedule filters and paginated results.",
     ),
     _MatrixRow(
         tool_name="drafts.read",
@@ -202,6 +241,8 @@ _MATRIX_ROWS: tuple[_MatrixRow, ...] = (
         helper_path=None,
         transport_kind="generic",
         parameter_families=("drafts.selector",),
+        locality="local",
+        description="Read a local draft by its draft ID and inspect its source, formatted content, and stored metadata.",
     ),
     _MatrixRow(
         tool_name="drafts.update",
@@ -211,6 +252,8 @@ _MATRIX_ROWS: tuple[_MatrixRow, ...] = (
         helper_path=None,
         transport_kind="generic",
         parameter_families=("drafts.selector", "drafts.metadata"),
+        locality="local",
+        description="Update title, category, status, or scheduled-time metadata on a selected local draft; content is not sent to Hack Forums.",
     ),
     _MatrixRow(
         tool_name="drafts.delete",
@@ -220,6 +263,8 @@ _MATRIX_ROWS: tuple[_MatrixRow, ...] = (
         helper_path=None,
         transport_kind="generic",
         parameter_families=("drafts.selector", "drafts.confirm_delete"),
+        locality="local",
+        description="Delete a selected local draft after explicit confirmation; this removes the local artifact without contacting Hack Forums.",
     ),
     _MatrixRow(
         tool_name="threads.create",
@@ -228,6 +273,8 @@ _MATRIX_ROWS: tuple[_MatrixRow, ...] = (
         operation="write",
         helper_path="threads",
         transport_kind="helper",
+        parameter_families=("confirm.live", "selectors.forum", "writes.content"),
+        description="Send a live thread-creation request to a selected forum with a subject and message. Requires explicit live confirmation.",
     ),
     _MatrixRow(
         tool_name="posts.reply",
@@ -236,6 +283,8 @@ _MATRIX_ROWS: tuple[_MatrixRow, ...] = (
         operation="write",
         helper_path="posts",
         transport_kind="helper",
+        parameter_families=("confirm.live", "selectors.thread", "writes.content"),
+        description="Send a reply to a selected thread with message content and explicit live confirmation.",
     ),
     _MatrixRow(
         tool_name="bytes.transfer",
@@ -244,6 +293,8 @@ _MATRIX_ROWS: tuple[_MatrixRow, ...] = (
         operation="write",
         helper_path="bytes",
         transport_kind="helper",
+        parameter_families=("confirm.live", "selectors.bytes", "writes.bytes"),
+        description="Send a live Bytes transfer to a selected user with an amount and explicit live confirmation.",
     ),
     _MatrixRow(
         tool_name="bytes.deposit",
@@ -252,6 +303,8 @@ _MATRIX_ROWS: tuple[_MatrixRow, ...] = (
         operation="write",
         helper_path="bytes/deposit",
         transport_kind="helper",
+        parameter_families=("confirm.live", "selectors.bytes", "writes.bytes"),
+        description="Send a live Bytes deposit request with an amount and explicit live confirmation.",
     ),
     _MatrixRow(
         tool_name="bytes.withdraw",
@@ -260,6 +313,8 @@ _MATRIX_ROWS: tuple[_MatrixRow, ...] = (
         operation="write",
         helper_path="bytes/withdraw",
         transport_kind="helper",
+        parameter_families=("confirm.live", "selectors.bytes", "writes.bytes"),
+        description="Send a live Bytes withdrawal request with an amount and explicit live confirmation.",
     ),
     _MatrixRow(
         tool_name="bytes.bump",
@@ -268,14 +323,25 @@ _MATRIX_ROWS: tuple[_MatrixRow, ...] = (
         operation="write",
         helper_path="bytes/bump",
         transport_kind="helper",
+        parameter_families=("confirm.live", "selectors.bytes", "writes.bytes"),
+        description="Send a live Bytes bump request for a selected thread with explicit live confirmation.",
+    ),
+    _MatrixRow(
+        tool_name="hf.doctor",
+        coverage_family="hf.doctor",
+        capability_family="hf.doctor",
+        operation="read",
+        helper_path=None,
+        transport_kind="generic",
+        parameter_families=(),
+        locality="local",
+        description="Local diagnostic catalog entry; this row is not currently a callable MCP tool.",
     ),
 )
 
 
 def _resolve_parameter_families(row: _MatrixRow) -> tuple[str, ...]:
-    if row.parameter_families is not None:
-        return tuple(dict.fromkeys(row.parameter_families))
-    return tuple(sorted(CAPABILITY_PARAMETER_FAMILIES.get(row.capability_family, frozenset())))
+    return tuple(sorted(set(row.parameter_families)))
 
 
 def _build_tool_spec(row: _MatrixRow) -> ToolSpec:
@@ -287,6 +353,7 @@ def _build_tool_spec(row: _MatrixRow) -> ToolSpec:
         helper_path=row.helper_path,
         transport_kind=row.transport_kind,
         parameter_families=_resolve_parameter_families(row),
+        locality=row.locality,
     )
 
 

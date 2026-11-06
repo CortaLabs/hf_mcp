@@ -205,7 +205,7 @@ def get_profile(
         include_advanced_fields=include_advanced_fields,
         allow_advanced_fields=allow_advanced_fields,
     )
-    return transport.read(asks=asks, helper="me")
+    return transport.read(asks=asks)
 
 
 def get_user(
@@ -222,7 +222,7 @@ def get_user(
         per_page=per_page,
         include_profile_fields=include_profile_fields,
     )
-    return transport.read(asks=asks, helper="users")
+    return transport.read(asks=asks)
 
 
 def list_forums(
@@ -233,7 +233,7 @@ def list_forums(
     per_page: int | None = DEFAULT_PER_PAGE,
 ) -> dict[str, Any]:
     asks = _build_forums_asks(fid=fid, page=page, per_page=per_page)
-    return transport.read(asks=asks, helper="forums")
+    return transport.read(asks=asks)
 
 
 def list_threads(
@@ -246,7 +246,7 @@ def list_threads(
     per_page: int | None = DEFAULT_PER_PAGE,
 ) -> dict[str, Any]:
     asks = _build_threads_asks(fid=fid, tid=tid, uid=uid, page=page, per_page=per_page)
-    return transport.read(asks=asks, helper="threads")
+    return transport.read(asks=asks)
 
 
 def list_posts(
@@ -267,7 +267,7 @@ def list_posts(
         per_page=per_page,
         include_post_body=include_post_body,
     )
-    return transport.read(asks=asks, helper="posts")
+    return transport.read(asks=asks)
 
 
 def _coerce_page(page: int | None) -> int:
@@ -469,11 +469,12 @@ def build_core_read_handlers(policy: CapabilityPolicy, transport: HFTransport) -
         defaults = resolve_read_output_defaults(settings, output_mode, include_raw_payload, body_format)
         need_raw = defaults.mode == "raw" or defaults.include_raw_payload
         raw_payload: dict[str, Any] | None = None
+        # Core resources travel in asks; the generic endpoint is supported live.
         if need_raw:
-            raw_payload = transport.read_raw(asks=asks, helper=helper)
+            raw_payload = transport.read_raw(asks=asks, helper=None)
             normalized_payload = normalize_response(raw_payload)
         else:
-            normalized_payload = transport.read(asks=asks, helper=helper)
+            normalized_payload = transport.read(asks=asks, helper=None)
         normalized_payload = format_body_fields(normalized_payload, defaults.body_format)
         return _build_read_tool_result(
             tool_name=tool_name,

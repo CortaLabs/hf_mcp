@@ -4,6 +4,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from jsonschema import Draft202012Validator, ValidationError
 
 PRODUCT_ROOT = Path(__file__).resolve().parents[1]
 SRC_PATH = PRODUCT_ROOT / "src"
@@ -27,11 +28,45 @@ def _policy(capabilities: set[str], parameter_families: set[str]) -> CapabilityP
     return CapabilityPolicy(settings=settings)
 
 
+@pytest.mark.core
+@pytest.mark.registry
+@pytest.mark.regression
 def test_registry_covers_documented_matrix_once() -> None:
     specs = build_registry()
     tool_names = {spec.tool_name for spec in specs}
     mcp_tool_names = {mcp_tool_name(spec.tool_name) for spec in specs}
 
+    expected_tool_names = {
+        "me.read",
+        "users.read",
+        "forums.index",
+        "forums.read",
+        "threads.read",
+        "posts.read",
+        "bytes.read",
+        "contracts.read",
+        "disputes.read",
+        "bratings.read",
+        "sigmarket.market.read",
+        "sigmarket.order.read",
+        "admin.high_risk.read",
+        "formatting.preflight",
+        "drafts.list",
+        "drafts.read",
+        "drafts.update",
+        "drafts.delete",
+        "threads.create",
+        "posts.reply",
+        "bytes.transfer",
+        "bytes.deposit",
+        "bytes.withdraw",
+        "bytes.bump",
+        "hf.doctor",
+    }
+
+    assert len(specs) == 25
+    assert tool_names == expected_tool_names
+    assert "hf_doctor" in mcp_tool_names
     assert len(specs) == len(registry_module._EXPECTED_COVERAGE_FAMILIES)
     assert {spec.coverage_family for spec in specs} == registry_module._EXPECTED_COVERAGE_FAMILIES
     assert len(tool_names) == len(specs)
@@ -46,11 +81,86 @@ def test_registry_covers_documented_matrix_once() -> None:
         "drafts.read",
         "drafts.update",
         "drafts.delete",
+        "hf.doctor",
     }
     assert all(
         spec.transport_kind == ("generic" if spec.tool_name in local_generic_tools else "helper")
         for spec in specs
     )
+
+
+@pytest.mark.core
+@pytest.mark.registry
+@pytest.mark.regression
+def test_hf_doctor_schema_and_output_metadata_remain_local_and_neutral() -> None:
+    spec = get_tool_spec("hf.doctor")
+    policy = _policy(capabilities={"hf.doctor"}, parameter_families=set())
+
+    schema = build_tool_schema(spec, policy)
+    output_schema = build_tool_output_schema(spec)
+
+    assert schema["type"] == "object"
+    assert schema["properties"] == {}
+    assert schema["additionalProperties"] is False
+    assert spec.transport_kind == "generic"
+    assert spec.locality == "local"
+    assert output_schema == {
+        "type": "object",
+        "additionalProperties": True,
+        "x-hf-helper-path": None,
+    }
+
+
+@pytest.mark.core
+@pytest.mark.registry
+def test_produced_tool_schemas_are_valid_draft_2020_12() -> None:
+    specs = build_registry()
+    policy = _policy(
+        capabilities={spec.capability_family for spec in specs},
+        parameter_families={family for spec in specs for family in spec.parameter_families},
+    )
+
+    for spec in specs:
+        Draft202012Validator.check_schema(build_tool_schema(spec, policy))
+        output_schema = build_tool_output_schema(spec)
+        if output_schema is not None:
+            Draft202012Validator.check_schema(output_schema)
+
+
+@pytest.mark.core
+@pytest.mark.registry
+@pytest.mark.regression
+def test_deposit_and_withdraw_amount_minimums_are_local_schema_copies() -> None:
+    policy = _policy(
+        capabilities={"bytes.transfer", "bytes.deposit", "bytes.withdraw", "bytes.bump"},
+        parameter_families={"selectors.bytes", "selectors.thread", "writes.bytes", "confirm.live"},
+    )
+
+    deposit = build_tool_schema(get_tool_spec("bytes.deposit"), policy)
+    withdraw = build_tool_schema(get_tool_spec("bytes.withdraw"), policy)
+    transfer = build_tool_schema(get_tool_spec("bytes.transfer"), policy)
+    bump = build_tool_schema(get_tool_spec("bytes.bump"), policy)
+
+    assert deposit["properties"]["amount"]["minimum"] == 100
+    assert withdraw["properties"]["amount"]["minimum"] == 100
+    assert transfer["properties"]["amount"]["minimum"] == 1
+    assert "amount" not in bump["properties"]
+
+    for schema in (deposit, withdraw):
+        amount_schema = {
+            "type": "object",
+            "properties": {"amount": schema["properties"]["amount"]},
+            "required": ["amount"],
+        }
+        validator = Draft202012Validator(amount_schema)
+        validator.validate({"amount": 100})
+        with pytest.raises(ValidationError):
+            validator.validate({"amount": 99})
+
+    transfer_first = build_tool_schema(get_tool_spec("bytes.transfer"), policy)
+    deposit_after_transfer = build_tool_schema(get_tool_spec("bytes.deposit"), policy)
+    assert transfer_first["properties"]["amount"]["minimum"] == 1
+    assert deposit_after_transfer["properties"]["amount"]["minimum"] == 100
 
 
 def test_mcp_tool_names_are_desktop_client_safe() -> None:

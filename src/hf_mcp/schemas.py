@@ -295,6 +295,12 @@ def build_tool_schema(spec: ToolSpec, policy: CapabilityPolicy) -> dict[str, Any
             for selector_name, selector_family in _TOOL_SELECTOR_PROPERTY_OVERRIDES.get(spec.tool_name, ()):
                 selector_schema = {"type": "integer", "minimum": 1}
                 updated_properties[selector_name] = _tag_with_family(selector_schema, selector_family)
+        if spec.tool_name in {"bytes.deposit", "bytes.withdraw"}:
+            amount_schema = updated_properties.get("amount")
+            if isinstance(amount_schema, dict):
+                updated_amount_schema = dict(amount_schema)
+                updated_amount_schema["minimum"] = 100
+                updated_properties["amount"] = updated_amount_schema
         schema["properties"] = updated_properties
     required_override = _TOOL_REQUIRED_OVERRIDES.get(spec.tool_name)
     if required_override is not None:
@@ -316,6 +322,7 @@ def build_tool_schema(spec: ToolSpec, policy: CapabilityPolicy) -> dict[str, Any
         "formatting.preflight",
         "drafts.list",
         "drafts.read",
+        "hf.doctor",
     }:
         properties = schema.get("properties")
         if isinstance(properties, dict):
@@ -355,6 +362,12 @@ def build_tool_schema(spec: ToolSpec, policy: CapabilityPolicy) -> dict[str, Any
 def build_tool_output_schema(spec: ToolSpec) -> dict[str, object] | None:
     if spec.operation != "read":
         return None
+    if spec.tool_name == "hf.doctor":
+        return {
+            "type": "object",
+            "additionalProperties": True,
+            "x-hf-helper-path": spec.helper_path,
+        }
     if spec.tool_name == "formatting.preflight":
         return {
             "type": "object",

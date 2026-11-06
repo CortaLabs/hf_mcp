@@ -54,6 +54,37 @@ class _CaptureServer:
         }
 
 
+@pytest.mark.parametrize("tool_name", ["me.read", "users.read"])
+@pytest.mark.parametrize("output_mode", ["structured", "raw"])
+def test_account_reads_use_generic_route_in_all_output_modes(
+    monkeypatch: pytest.MonkeyPatch, tool_name: str, output_mode: str,
+) -> None:
+    calls: list[dict[str, Any]] = []
+    resource = tool_name.split(".")[0]
+
+    def fake_post(self: HFTransport, route: str, payload: dict[str, Any], headers: dict[str, str]) -> dict[str, Any]:
+        calls.append({"route": route, "payload": payload})
+        if route != "/read":
+            raise RuntimeError("HF helper route failed with HTTP 404")
+        return {resource: {"uid": 5, "username": "reader"}}
+
+    monkeypatch.setattr(HFTransport, "_post_json", fake_post)
+    policy = _policy(
+        enabled_capabilities={tool_name},
+        enabled_parameter_families=set(CAPABILITY_PARAMETER_FAMILIES[tool_name]),
+    )
+    handlers = build_core_read_handlers(policy, HFTransport(_StubTokenStore()))
+    kwargs = {"uid": 5} if tool_name == "users.read" else {}
+    result = handlers[tool_name](output_mode=output_mode, **kwargs)
+    assert len(calls) == 1
+    assert calls[0]["payload"]["asks"][resource]["uid"] is True
+    assert calls[0]["payload"]["asks"][resource].get("_uid") == (5 if kwargs else None)
+    assert result["structuredContent"][resource][0]["uid"] == "5"
+    if output_mode == "raw":
+        raw = json.loads(result["content"][1]["resource"]["text"])
+        assert raw[resource]["uid"] == 5
+
+
 class _StubTokenStore:
     def require_bundle(self) -> TokenBundle:
         return TokenBundle(access_token="token", token_type="Bearer", scope=frozenset())
@@ -141,7 +172,7 @@ def test_dispatcher_output_excludes_disabled_core_read_capability() -> None:
     assert mcp_tool_name("forums.read") not in server.tools
 
 
-def test_list_posts_delegates_to_transport_helper_and_returns_normalized_output(
+def test_list_posts_delegates_to_generic_transport_and_returns_normalized_output(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     captured: dict[str, Any] = {}
@@ -169,7 +200,7 @@ def test_list_posts_delegates_to_transport_helper_and_returns_normalized_output(
         include_post_body=True,
     )
 
-    assert captured["route"] == "/read/posts"
+    assert captured["route"] == "/read"
     assert captured["payload"]["asks"]["posts"]["_tid"] == 123
     assert captured["payload"]["asks"]["posts"]["_pid"] == 7
     assert captured["payload"]["asks"]["posts"]["_page"] == 2
@@ -206,7 +237,7 @@ def test_me_handler_reads_authenticated_profile_without_uid_selector(
 
     result = handlers["me.read"](include_basic_fields=None, include_advanced_fields=True)
 
-    assert captured["route"] == "/read/me"
+    assert captured["route"] == "/read"
     me_asks = captured["payload"]["asks"]["me"]
     assert "_uid" not in me_asks
     assert me_asks["uid"] is True
@@ -256,7 +287,7 @@ def test_get_profile_omits_uid_selector_when_called_directly(monkeypatch: pytest
     transport = HFTransport(token_store=_StubTokenStore(), base_url="https://example.test")
     result = get_profile(transport=transport)
 
-    assert captured["route"] == "/read/me"
+    assert captured["route"] == "/read"
     assert captured["payload"]["asks"]["me"] == {
         "uid": True,
         "username": True,
@@ -306,7 +337,7 @@ def test_get_profile_includes_advanced_fields_only_when_opted_in_and_allowed(
     result = get_profile(transport=transport, include_advanced_fields=True, allow_advanced_fields=True)
 
     me_asks = captured["payload"]["asks"]["me"]
-    assert captured["route"] == "/read/me"
+    assert captured["route"] == "/read"
     assert me_asks["uid"] is True
     assert me_asks["username"] is True
     assert me_asks["usergroup"] is True
@@ -385,7 +416,7 @@ def test_get_user_defaults_optional_values_and_requests_profile_bundle(
     result = get_user(transport=transport, uid=5, page=None, per_page=None, include_profile_fields=True)
 
     user_asks = captured["payload"]["asks"]["users"]
-    assert captured["route"] == "/read/users"
+    assert captured["route"] == "/read"
     assert user_asks["_uid"] == 5
     assert user_asks["_page"] == 1
     assert user_asks["_perpage"] == 30
@@ -454,7 +485,7 @@ def test_list_threads_defaults_optional_values_and_requests_record_fields(
     result = list_threads(transport=transport, fid=375, page=None, per_page=None)
 
     thread_asks = captured["payload"]["asks"]["threads"]
-    assert captured["route"] == "/read/threads"
+    assert captured["route"] == "/read"
     assert thread_asks["_fid"] == 375
     assert "_tid" not in thread_asks
     assert thread_asks["_page"] == 1
@@ -515,7 +546,7 @@ def test_list_threads_supports_tid_and_uid_selectors_with_exact_hf_keys(
     list_threads(transport=transport, tid=123, uid=5, page=None, per_page=None)
 
     thread_asks = captured["payload"]["asks"]["threads"]
-    assert captured["route"] == "/read/threads"
+    assert captured["route"] == "/read"
     assert "_fid" not in thread_asks
     assert thread_asks["_tid"] == 123
     assert thread_asks["_uid"] == 5
@@ -559,7 +590,7 @@ def test_list_forums_defaults_optional_values_and_requests_forum_card_fields(
     result = list_forums(transport=transport, fid=375, page=None, per_page=None)
 
     forum_asks = captured["payload"]["asks"]["forums"]
-    assert captured["route"] == "/read/forums"
+    assert captured["route"] == "/read"
     assert forum_asks["_fid"] == 375
     assert forum_asks["_page"] == 1
     assert forum_asks["_perpage"] == 30
@@ -604,7 +635,7 @@ def test_list_posts_defaults_optional_values_and_requests_record_fields(
     )
 
     post_asks = captured["payload"]["asks"]["posts"]
-    assert captured["route"] == "/read/posts"
+    assert captured["route"] == "/read"
     assert post_asks["_tid"] == 123
     assert "_pid" not in post_asks
     assert post_asks["_page"] == 1
@@ -662,7 +693,7 @@ def test_list_posts_supports_uid_selector_without_tid(
     list_posts(transport=transport, uid=5, page=None, per_page=None, include_post_body=None)
 
     post_asks = captured["payload"]["asks"]["posts"]
-    assert captured["route"] == "/read/posts"
+    assert captured["route"] == "/read"
     assert "_pid" not in post_asks
     assert "_tid" not in post_asks
     assert post_asks["_uid"] == 5
@@ -692,7 +723,7 @@ def test_list_posts_supports_pid_selector_without_tid_or_uid(
     list_posts(transport=transport, pid=88, page=None, per_page=None, include_post_body=False)
 
     post_asks = captured["payload"]["asks"]["posts"]
-    assert captured["route"] == "/read/posts"
+    assert captured["route"] == "/read"
     assert post_asks["_pid"] == 88
     assert "_tid" not in post_asks
     assert "_uid" not in post_asks
@@ -736,7 +767,7 @@ def test_list_posts_include_post_body_false_removes_only_message(
     )
 
     post_asks = captured["payload"]["asks"]["posts"]
-    assert captured["route"] == "/read/posts"
+    assert captured["route"] == "/read"
     assert post_asks["_tid"] == 123
     assert "_pid" not in post_asks
     assert post_asks["_page"] == 1
@@ -945,8 +976,8 @@ def test_registered_posts_handler_supports_output_modes_and_raw_payload_attachme
 
     assert len(captured["read"]) == 2
     assert len(captured["read_raw"]) == 2
-    assert all(call["helper"] == "posts" for call in captured["read"])
-    assert all(call["helper"] == "posts" for call in captured["read_raw"])
+    assert all(call["helper"] is None for call in captured["read"])
+    assert all(call["helper"] is None for call in captured["read_raw"])
 
 
 def test_core_read_flow_chain_adds_hf_flow_and_preserves_endpoint_root_payloads(
@@ -959,9 +990,8 @@ def test_core_read_flow_chain_adds_hf_flow_and_preserves_endpoint_root_payloads(
     }
 
     def _fake_read(self: HFTransport, asks: dict[str, Any], helper: str | None = None) -> dict[str, Any]:
-        del asks
-        assert helper in payload_by_helper
-        return payload_by_helper[helper]
+        assert helper is None
+        return payload_by_helper[next(iter(asks))]
 
     monkeypatch.setattr(HFTransport, "read", _fake_read)
 

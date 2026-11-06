@@ -1,15 +1,6 @@
 name: Publish hf-mcp to PyPI
 
 'on':
-  push:
-    paths:
-      - pyproject.toml
-      - MANIFEST.in
-      - README.md
-      - docs/**
-      - scripts/build_release_dists.sh
-      - scripts/check_pypi_version_available.py
-      - .github/workflows/publish-hf-mcp-pypi.yml
   workflow_dispatch:
 
 jobs:

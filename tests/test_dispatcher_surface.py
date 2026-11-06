@@ -20,7 +20,7 @@ from hf_mcp.config import HFMCPSettings, PRESET_CAPABILITIES, PRESET_PARAMETER_F
 from hf_mcp.dispatcher import RuntimeBundle, register_tools
 from hf_mcp.metadata import get_tool_specs
 from hf_mcp.registry import get_documented_write_specs, mcp_tool_name
-from hf_mcp.server import _FastMCPToolAdapter
+from hf_mcp.server import _MCPServerToolAdapter
 from hf_mcp.server import create_server, serve_stdio
 from hf_mcp.token_store import TokenBundle
 from hf_mcp.tools.read_core import build_core_read_handlers
@@ -57,17 +57,15 @@ class _StubTokenStore:
 
 
 class _StubReadTransport:
-    def read(self, *, asks: dict[str, Any], helper: str) -> dict[str, Any]:
-        del asks
-        if helper == "me":
+    def read(self, *, asks: dict[str, Any], helper: str | None = None) -> dict[str, Any]:
+        if helper is None and "me" in asks:
             return {"me": [{"uid": "5", "username": "forge"}]}
         if helper == "sigmarket/order":
             return {"sigmarket/order": [{"oid": "17", "uid": "5"}]}
         raise AssertionError(f"unexpected helper: {helper}")
 
-    def read_raw(self, *, asks: dict[str, Any], helper: str) -> dict[str, Any]:
-        del asks
-        if helper == "me":
+    def read_raw(self, *, asks: dict[str, Any], helper: str | None = None) -> dict[str, Any]:
+        if helper is None and "me" in asks:
             return {"me": [{"uid": "5", "username": "forge", "raw": True}]}
         if helper == "sigmarket/order":
             return {"sigmarket/order": [{"oid": "17", "uid": "5", "raw": True}]}
@@ -120,6 +118,410 @@ def _assert_not_placeholder_handler(handler: Any) -> None:
     assert all("not implemented yet" not in constant for constant in string_constants)
 
 
+@pytest.mark.core
+@pytest.mark.registry
+def test_sdk_adapter_uses_defensive_original_schema_before_argument_coercion(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from mcp.server.mcpserver import MCPServer
+    from pydantic import ValidationError
+    import jsonschema
+
+    schema: dict[str, Any] = {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "title": "Caller-owned title",
+        "type": "object",
+        "$defs": {"choice": {"type": "string", "enum": ["allowed", "blocked"]}},
+        "properties": {
+            "selector_a": {"type": "string", "default": "A"},
+            "selector_b": {"type": "string", "default": "B"},
+            "choice": {"$ref": "#/$defs/choice"},
+            "count": {"type": "integer"},
+            "items": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {"code": {"type": "string", "pattern": "^[a-z]+$"}},
+                    "required": ["code"],
+                    "additionalProperties": False,
+                },
+            },
+            "details": {
+                "type": "object",
+                "properties": {"label": {"type": "string", "minLength": 1}},
+                "required": ["label"],
+                "additionalProperties": False,
+            },
+            "array_numbers": {"type": "array", "items": {"type": "integer", "minimum": 1}},
+            "text": {"type": "string", "minLength": 1},
+            "flag": {"type": "boolean"},
+            "mode": {"type": "string"},
+            "nullable": {"type": ["string", "null"]},
+            "timestamp": {"type": "string", "format": "date-time"},
+            "defaulted": {"type": "array", "items": {"type": "string"}, "default": ["safe"]},
+            "confirmed": {"type": "boolean", "const": True},
+        },
+        "required": ["confirmed", "count", "items", "details", "array_numbers", "text"],
+        "additionalProperties": False,
+        "anyOf": [{"required": ["selector_a"]}, {"required": ["selector_b"]}],
+        "oneOf": [
+            {"required": ["flag"]},
+            {"required": ["flag", "mode"], "properties": {"mode": {"const": "x"}}},
+        ],
+        "allOf": [{"properties": {"count": {"minimum": 1, "maximum": 3}}}],
+        "not": {"properties": {"choice": {"const": "blocked"}}, "required": ["choice"]},
+        "x-hf-probe": {"complete": True},
+    }
+    calls: list[dict[str, Any]] = []
+
+    def handler(
+        *,
+        selector_a: str,
+        selector_b: str,
+        choice: str | None = None,
+        count: int,
+        items: list[dict[str, str]],
+        details: dict[str, str],
+        array_numbers: list[int],
+        text: str,
+        flag: bool,
+        mode: str | None = None,
+        nullable: str | None = None,
+        timestamp: str | None = None,
+        defaulted: list[str],
+        confirmed: bool,
+    ) -> dict[str, Any]:
+        result = {
+            "selector_a": selector_a,
+            "selector_b": selector_b,
+            "choice": choice,
+            "count": count,
+            "items": items,
+            "details": details,
+            "array_numbers": array_numbers,
+            "text": text,
+            "flag": flag,
+            "mode": mode,
+            "nullable": nullable,
+            "timestamp": timestamp,
+            "defaulted": defaulted,
+            "confirmed": confirmed,
+        }
+        calls.append(result)
+        return result
+
+    compiled_tool_schemas = 0
+    draft_validator = jsonschema.Draft202012Validator
+
+    def _count_validator_construction(schema_to_compile: Any, *args: Any, **kwargs: Any) -> Any:
+        nonlocal compiled_tool_schemas
+        if isinstance(schema_to_compile, dict) and schema_to_compile.get("title") == "Caller-owned title":
+            compiled_tool_schemas += 1
+        return draft_validator(schema_to_compile, *args, **kwargs)
+
+    _count_validator_construction.check_schema = draft_validator.check_schema
+    monkeypatch.setattr(jsonschema, "Draft202012Validator", _count_validator_construction)
+    app = MCPServer(name="hf-mcp-adapter-probe")
+    adapter = _MCPServerToolAdapter(app)
+    adapter.register_tool(
+        name="wire_probe",
+        description="Strict adapter probe",
+        input_schema=schema,
+        annotations={"title": "wire_probe", "readOnlyHint": True},
+        handler=handler,
+    )
+    schema["$defs"]["choice"]["enum"] = ["caller-mutated"]
+    schema["properties"]["selector_a"]["default"] = "caller-mutated"
+    schema["properties"]["defaulted"]["default"].append("caller-mutated")
+    schema["x-hf-probe"]["complete"] = False
+
+    tool = app._tool_manager.get_tool("wire_probe")
+    assert tool is not None
+    published_schema = tool.parameters
+    assert published_schema["title"] == "Caller-owned title"
+    assert published_schema["$defs"]["choice"]["enum"] == ["allowed", "blocked"]
+    assert published_schema["properties"]["selector_a"]["default"] == "A"
+    assert published_schema["x-hf-probe"] == {"complete": True}
+    assert published_schema["properties"]["timestamp"]["format"] == "date-time"
+    validator = tool.fn_metadata._input_validator
+    assert validator is not None
+
+    valid_arguments = {
+        "selector_a": "explicit-a",
+        "selector_b": "explicit-b",
+        "choice": "allowed",
+        "count": 1,
+        "items": [{"code": "valid"}],
+        "details": {"label": "valid"},
+        "array_numbers": [1],
+        "text": "valid",
+        "flag": True,
+        "nullable": None,
+        "timestamp": "not-validated-as-a-date-time-annotation",
+        "confirmed": True,
+    }
+    validated = tool.fn_metadata.validate_arguments(valid_arguments)
+    assert validated == {**valid_arguments, "defaulted": ["safe"]}
+    assert type(validated["count"]) is int
+    assert compiled_tool_schemas == 1
+    assert tool.fn_metadata._input_validator is validator
+
+    without_selector_a = {**valid_arguments}
+    without_selector_a.pop("selector_a")
+    defaulted_selector = tool.fn_metadata.validate_arguments(without_selector_a)
+    assert defaulted_selector["selector_a"] == "A"
+    without_selectors = {
+        key: value
+        for key, value in valid_arguments.items()
+        if key not in {"selector_a", "selector_b"}
+    }
+    invalid_cases = (
+        ("boolean is not an integer", {**valid_arguments, "count": True}, "type", "$.count"),
+        ("numeric strings are not integers", {**valid_arguments, "count": "1"}, "type", "$.count"),
+        ("fractional integers reject", {**valid_arguments, "count": 1.5}, "type", "$.count"),
+        ("allOf minimum", {**valid_arguments, "count": 0}, "minimum", "$.count"),
+        ("allOf maximum", {**valid_arguments, "count": 4}, "maximum", "$.count"),
+        ("enum rejects", {**valid_arguments, "choice": "unlisted-choice"}, "enum", "$.choice"),
+        ("not rejects", {**valid_arguments, "choice": "blocked"}, "not", "$"),
+        ("oneOf rejects double match", {**valid_arguments, "mode": "x"}, "oneOf", "$"),
+        ("nested pattern", {**valid_arguments, "items": [{"code": "UPPER"}]}, "pattern", "$.items[0].code"),
+        ("nested closed object", {**valid_arguments, "items": [{"code": "valid", "extra": 1}]}, "additionalProperties", "$.items[0]"),
+        ("encoded object string", {**valid_arguments, "details": "{}"}, "type", "$.details"),
+        ("encoded array string", {**valid_arguments, "array_numbers": "[1]"}, "type", "$.array_numbers"),
+        ("array item bool", {**valid_arguments, "array_numbers": [True]}, "type", "$.array_numbers[0]"),
+        ("nonnullable null", {**valid_arguments, "text": None}, "type", "$.text"),
+        ("additional root property", {**valid_arguments, "unknown": "secret-value"}, "additionalProperties", "$"),
+        ("const false", {**valid_arguments, "confirmed": False}, "const", "$.confirmed"),
+        ("const numeric", {**valid_arguments, "confirmed": 1}, "type", "$.confirmed"),
+        ("const string", {**valid_arguments, "confirmed": "true"}, "type", "$.confirmed"),
+        ("missing required confirmation", {key: value for key, value in valid_arguments.items() if key != "confirmed"}, "required", "$"),
+        ("selector defaults cannot satisfy anyOf", without_selectors, "anyOf", "$"),
+    )
+    for case_name, invalid, constraint, path in invalid_cases:
+        with pytest.raises(ValidationError) as error:
+            tool.fn_metadata.validate_arguments(invalid)
+        error_text = str(error.value)
+        assert constraint in error_text, case_name
+        assert path in error_text, case_name
+        assert "secret-value" not in error_text
+    with pytest.raises(ValidationError):
+        tool.fn_metadata.validate_arguments(["must-be-an-object"])
+    assert compiled_tool_schemas == 1
+    assert calls == []
+
+    async def invoke(arguments_to_call: dict[str, Any]) -> Any:
+        raw_validated = tool.fn_metadata.validate_arguments(arguments_to_call)
+        return await tool.fn_metadata.call_fn(tool.fn, tool.is_async, raw_validated)
+
+    result = anyio.run(invoke, without_selector_a)
+    assert result["count"] == 1
+    assert result["selector_a"] == "A"
+    assert result["nullable"] is None
+    assert result["timestamp"] == "not-validated-as-a-date-time-annotation"
+    assert result["defaulted"] == ["safe"]
+    assert result["confirmed"] is True
+    result["defaulted"].append("call-mutated")
+    repeat_validation = tool.fn_metadata.validate_arguments(without_selector_a)
+    assert repeat_validation["defaulted"] == ["safe"]
+
+    float_result = anyio.run(invoke, {**valid_arguments, "count": 1.0})
+    assert type(float_result["count"]) is float
+    assert float_result["count"] == 1.0
+    assert calls == [result, float_result]
+    assert compiled_tool_schemas == 1
+
+
+@pytest.mark.core
+@pytest.mark.registry
+def test_sdk_adapter_rejects_incompatible_registry_before_tool_exposure() -> None:
+    class _IncompatibleApp:
+        def add_tool(self, handler: Any, **kwargs: Any) -> None:
+            del handler, kwargs
+
+    adapter = _MCPServerToolAdapter(_IncompatibleApp())
+    with pytest.raises(RuntimeError, match="tool manager.*metadata capability"):
+        adapter.register_tool(
+            name="unsupported_probe",
+            description="Unsupported SDK probe",
+            input_schema={"type": "object", "properties": {}},
+            annotations={},
+            handler=lambda: None,
+        )
+
+
+@pytest.mark.parametrize(
+    "schema",
+    [
+        {"type": "object", "properties": {"value": {"type": "integer", "minimum": "low"}}},
+        {"type": "object", "properties": {"value": {"$ref": "https://example.invalid/schema"}}},
+        {"type": "object", "properties": {"value": {"$ref": "#/$defs/missing"}}},
+        {"type": "object", "properties": {"value": {"$dynamicRef": "https://example.invalid/no-fetch"}}},
+        {"type": "object", "properties": {"value": {"$dynamicRef": "#/$defs/missing"}}},
+    ],
+    ids=[
+        "invalid-draft-schema",
+        "nonlocal-reference",
+        "unresolved-local-reference",
+        "nonlocal-dynamic-reference",
+        "unresolved-local-dynamic-reference",
+    ],
+)
+@pytest.mark.core
+@pytest.mark.registry
+def test_sdk_adapter_rejects_invalid_or_remote_schema_before_tool_exposure(
+    schema: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import http.client
+    from mcp.server.mcpserver import MCPServer
+
+    network_attempts: list[str] = []
+
+    def _deny_network(self: Any) -> None:
+        network_attempts.append(type(self).__name__)
+        raise AssertionError("schema reference resolution attempted network access")
+
+    monkeypatch.setattr(http.client.HTTPConnection, "connect", _deny_network)
+    monkeypatch.setattr(http.client.HTTPSConnection, "connect", _deny_network)
+    app = MCPServer(name="hf-mcp-schema-probe")
+    adapter = _MCPServerToolAdapter(app)
+    with pytest.raises(ValueError, match="Invalid Draft 2020-12 input schema"):
+        adapter.register_tool(
+            name="invalid_schema_probe",
+            description="Invalid schema probe",
+            input_schema=schema,
+            annotations={},
+            handler=lambda **kwargs: kwargs,
+        )
+    assert app._tool_manager.get_tool("invalid_schema_probe") is None
+    assert network_attempts == []
+
+
+@pytest.mark.core
+@pytest.mark.registry
+def test_sdk_adapter_keeps_resolvable_local_dynamic_reference() -> None:
+    from mcp.server.mcpserver import MCPServer
+    from pydantic import ValidationError
+
+    app = MCPServer(name="hf-mcp-dynamic-reference-probe")
+    adapter = _MCPServerToolAdapter(app)
+    adapter.register_tool(
+        name="dynamic_reference_probe",
+        description="Local dynamic reference probe",
+        input_schema={
+            "type": "object",
+            "$id": "https://example.invalid/schema-root",
+            "$defs": {
+                "nested": {
+                    "$id": "nested",
+                    "type": "object",
+                    "$defs": {
+                        "choice": {
+                            "$dynamicAnchor": "choice",
+                            "type": "string",
+                            "enum": ["allowed"],
+                        }
+                    },
+                    "properties": {"value": {"$dynamicRef": "#choice"}},
+                    "required": ["value"],
+                    "additionalProperties": False,
+                }
+            },
+            "x-hf-reference-example": {"$ref": "https://example.invalid/annotation-only"},
+            "properties": {"nested": {"$ref": "#/$defs/nested"}},
+            "required": ["nested"],
+            "additionalProperties": False,
+        },
+        annotations={},
+        handler=lambda *, value: {"value": value},
+    )
+    tool = app._tool_manager.get_tool("dynamic_reference_probe")
+    assert tool is not None
+    assert tool.parameters["x-hf-reference-example"] == {
+        "$ref": "https://example.invalid/annotation-only"
+    }
+    assert tool.fn_metadata.validate_arguments({"nested": {"value": "allowed"}}) == {
+        "nested": {"value": "allowed"}
+    }
+    with pytest.raises(ValidationError):
+        tool.fn_metadata.validate_arguments({"nested": {"value": "rejected"}})
+
+
+@pytest.mark.core
+@pytest.mark.registry
+def test_sdk_adapter_checks_inserted_schema_default_against_its_property_schema() -> None:
+    from mcp.server.mcpserver import MCPServer
+    from pydantic import ValidationError
+
+    calls: list[int] = []
+
+    def handler(*, value: int) -> dict[str, int]:
+        calls.append(value)
+        return {"value": value}
+
+    app = MCPServer(name="hf-mcp-default-probe")
+    adapter = _MCPServerToolAdapter(app)
+    adapter.register_tool(
+        name="default_probe",
+        description="Default validation probe",
+        input_schema={
+            "type": "object",
+            "properties": {"value": {"type": "integer", "default": "1"}},
+            "additionalProperties": False,
+        },
+        annotations={},
+        handler=handler,
+    )
+    tool = app._tool_manager.get_tool("default_probe")
+    assert tool is not None
+    with pytest.raises(ValidationError) as error:
+        tool.fn_metadata.validate_arguments({})
+    assert "input_value='1'" not in str(error.value)
+    assert calls == []
+
+
+@pytest.mark.core
+@pytest.mark.registry
+def test_sdk_adapter_preserves_async_handler_execution_after_validation() -> None:
+    from mcp.server.mcpserver import MCPServer
+    from pydantic import ValidationError
+
+    calls: list[str] = []
+
+    async def handler(*, value: str) -> dict[str, str]:
+        calls.append(value)
+        return {"value": value}
+
+    app = MCPServer(name="hf-mcp-async-adapter-probe")
+    adapter = _MCPServerToolAdapter(app)
+    adapter.register_tool(
+        name="async_probe",
+        description="Async adapter probe",
+        input_schema={
+            "type": "object",
+            "properties": {"value": {"type": "string", "minLength": 1}},
+            "required": ["value"],
+            "additionalProperties": False,
+        },
+        annotations={},
+        handler=handler,
+    )
+    tool = app._tool_manager.get_tool("async_probe")
+    assert tool is not None and tool.is_async is True
+
+    with pytest.raises(ValidationError):
+        tool.fn_metadata.validate_arguments({"value": ""})
+    assert calls == []
+
+    async def invoke() -> Any:
+        validated = tool.fn_metadata.validate_arguments({"value": "accepted"})
+        return await tool.fn_metadata.call_fn(tool.fn, tool.is_async, validated)
+
+    result = anyio.run(invoke)
+    assert result == {"value": "accepted"}
+    assert calls == ["accepted"]
+
+
 def test_nested_envelope_json_in_text_content_is_rejected_by_validator() -> None:
     import mcp.types as mcp_types
 
@@ -135,25 +537,7 @@ def test_nested_envelope_json_in_text_content_is_rejected_by_validator() -> None
 
 def test_fastmcp_adapter_converts_hf_envelope_dict_to_protocol_call_tool_result() -> None:
     import mcp.types as mcp_types
-
-    class _FakeApp:
-        def __init__(self) -> None:
-            self._handler: Any | None = None
-
-        def add_tool(
-            self,
-            handler: Any,
-            *,
-            name: str,
-            description: str,
-            annotations: object | None = None,
-            structured_output: bool | None = None,
-        ) -> None:
-            del name
-            del description
-            del annotations
-            del structured_output
-            self._handler = handler
+    from mcp.server.mcpserver import MCPServer
 
     envelope = {
         "content": [
@@ -179,8 +563,8 @@ def test_fastmcp_adapter_converts_hf_envelope_dict_to_protocol_call_tool_result(
         },
     }
 
-    fake_app = _FakeApp()
-    adapter = _FastMCPToolAdapter(fake_app)
+    app = MCPServer(name="hf-mcp-envelope-probe")
+    adapter = _MCPServerToolAdapter(app)
     adapter.register_tool(
         name="me.read",
         description="Read me",
@@ -196,16 +580,23 @@ def test_fastmcp_adapter_converts_hf_envelope_dict_to_protocol_call_tool_result(
         output_schema={"type": "object"},
     )
 
-    assert fake_app._handler is not None
-    normalized = fake_app._handler()
+    tool = app._tool_manager.get_tool("me.read")
+    assert tool is not None
+    normalized = tool.fn()
     assert isinstance(normalized, mcp_types.CallToolResult)
-    assert normalized.structuredContent["me"] == [{"uid": "5"}]
-    assert normalized.structuredContent["_hf_flow"]["version"] == 1
-    assert isinstance(normalized.structuredContent["_hf_flow"]["next_actions"], list)
+    assert normalized.structured_content["me"] == [{"uid": "5"}]
+    assert normalized.structured_content["_hf_flow"]["version"] == 1
+    assert isinstance(normalized.structured_content["_hf_flow"]["next_actions"], list)
     assert len(normalized.content) == 2
     assert isinstance(normalized.content[0], mcp_types.TextContent)
+    assert normalized.content[0].text == "me.read returned 1 row(s)."
     assert isinstance(normalized.content[1], mcp_types.EmbeddedResource)
-    assert str(normalized.content[1].resource.uri) == "hf-mcp://raw/me.read"
+    raw_resource = normalized.content[1].resource.model_dump(by_alias=True, exclude_none=True)
+    assert raw_resource == {
+        "uri": "hf-mcp://raw/me.read",
+        "mimeType": "application/json",
+        "text": "{\"me\":[{\"uid\":\"5\"}]}",
+    }
 
 
 def test_runtime_stdio_client_session_returns_protocol_structured_content_and_raw_resource() -> None:
@@ -217,24 +608,22 @@ import sys
 from hf_mcp.capabilities import CapabilityPolicy
 from hf_mcp.config import HFMCPSettings
 from hf_mcp.dispatcher import RuntimeBundle, register_tools
-from hf_mcp.server import _FastMCPToolAdapter
+from hf_mcp.server import _MCPServerToolAdapter
 from hf_mcp.token_store import TokenBundle
 from hf_mcp.transport import HFTransport
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 class _ProbeTokenStore:
     def require_bundle(self):
         return TokenBundle(access_token="token", token_type="Bearer", scope=frozenset({"read"}))
 
 def _stub_read(*, asks, helper):
-    del asks
-    if helper != "me":
+    if helper is not None or "me" not in asks:
         raise RuntimeError(f"unexpected helper: {helper}")
     return {"me": [{"uid": "5", "username": "forge"}]}
 
 def _stub_read_raw(*, asks, helper):
-    del asks
-    if helper != "me":
+    if helper is not None or "me" not in asks:
         raise RuntimeError(f"unexpected helper: {helper}")
     return {"me": [{"uid": "5", "username": "forge", "raw": True}]}
 
@@ -248,8 +637,8 @@ settings = HFMCPSettings(
     enabled_parameter_families=frozenset({"fields.me.basic", "selectors.user"}),
 )
 policy = CapabilityPolicy(settings)
-app = FastMCP(name="hf-mcp-probe")
-adapter = _FastMCPToolAdapter(app)
+app = MCPServer(name="hf-mcp-probe")
+adapter = _MCPServerToolAdapter(app)
 register_tools(adapter, policy, RuntimeBundle(transport=transport))
 app.run(transport="stdio")
 """
@@ -272,8 +661,8 @@ app.run(transport="stdio")
                     "me_read",
                     {"output_mode": "raw", "include_raw_payload": True},
                 )
-        assert result.structuredContent is not None
-        assert result.structuredContent["me"][0]["uid"] == "5"
+        assert result.structured_content is not None
+        assert result.structured_content["me"][0]["uid"] == "5"
         assert any(getattr(item, "type", None) == "resource" for item in result.content)
         _assert_rejects_nested_envelope_json_text(result)
 
@@ -288,10 +677,10 @@ def test_runtime_stdio_tool_list_has_unique_input_schema_titles_for_extended_rea
 from hf_mcp.capabilities import CapabilityPolicy
 from hf_mcp.config import HFMCPSettings, PRESET_PARAMETER_FAMILIES
 from hf_mcp.dispatcher import RuntimeBundle, register_tools
-from hf_mcp.server import _FastMCPToolAdapter
+from hf_mcp.server import _MCPServerToolAdapter
 from hf_mcp.token_store import TokenBundle
 from hf_mcp.transport import HFTransport
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 class _ProbeTokenStore:
     def require_bundle(self):
@@ -312,8 +701,8 @@ settings = HFMCPSettings(
     enabled_parameter_families=PRESET_PARAMETER_FAMILIES["full_api"],
 )
 policy = CapabilityPolicy(settings)
-app = FastMCP(name="hf-mcp-probe")
-adapter = _FastMCPToolAdapter(app)
+app = MCPServer(name="hf-mcp-probe")
+adapter = _MCPServerToolAdapter(app)
 register_tools(adapter, policy, RuntimeBundle(transport=transport))
 app.run(transport="stdio")
 """
@@ -335,7 +724,7 @@ app.run(transport="stdio")
                 result = await session.list_tools()
 
         titles = {
-            tool.name: (tool.inputSchema or {}).get("title")
+            tool.name: (tool.input_schema or {}).get("title")
             for tool in result.tools
         }
         assert titles["bytes_read"] == "bytes_read_handlerArguments"
@@ -995,6 +1384,8 @@ def test_serve_stdio_fails_closed_when_token_bundle_is_missing(tmp_path: Path) -
 def test_serve_stdio_publishes_dispatcher_contract_for_live_runtime(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from mcp.server.mcpserver import MCPServer
+
     settings = HFMCPSettings(
         profile="test",
         enabled_capabilities=frozenset(
@@ -1041,6 +1432,7 @@ def test_serve_stdio_publishes_dispatcher_contract_for_live_runtime(
 
         def __init__(self, name: str) -> None:
             self.name = name
+            self._tool_manager = MCPServer(name=name)._tool_manager
             self.registered_tools: dict[str, dict[str, Any]] = {}
             self.run_calls: list[str] = []
             _FakeFastMCP.instances.append(self)
@@ -1056,6 +1448,13 @@ def test_serve_stdio_publishes_dispatcher_contract_for_live_runtime(
             output_schema: dict[str, object] | None = None,
             **_: object,
         ) -> None:
+            self._tool_manager.add_tool(
+                handler,
+                name=name,
+                description=description,
+                annotations=annotations,
+                meta=meta,
+            )
             self.registered_tools[name] = {
                 "handler": handler,
                 "description": description,
@@ -1068,7 +1467,7 @@ def test_serve_stdio_publishes_dispatcher_contract_for_live_runtime(
             self.run_calls.append(transport)
 
     monkeypatch.setattr("hf_mcp.server.resolve_runtime_bundle", lambda _: _runtime_bundle())
-    monkeypatch.setattr("hf_mcp.server._load_fastmcp_class", lambda: _FakeFastMCP)
+    monkeypatch.setattr("hf_mcp.server._load_mcpserver_class", lambda: _FakeFastMCP)
 
     expected_server = create_server(settings)
     serve_stdio(settings)
@@ -1103,8 +1502,9 @@ def test_serve_stdio_publishes_dispatcher_contract_for_live_runtime(
 
         published_annotations = published["annotations"]
         if hasattr(published_annotations, "model_dump"):
-            published_annotations = published_annotations.model_dump(exclude_none=True)
-        assert published_annotations == expected_tool.annotations
+            published_annotations = published_annotations.model_dump(by_alias=True, exclude_none=True)
+        assert published_annotations == {key: value for key, value in expected_tool.annotations.items() if key != "_meta"}
+        assert published["meta"] == expected_tool.annotations.get("_meta")
         assert published["output_schema"] == expected_tool.output_schema
 
     assert mcp_tool_name("contracts.write") not in app.registered_tools
@@ -1215,6 +1615,8 @@ def test_serve_stdio_publishes_dispatcher_contract_for_live_runtime(
 def test_serve_stdio_runs_stdio_runtime_once_without_restart_loop(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from mcp.server.mcpserver import MCPServer
+
     settings = HFMCPSettings(
         profile="test",
         enabled_capabilities=frozenset({"threads.read"}),
@@ -1227,6 +1629,7 @@ def test_serve_stdio_runs_stdio_runtime_once_without_restart_loop(
     class _FakeFastMCP:
         def __init__(self, name: str) -> None:
             self.name = name
+            self._tool_manager = MCPServer(name=name)._tool_manager
 
         def add_tool(
             self,
@@ -1237,6 +1640,13 @@ def test_serve_stdio_runs_stdio_runtime_once_without_restart_loop(
             annotations: object | None = None,
             meta: dict[str, object] | None = None,
         ) -> None:
+            self._tool_manager.add_tool(
+                handler,
+                name=name,
+                description=description,
+                annotations=annotations,
+                meta=meta,
+            )
             del handler
             registered_names.append(name)
             del description
@@ -1247,7 +1657,7 @@ def test_serve_stdio_runs_stdio_runtime_once_without_restart_loop(
             run_calls.append(transport)
 
     monkeypatch.setattr("hf_mcp.server.resolve_runtime_bundle", lambda _: _runtime_bundle())
-    monkeypatch.setattr("hf_mcp.server._load_fastmcp_class", lambda: _FakeFastMCP)
+    monkeypatch.setattr("hf_mcp.server._load_mcpserver_class", lambda: _FakeFastMCP)
 
     serve_stdio(settings)
 
@@ -1258,6 +1668,8 @@ def test_serve_stdio_runs_stdio_runtime_once_without_restart_loop(
 def test_serve_stdio_does_not_retry_when_stdio_is_closed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from mcp.server.mcpserver import MCPServer
+
     settings = HFMCPSettings(
         profile="test",
         enabled_capabilities=frozenset({"threads.read"}),
@@ -1269,6 +1681,7 @@ def test_serve_stdio_does_not_retry_when_stdio_is_closed(
     class _FakeFastMCP:
         def __init__(self, name: str) -> None:
             self.name = name
+            self._tool_manager = MCPServer(name=name)._tool_manager
 
         def add_tool(
             self,
@@ -1279,6 +1692,13 @@ def test_serve_stdio_does_not_retry_when_stdio_is_closed(
             annotations: object | None = None,
             meta: dict[str, object] | None = None,
         ) -> None:
+            self._tool_manager.add_tool(
+                handler,
+                name=name,
+                description=description,
+                annotations=annotations,
+                meta=meta,
+            )
             del handler
             del name
             del description
@@ -1290,7 +1710,7 @@ def test_serve_stdio_does_not_retry_when_stdio_is_closed(
             raise ValueError("I/O operation on closed file")
 
     monkeypatch.setattr("hf_mcp.server.resolve_runtime_bundle", lambda _: _runtime_bundle())
-    monkeypatch.setattr("hf_mcp.server._load_fastmcp_class", lambda: _FakeFastMCP)
+    monkeypatch.setattr("hf_mcp.server._load_mcpserver_class", lambda: _FakeFastMCP)
 
     with pytest.raises(ValueError, match="closed file"):
         serve_stdio(settings)
