@@ -54,7 +54,11 @@ _MYCODE_TAG_PATTERN = re.compile(
 )
 _RAW_MYCODE_TAG_PATTERN = re.compile(r"\[/?[a-zA-Z][a-zA-Z0-9_-]*(?:=[^\]]*)?\]|\[\*\]")
 _MARKDOWN_SETEXT_PATTERN = re.compile(r"^ {0,3}(?:=+|-+)[ \t]*$")
-_CODE_CLOSER_PATTERN = re.compile(r"\[/(?:code|php)\]", re.IGNORECASE)
+_CODE_OPENER_PATTERN = re.compile(r"\[(code|php)\]", re.IGNORECASE)
+_CODE_CLOSER_PATTERNS: dict[str, re.Pattern[str]] = {
+    "code": re.compile(r"\[/code\]", re.IGNORECASE),
+    "php": re.compile(r"\[/php\]", re.IGNORECASE),
+}
 _QUOTE_CLOSER_PATTERN = re.compile(r"\[/quote\]", re.IGNORECASE)
 _LIST_CLOSER_PATTERN = re.compile(r"\[/list\]", re.IGNORECASE)
 _URL_CLOSER_PATTERN = re.compile(r"\[/url\]", re.IGNORECASE)
@@ -259,7 +263,7 @@ def format_body_text(value: str, body_format: BodyFormat) -> str:
             return "\n" + shield.token(block) + "\n"
         return shield.token(code)
 
-    text = _sub_paired(_CODE_BLOCK_PATTERN, _CODE_CLOSER_PATTERN, _stash_code, value)
+    text = _sub_matches(finditer_code_blocks(value), _stash_code, value)
     text = _protect_malformed_markup(text, shield)
     text = _convert_spoilers(text)
     text = _convert_quotes(text, body_format)
@@ -359,6 +363,30 @@ def finditer_paired(
     return pattern.finditer(text, 0, last_closer_end)
 
 
+def finditer_code_blocks(text: str) -> Iterator[re.Match[str]]:
+    """Match `[code]...[/code]` and `[php]...[/php]` blocks in linear time.
+
+    The block pattern pairs an opener with the closer of its own tag, so the
+    bound `finditer_paired` uses (the last closer of either tag) lets every
+    `[code]` opener rescan to the end of a text that only closes `[php]`. Each
+    opener is instead tried only while a closer of its own tag still follows it,
+    which never changes a match: past that point the pattern cannot match.
+    """
+    last_closer_start: dict[str, int] = {}
+    for tag, closer in _CODE_CLOSER_PATTERNS.items():
+        for last in closer.finditer(text):
+            last_closer_start[tag] = last.start()
+    position = 0
+    while (opener := _CODE_OPENER_PATTERN.search(text, position)) is not None:
+        position = opener.end()
+        if last_closer_start.get(opener.group(1).lower(), -1) < position:
+            continue
+        match = _CODE_BLOCK_PATTERN.match(text, opener.start())
+        if match is not None:
+            position = match.end()
+            yield match
+
+
 def _sub_paired(
     pattern: re.Pattern[str],
     closer: re.Pattern[str],
@@ -366,9 +394,18 @@ def _sub_paired(
     text: str,
 ) -> str:
     """`pattern.sub(replace, text)` built on `finditer_paired`."""
+    return _sub_matches(finditer_paired(pattern, closer, text), replace, text)
+
+
+def _sub_matches(
+    matches: Iterable[re.Match[str]],
+    replace: Callable[[re.Match[str]], str],
+    text: str,
+) -> str:
+    """Replace every match of `matches` in `text` with `replace(match)`."""
     pieces: list[str] = []
     cursor = 0
-    for match in finditer_paired(pattern, closer, text):
+    for match in matches:
         pieces.append(text[cursor : match.start()])
         pieces.append(replace(match))
         cursor = match.end()
@@ -867,19 +904,28 @@ def _find_markdown_emphasis_close(
     return None
 
 
-def _convert_markdown_blocks(text: str) -> str:
-    """Line-level constructs: blockquotes, headings, rules and lists."""
+_MAX_BLOCKQUOTE_DEPTH = 16
+
+
+def _convert_markdown_blocks(text: str, depth: int = 0) -> str:
+    """Line-level constructs: blockquotes, headings, rules and lists.
+
+    Blockquote nesting recurses once per level, so it stops at
+    ``_MAX_BLOCKQUOTE_DEPTH``: deeper ``>`` markers stay literal text, which keeps
+    the result deterministic and the Python stack bounded for any input size.
+    """
     lines = text.replace("\r\n", "\n").split("\n")
     converted: list[str] = []
     index = 0
     while index < len(lines):
         line = lines[index]
         end = index + 1
-        if line.startswith(">"):
+        if line.startswith(">") and depth < _MAX_BLOCKQUOTE_DEPTH:
             while end < len(lines) and lines[end].startswith(">"):
                 end += 1
             inner = _convert_markdown_blocks(
-                "\n".join(item[1:].lstrip() for item in lines[index:end])
+                "\n".join(item[1:].lstrip() for item in lines[index:end]),
+                depth + 1,
             )
             converted.append("[quote]" + inner.strip() + "[/quote]")
         elif (heading := _MARKDOWN_HEADING_PATTERN.match(line)) and heading.group(
@@ -996,13 +1042,7 @@ def _readable_projection_findings(
     findings: list[ConversionFinding] = []
     masked = _masked(
         value,
-        [
-            match.span()
-            for match in finditer_paired(
-                _CODE_BLOCK_PATTERN, _CODE_CLOSER_PATTERN, value
-            )
-        ]
-        + list(protected_spans),
+        [match.span() for match in finditer_code_blocks(value)] + list(protected_spans),
     )
     text = _masked(masked, _malformed_markup_ranges(masked))
     for match in _finditer_closed(_MYCODE_TAG_PATTERN, text):
