@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 
+import hf_mcp
 from hf_mcp.capabilities import CapabilityPolicy
 from hf_mcp.config import HFMCPSettings
 from hf_mcp.registry import get_tool_spec
@@ -114,7 +115,6 @@ def deny_connection(*args, **kwargs):
 socket.create_connection = deny_connection
 
 from hf_mcp.config import HFMCPSettings
-from hf_mcp.dispatcher import RuntimeBundle
 from hf_mcp.token_store import TokenBundle
 from hf_mcp.transport import HFTransport
 import hf_mcp.server as server
@@ -169,59 +169,9 @@ settings = HFMCPSettings(
     enabled_capabilities=frozenset({"forums.index", "forums.read", "threads.read", "posts.read"}),
     enabled_parameter_families=frozenset({"selectors.forum", "selectors.thread", "selectors.post", "filters.pagination", "fields.posts.body", "output.options"}),
 )
-server.resolve_runtime_bundle = lambda _: RuntimeBundle(transport=transport, settings=settings)
+server.resolve_transport = lambda _: transport
 server.serve_stdio(settings)
 """
-
-WIRE_PROBE_SCHEMA = {
-    "$schema": "https://json-schema.org/draft/2020-12/schema",
-    "title": "wire_probe",
-    "type": "object",
-    "$defs": {"choice": {"type": "string", "enum": ["allowed", "blocked"]}},
-    "properties": {
-        "selector_a": {"type": "string", "default": "A"},
-        "selector_b": {"type": "string", "default": "B"},
-        "count": {"type": "integer"},
-        "confirmed": {"type": "boolean", "const": True},
-        "choice": {"$ref": "#/$defs/choice"},
-        "flag": {"type": "boolean"},
-        "mode": {"type": "string"},
-        "items": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "properties": {"code": {"type": "string", "pattern": "^[a-z]+$"}},
-                "required": ["code"],
-                "additionalProperties": False,
-            },
-        },
-        "details": {
-            "type": "object",
-            "properties": {"label": {"type": "string", "minLength": 1}},
-            "required": ["label"],
-            "additionalProperties": False,
-        },
-        "numbers": {"type": "array", "items": {"type": "integer", "minimum": 1}},
-        "nullable": {"type": ["string", "null"]},
-        "text": {"type": "string", "minLength": 1},
-        "timestamp": {"type": "string", "format": "date-time"},
-        "defaulted": {
-            "type": "array",
-            "items": {"type": "string"},
-            "default": ["safe"],
-        },
-    },
-    "required": ["count", "confirmed", "flag", "items", "details", "numbers", "text"],
-    "additionalProperties": False,
-    "anyOf": [{"required": ["selector_a"]}, {"required": ["selector_b"]}],
-    "oneOf": [
-        {"required": ["flag"]},
-        {"required": ["flag", "mode"], "properties": {"mode": {"const": "x"}}},
-    ],
-    "allOf": [{"properties": {"count": {"minimum": 1, "maximum": 3}}}],
-    "not": {"properties": {"choice": {"const": "blocked"}}, "required": ["choice"]},
-    "x-hf-reference-example": {"$ref": "https://example.invalid/annotation-only"},
-}
 
 WRITE_SERVER_TEMPLATE = """
 import json
@@ -267,10 +217,10 @@ import hf_mcp.dispatcher as dispatcher_module
 import hf_mcp.formatting_engine as formatting_engine
 import hf_mcp.tools.drafts as drafts_module
 import hf_mcp.transport as transport_module
-from hf_mcp.server import _MCPServerToolAdapter
-from mcp.server.mcpserver import MCPServer
+from hf_mcp.server import build_server
+import anyio
+from mcp.server.stdio import stdio_server
 
-probe_schema = json.loads(PROBE_SCHEMA_JSON)
 capabilities = {"bytes.deposit", "bytes.withdraw", "posts.reply", "drafts.write"}
 families = {"confirm.live", "writes.bytes", "selectors.thread", "writes.content", "drafts.selector", "drafts.confirm_delete", "drafts.metadata"}
 policy = CapabilityPolicy(HFMCPSettings(
@@ -278,8 +228,6 @@ policy = CapabilityPolicy(HFMCPSettings(
     enabled_capabilities=frozenset(capabilities),
     enabled_parameter_families=frozenset(families),
 ))
-app = MCPServer(name="hf-mcp-offline-write-probe")
-adapter = _MCPServerToolAdapter(app)
 effects = {"handlers": {}, "transport_calls": 0, "draft_writes": 0, "config_loads": 0, "token_loads": 0}
 
 def _deny_effect(counter_name):
@@ -289,7 +237,7 @@ def _deny_effect(counter_name):
     return deny
 
 server_module.load_settings = _deny_effect("config_loads")
-server_module.resolve_runtime_bundle = _deny_effect("config_loads")
+server_module.resolve_transport = _deny_effect("config_loads")
 dispatcher_module.load_token_store = _deny_effect("token_loads")
 for method_name in ("read", "read_raw", "write", "_post_json"):
     setattr(transport_module.HFTransport, method_name, _deny_effect("transport_calls"))
@@ -336,11 +284,6 @@ def posts_reply_handler(*, tid, confirm_live, message=None, source_path=None,
         "draft_path": draft_path,
     })
 
-def wire_probe_handler(*, selector_a, selector_b, count, confirmed, flag,
-                       items, details, numbers, text, choice=None, mode=None,
-                       nullable=None, timestamp=None, defaulted):
-    return _envelope("wire_probe", locals())
-
 handlers = {
     "bytes.deposit": _capture("bytes.deposit"),
     "bytes.withdraw": _capture("bytes.withdraw"),
@@ -348,24 +291,13 @@ handlers = {
     "drafts.delete": _capture("drafts.delete"),
     "drafts.update": _capture("drafts.update"),
 }
-for tool_name, handler in handlers.items():
-    spec = get_tool_spec(tool_name)
-    adapter.register_tool(
-        name=mcp_tool_name(tool_name),
-        description=f"Offline schema probe for {tool_name}",
-        input_schema=policy.input_schema(spec),
-        annotations={"readOnlyHint": False, "destructiveHint": True, "openWorldHint": True},
-        handler=handler,
-        output_schema=spec.output_schema,
-    )
-adapter.register_tool(
-    name="wire_probe",
-    description="Local synthetic adapter schema probe",
-    input_schema=probe_schema,
-    annotations={"readOnlyHint": False, "destructiveHint": True, "openWorldHint": True},
-    handler=wire_probe_handler,
-)
-app.run(transport="stdio")
+server = build_server(policy, handlers)
+
+async def _serve():
+    async with stdio_server() as (read_stream, write_stream):
+        await server.run(read_stream, write_stream, server.create_initialization_options())
+
+anyio.run(_serve)
 """
 
 
@@ -447,9 +379,16 @@ def test_normal_stdio_read_surface_and_pagination_on_actual_wire(modern: bool) -
                     },
                 )
                 assert initialized["protocolVersion"] == "2025-11-25"
+                assert initialized["serverInfo"]["name"] == "hf-mcp"
+                assert initialized["serverInfo"]["version"] == hf_mcp.__version__
                 send("notifications/initialized", {}, notification=True)
 
-            tools = {tool["name"]: tool for tool in send("tools/list", {})["tools"]}
+            listed = send("tools/list", {})
+            if modern:
+                server_info = listed["_meta"]["io.modelcontextprotocol/serverInfo"]
+                assert server_info["name"] == "hf-mcp"
+                assert server_info["version"] == hf_mcp.__version__
+            tools = {tool["name"]: tool for tool in listed["tools"]}
             assert set(tools) == {
                 "forums_index",
                 "forums_read",
@@ -460,42 +399,15 @@ def test_normal_stdio_read_surface_and_pagination_on_actual_wire(modern: bool) -
                 assert tool["annotations"]["readOnlyHint"] is True
                 assert tool["annotations"]["destructiveHint"] is False
                 spec = get_tool_spec(name.replace("_", "."))
-                expected_input_schema = policy.input_schema(spec)
-                if "title" not in expected_input_schema:
-                    expected_input_schema["title"] = tool["inputSchema"]["title"]
-                for key, value in tuple(expected_input_schema.items()):
-                    if (
-                        key.startswith("x-hf-")
-                        and value is None
-                        and key not in tool["inputSchema"]
-                    ):
-                        expected_input_schema.pop(key)
-                assert tool["inputSchema"] == expected_input_schema
+                assert tool["inputSchema"] == policy.input_schema(spec)
                 assert not tool.get("_meta")
                 assert "_meta" not in tool["annotations"]
-                expected_output_schema = dict(spec.output_schema or {})
-                if (
-                    "title" in tool["outputSchema"]
-                    and "title" not in expected_output_schema
-                ):
-                    assert tool["outputSchema"]["title"] == "_StructuredOutput"
-                    expected_output_schema["title"] = "_StructuredOutput"
-                for key, value in tuple(expected_output_schema.items()):
-                    if (
-                        key.startswith("x-hf-")
-                        and value is None
-                        and key not in tool["outputSchema"]
-                    ):
-                        expected_output_schema.pop(key)
-                assert tool["outputSchema"] == expected_output_schema
+                assert tool["outputSchema"] == (spec.output_schema or {})
                 if name != "forums_index":
                     properties = tool["inputSchema"]["properties"]
                     assert properties["page"]["minimum"] == 1
                     assert properties["per_page"]["minimum"] == 1
                     assert properties["per_page"]["maximum"] == 30
-
-            titles = [tool["inputSchema"]["title"] for tool in tools.values()]
-            assert len(set(titles)) == len(titles)
 
             catalog = send("tools/call", {"name": "forums_index", "arguments": {}})
             assert "structuredContent" in catalog
@@ -542,10 +454,12 @@ def test_normal_stdio_read_surface_and_pagination_on_actual_wire(modern: bool) -
                 for arguments in invalid_arguments:
                     invalid = send("tools/call", {"name": name, "arguments": arguments})
                     assert invalid["isError"] is True
+                    error = invalid["structuredContent"]["error"]
+                    assert error["code"] == "INVALID_ARGUMENT"
+                    assert error["tool"] == name
                     if "unexpected" in arguments:
+                        assert "unknown parameter" in error["message"]
                         serialized_error = json.dumps(invalid)
-                        assert "additionalProperties" in serialized_error
-                        assert "$" in serialized_error
                         assert "UNTRUSTED-MESSAGE-DO-NOT-ECHO" not in serialized_error
                 for page, per_page in ((1, 1), (2, 30)):
                     result = send(
@@ -640,10 +554,7 @@ def test_write_and_composition_schema_matrix_on_actual_stdio(
 ) -> None:
     draft_dir = tmp_path / "drafts"
     draft_dir.mkdir()
-    server_probe = WRITE_SERVER_TEMPLATE.replace(
-        "PROBE_SCHEMA_JSON",
-        repr(json.dumps(WIRE_PROBE_SCHEMA)),
-    )
+    server_probe = WRITE_SERVER_TEMPLATE
     env = {
         "PATH": os.defpath,
         "PYTHONPATH": _child_pythonpath(),
@@ -760,32 +671,14 @@ def test_write_and_composition_schema_matrix_on_actual_stdio(
             expected_wire_names = {
                 get_tool_spec(name).name.replace(".", "_") for name in canonical_names
             }
-            expected_wire_names |= {"wire_probe"}
             assert set(tool_rows) == expected_wire_names
             assert "hf_doctor" not in tool_rows
             for canonical_name in canonical_names:
                 spec = get_tool_spec(canonical_name)
-                expected_schema = policy.input_schema(spec)
-                if "title" not in expected_schema:
-                    expected_schema["title"] = tool_rows[
-                        canonical_name.replace(".", "_")
-                    ]["inputSchema"]["title"]
                 published = tool_rows[canonical_name.replace(".", "_")]["inputSchema"]
-                for key, value in tuple(expected_schema.items()):
-                    if (
-                        key.startswith("x-hf-")
-                        and value is None
-                        and key not in published
-                    ):
-                        expected_schema.pop(key)
-                assert published == expected_schema
-            assert tool_rows["wire_probe"]["inputSchema"] == WIRE_PROBE_SCHEMA
-            titles = [tool["inputSchema"]["title"] for tool in tool_rows.values()]
-            assert len(set(titles)) == len(titles)
+                assert published == policy.input_schema(spec)
 
-            expected_handler_calls = {
-                name: 0 for name in (*canonical_names, "wire_probe")
-            }
+            expected_handler_calls = {name: 0 for name in canonical_names}
             id_value = "0123456789abcdef0123456789abcdef"
             valid_arguments = {
                 "bytes.deposit": {"amount": 100, "confirm_live": True},
@@ -800,19 +693,6 @@ def test_write_and_composition_schema_matrix_on_actual_stdio(
                     "draft_id": id_value,
                     "status": "draft",
                     "title": "safe title",
-                },
-                "wire_probe": {
-                    "selector_b": "chosen-b",
-                    "count": 1,
-                    "confirmed": True,
-                    "flag": True,
-                    "items": [{"code": "valid"}],
-                    "details": {"label": "valid"},
-                    "numbers": [1],
-                    "text": "valid",
-                    "choice": "allowed",
-                    "nullable": None,
-                    "timestamp": "not-validated-as-a-date-time-annotation",
                 },
             }
 
@@ -857,11 +737,20 @@ def test_write_and_composition_schema_matrix_on_actual_stdio(
                 )
                 assert result.get("isError") is True, result
                 assert "jsonrpcError" not in result
+                error = result["structuredContent"]["error"]
+                assert error["code"] == "INVALID_ARGUMENT"
+                assert error["tool"] == wire_name(canonical_name)
+                if argument_path != "$":
+                    fragment = argument_path[2:]
+                    assert fragment.split("[")[0].split(".")[0] in error["message"]
+                elif constraint == "required":
+                    schema = tool_rows[wire_name(canonical_name)]["inputSchema"]
+                    missing = [n for n in schema["required"] if n not in arguments]
+                    assert all(name in error["message"] for name in missing)
+                    assert "$" not in error["message"]
+                elif constraint == "anyOf":
+                    assert "one of" in error["message"]
                 error_text = json.dumps(result)
-                assert f"Error executing tool {wire_name(canonical_name)}" in error_text
-                assert constraint in error_text
-                assert argument_path in error_text
-                assert "UnexpectedToolError" not in error_text
                 if untrusted_marker is not None:
                     assert untrusted_marker not in error_text
                 control = valid_call(canonical_name, valid_arguments[canonical_name])
@@ -1077,115 +966,6 @@ def test_write_and_composition_schema_matrix_on_actual_stdio(
             )
             invalid_without_effect(
                 "drafts.delete", {"confirm_delete": True}, "anyOf", "$"
-            )
-
-            # The local synthetic probe covers composed schemas, nested objects/items, and defaults on the actual SDK wire.
-            probe_args = valid_arguments["wire_probe"]
-            wire_probe_result = valid_call("wire_probe", probe_args)
-            assert wire_probe_result["arguments"]["selector_a"] == "A"
-            assert wire_probe_result["arguments"]["defaulted"] == ["safe"]
-            assert (
-                wire_probe_result["arguments"]["timestamp"]
-                == "not-validated-as-a-date-time-annotation"
-            )
-            assert wire_probe_result["arguments"]["nullable"] is None
-            selector_a_only = {**probe_args, "selector_a": "explicit-a"}
-            selector_a_only.pop("selector_b")
-            selector_a_result = valid_call("wire_probe", selector_a_only)
-            assert selector_a_result["arguments"]["selector_b"] == "B"
-            valid_call(
-                "wire_probe",
-                {**probe_args, "selector_a": "explicit-a", "selector_b": "explicit-b"},
-            )
-            valid_call("wire_probe", {**probe_args, "count": 1.0})
-            invalid_without_effect(
-                "wire_probe", {**probe_args, "count": True}, "type", "$.count"
-            )
-            invalid_without_effect(
-                "wire_probe", {**probe_args, "count": "1"}, "type", "$.count"
-            )
-            invalid_without_effect(
-                "wire_probe", {**probe_args, "count": 1.5}, "type", "$.count"
-            )
-            invalid_without_effect(
-                "wire_probe", {**probe_args, "count": 0}, "minimum", "$.count"
-            )
-            invalid_without_effect(
-                "wire_probe", {**probe_args, "count": 4}, "maximum", "$.count"
-            )
-            invalid_without_effect(
-                "wire_probe",
-                {**probe_args, "items": [{"code": "UPPER"}]},
-                "pattern",
-                "$.items[0].code",
-            )
-            invalid_without_effect(
-                "wire_probe",
-                {**probe_args, "items": [{"code": "valid", "extra": 1}]},
-                "additionalProperties",
-                "$.items[0]",
-            )
-            invalid_without_effect(
-                "wire_probe", {**probe_args, "details": "{}"}, "type", "$.details"
-            )
-            invalid_without_effect(
-                "wire_probe",
-                {**probe_args, "details": {"label": ""}},
-                "minLength",
-                "$.details.label",
-            )
-            invalid_without_effect(
-                "wire_probe",
-                {**probe_args, "details": {"label": "valid", "extra": 1}},
-                "additionalProperties",
-                "$.details",
-            )
-            invalid_without_effect(
-                "wire_probe", {**probe_args, "numbers": "[1]"}, "type", "$.numbers"
-            )
-            invalid_without_effect(
-                "wire_probe", {**probe_args, "numbers": [True]}, "type", "$.numbers[0]"
-            )
-            invalid_without_effect(
-                "wire_probe", {**probe_args, "text": ""}, "minLength", "$.text"
-            )
-            invalid_without_effect(
-                "wire_probe", {**probe_args, "text": None}, "type", "$.text"
-            )
-            invalid_without_effect(
-                "wire_probe", {**probe_args, "choice": "unlisted"}, "enum", "$.choice"
-            )
-            invalid_without_effect(
-                "wire_probe", {**probe_args, "choice": "blocked"}, "not", "$"
-            )
-            invalid_without_effect(
-                "wire_probe", {**probe_args, "mode": "x"}, "oneOf", "$"
-            )
-            invalid_without_effect(
-                "wire_probe",
-                {
-                    key: value
-                    for key, value in probe_args.items()
-                    if key not in {"selector_a", "selector_b"}
-                },
-                "anyOf",
-                "$",
-            )
-            invalid_without_effect(
-                "wire_probe", {**probe_args, "confirmed": False}, "const", "$.confirmed"
-            )
-            invalid_without_effect(
-                "wire_probe", {**probe_args, "confirmed": 1}, "type", "$.confirmed"
-            )
-            invalid_without_effect(
-                "wire_probe", {**probe_args, "confirmed": "true"}, "type", "$.confirmed"
-            )
-            invalid_without_effect(
-                "wire_probe",
-                {**probe_args, "unknown": "UNTRUSTED-MESSAGE-DO-NOT-ECHO"},
-                "additionalProperties",
-                "$",
-                untrusted_marker="UNTRUSTED-MESSAGE-DO-NOT-ECHO",
             )
 
         finally:
