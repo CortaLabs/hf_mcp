@@ -8,16 +8,16 @@ from pathlib import Path
 
 import pytest
 
-PRODUCT_ROOT = Path(__file__).resolve().parents[1]
-PYPROJECT_PATH = PRODUCT_ROOT / "pyproject.toml"
-SRC_PATH = PRODUCT_ROOT / "src"
-if str(SRC_PATH) not in sys.path:
-    sys.path.insert(0, str(SRC_PATH))
-
 import hf_mcp
 from hf_mcp.cli import build_cli, main
 
-_HOSTED_EXTERNAL_REDIRECT_EXAMPLE_URI = "https://cortalabs.github.io/hf_mcp/oauth_callback.html"
+PRODUCT_ROOT = Path(__file__).resolve().parents[1]
+SRC_PATH = PRODUCT_ROOT / "src"
+PYPROJECT_PATH = PRODUCT_ROOT / "pyproject.toml"
+
+_HOSTED_EXTERNAL_REDIRECT_EXAMPLE_URI = (
+    "https://cortalabs.github.io/hf_mcp/oauth_callback.html"
+)
 
 
 def _parse_hf_mcp_script_target(pyproject_text: str) -> str:
@@ -36,7 +36,9 @@ def _parse_hf_mcp_script_target(pyproject_text: str) -> str:
 
 
 def test_console_script_entrypoint_resolves_to_public_main() -> None:
-    script_target = _parse_hf_mcp_script_target(PYPROJECT_PATH.read_text(encoding="utf-8"))
+    script_target = _parse_hf_mcp_script_target(
+        PYPROJECT_PATH.read_text(encoding="utf-8")
+    )
     assert script_target == "hf_mcp.cli:main"
     assert callable(main)
     assert callable(build_cli)
@@ -46,10 +48,15 @@ def test_pyproject_includes_stdio_runtime_dependency() -> None:
     pyproject = tomllib.loads(PYPROJECT_PATH.read_text(encoding="utf-8"))
     dependencies: list[str] = pyproject["project"]["dependencies"]
 
-    assert any(dependency.split(">=", 1)[0].split("==", 1)[0] == "mcp" for dependency in dependencies)
+    assert any(
+        dependency.split(">=", 1)[0].split("==", 1)[0] == "mcp"
+        for dependency in dependencies
+    )
 
 
-def test_version_surfaces_match_declared_project_version(capsys: pytest.CaptureFixture[str]) -> None:
+def test_version_surfaces_match_declared_project_version(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     pyproject = tomllib.loads(PYPROJECT_PATH.read_text(encoding="utf-8"))
     expected_version = pyproject["project"]["version"]
 

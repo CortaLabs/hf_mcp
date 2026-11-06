@@ -1,15 +1,10 @@
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-PRODUCT_ROOT = Path(__file__).resolve().parents[1]
-SRC_PATH = PRODUCT_ROOT / "src"
-if str(SRC_PATH) not in sys.path:
-    sys.path.insert(0, str(SRC_PATH))
 
 from hf_mcp.capabilities import CapabilityPolicy
 from hf_mcp.config import HFMCPSettings
@@ -29,13 +24,18 @@ from hf_mcp.tools.write_documented import (
 )
 from hf_mcp.write_preflight import WritePreflightError, validate_write_body
 
+PRODUCT_ROOT = Path(__file__).resolve().parents[1]
+SRC_PATH = PRODUCT_ROOT / "src"
+
 
 class _CaptureTransport:
     def __init__(self, responses: dict[str, dict[str, Any]] | None = None) -> None:
         self.calls: list[dict[str, Any]] = []
         self._responses = responses or {}
 
-    def write(self, *, asks: dict[str, Any], helper: str | None = None) -> dict[str, Any]:
+    def write(
+        self, *, asks: dict[str, Any], helper: str | None = None
+    ) -> dict[str, Any]:
         self.calls.append({"asks": asks, "helper": helper})
         response_key = helper or next(iter(asks))
         if response_key in self._responses:
@@ -43,7 +43,9 @@ class _CaptureTransport:
         return {"ok": True, "asks": asks, "helper": helper}
 
 
-def _flow_actions(result: dict[str, Any]) -> set[tuple[str, tuple[tuple[str, int], ...]]]:
+def _flow_actions(
+    result: dict[str, Any],
+) -> set[tuple[str, tuple[tuple[str, int], ...]]]:
     flow = result.get("_hf_flow")
     assert isinstance(flow, dict)
     next_actions = flow.get("next_actions")
@@ -58,11 +60,20 @@ def _flow_actions(result: dict[str, Any]) -> set[tuple[str, tuple[tuple[str, int
             continue
         if not isinstance(arguments, dict):
             continue
-        actions.add((tool, tuple(sorted((str(key), int(value)) for key, value in arguments.items()))))
+        actions.add(
+            (
+                tool,
+                tuple(
+                    sorted((str(key), int(value)) for key, value in arguments.items())
+                ),
+            )
+        )
     return actions
 
 
-def _policy(*, enabled_capabilities: set[str], enabled_parameter_families: set[str]) -> CapabilityPolicy:
+def _policy(
+    *, enabled_capabilities: set[str], enabled_parameter_families: set[str]
+) -> CapabilityPolicy:
     return CapabilityPolicy(
         HFMCPSettings(
             profile="test",
@@ -88,7 +99,12 @@ def test_write_specs_include_only_concrete_core_rows_for_absence_path() -> None:
 
 def test_build_write_handlers_registers_only_core_rows_allowed_by_policy() -> None:
     policy = _policy(
-        enabled_capabilities={"threads.create", "posts.reply", "bytes.transfer", "contracts.write"},
+        enabled_capabilities={
+            "threads.create",
+            "posts.reply",
+            "bytes.transfer",
+            "contracts.write",
+        },
         enabled_parameter_families={
             "selectors.forum",
             "selectors.thread",
@@ -107,28 +123,52 @@ def test_build_write_handlers_registers_only_core_rows_allowed_by_policy() -> No
 @pytest.mark.parametrize(
     ("call", "tool_name"),
     [
-        (lambda transport: create_thread_live(
-            transport=transport,
-            fid=10,
-            subject="subject",
-            message="message",
-            confirm_live=False,
-        ), "threads.create"),
-        (lambda transport: reply_to_thread_live(
-            transport=transport,
-            tid=20,
-            message="message",
-            confirm_live=False,
-        ), "posts.reply"),
-        (lambda transport: send_live(
-            transport=transport,
-            target_uid=30,
-            amount=4,
-            confirm_live=False,
-        ), "bytes.transfer"),
-        (lambda transport: deposit_live(transport=transport, amount=7, confirm_live=False), "bytes.deposit"),
-        (lambda transport: withdraw_live(transport=transport, amount=8, confirm_live=False), "bytes.withdraw"),
-        (lambda transport: bump_live(transport=transport, tid=99, confirm_live=False), "bytes.bump"),
+        (
+            lambda transport: create_thread_live(
+                transport=transport,
+                fid=10,
+                subject="subject",
+                message="message",
+                confirm_live=False,
+            ),
+            "threads.create",
+        ),
+        (
+            lambda transport: reply_to_thread_live(
+                transport=transport,
+                tid=20,
+                message="message",
+                confirm_live=False,
+            ),
+            "posts.reply",
+        ),
+        (
+            lambda transport: send_live(
+                transport=transport,
+                target_uid=30,
+                amount=4,
+                confirm_live=False,
+            ),
+            "bytes.transfer",
+        ),
+        (
+            lambda transport: deposit_live(
+                transport=transport, amount=7, confirm_live=False
+            ),
+            "bytes.deposit",
+        ),
+        (
+            lambda transport: withdraw_live(
+                transport=transport, amount=8, confirm_live=False
+            ),
+            "bytes.withdraw",
+        ),
+        (
+            lambda transport: bump_live(
+                transport=transport, tid=99, confirm_live=False
+            ),
+            "bytes.bump",
+        ),
     ],
 )
 def test_core_write_helpers_fail_closed_without_confirm_live(
@@ -146,13 +186,20 @@ def test_core_write_helpers_fail_closed_without_confirm_live(
 def test_bound_write_handlers_still_fail_closed_without_confirm_live() -> None:
     policy = _policy(
         enabled_capabilities={"threads.create", "posts.reply"},
-        enabled_parameter_families={"selectors.forum", "selectors.thread", "writes.content", "confirm.live"},
+        enabled_parameter_families={
+            "selectors.forum",
+            "selectors.thread",
+            "writes.content",
+            "confirm.live",
+        },
     )
     transport = _CaptureTransport()
     handlers = build_write_handlers(policy, transport)
 
     with pytest.raises(PermissionError, match="posts.reply"):
-        handlers["posts.reply"](tid=77, message="Denied", message_format="mycode", confirm_live=False)
+        handlers["posts.reply"](
+            tid=77, message="Denied", message_format="mycode", confirm_live=False
+        )
 
     assert transport.calls == []
 
@@ -170,7 +217,9 @@ def test_create_thread_live_shapes_payload_and_helper_path() -> None:
 
     assert transport.calls == [
         {
-            "asks": {"threads": {"_fid": 12, "_subject": "Sell", "_message": "Details"}},
+            "asks": {
+                "threads": {"_fid": 12, "_subject": "Sell", "_message": "Details"}
+            },
             "helper": "threads",
         }
     ]
@@ -181,28 +230,46 @@ def test_reply_and_bytes_write_helpers_shape_payloads_truthfully() -> None:
     transport = _CaptureTransport()
 
     reply_to_thread_live(transport=transport, tid=44, message="Hi", confirm_live=True)
-    send_live(transport=transport, target_uid=55, amount=100, reason="tip", pid=99, confirm_live=True)
+    send_live(
+        transport=transport,
+        target_uid=55,
+        amount=100,
+        reason="tip",
+        pid=99,
+        confirm_live=True,
+    )
     deposit_live(transport=transport, amount=60, confirm_live=True)
     withdraw_live(transport=transport, amount=20, confirm_live=True)
     bump_live(transport=transport, tid=77, confirm_live=True)
 
     assert transport.calls == [
         {"asks": {"posts": {"_tid": 44, "_message": "Hi"}}, "helper": None},
-        {"asks": {"bytes": {"_uid": 55, "_amount": 100, "_reason": "tip", "_pid": 99}}, "helper": "bytes"},
+        {
+            "asks": {
+                "bytes": {"_uid": 55, "_amount": 100, "_reason": "tip", "_pid": 99}
+            },
+            "helper": "bytes",
+        },
         {"asks": {"bytes": {"_deposit": 60}}, "helper": "bytes/deposit"},
         {"asks": {"bytes": {"_withdraw": 20}}, "helper": "bytes/withdraw"},
         {"asks": {"bytes": {"_bump": 77}}, "helper": "bytes/bump"},
     ]
 
 
-def test_reply_uses_single_generic_write_with_unchanged_asks(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_reply_uses_single_generic_write_with_unchanged_asks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     class StubTokenStore:
         def require_bundle(self) -> TokenBundle:
-            return TokenBundle(access_token="offline", token_type="Bearer", scope=frozenset())
+            return TokenBundle(
+                access_token="offline", token_type="Bearer", scope=frozenset()
+            )
 
     calls: list[dict[str, Any]] = []
 
-    def fake_post(self: HFTransport, route: str, payload: dict[str, Any], headers: dict[str, str]) -> dict[str, Any]:
+    def fake_post(
+        self: HFTransport, route: str, payload: dict[str, Any], headers: dict[str, str]
+    ) -> dict[str, Any]:
         calls.append({"route": route, "payload": payload})
         if route != "/write":
             raise RuntimeError("HF helper route failed with HTTP 404")
@@ -211,14 +278,23 @@ def test_reply_uses_single_generic_write_with_unchanged_asks(monkeypatch: pytest
     monkeypatch.setattr(HFTransport, "_post_json", fake_post)
     policy = _policy(
         enabled_capabilities={"posts.reply"},
-        enabled_parameter_families={"selectors.thread", "writes.content", "confirm.live"},
+        enabled_parameter_families={
+            "selectors.thread",
+            "writes.content",
+            "confirm.live",
+        },
     )
     handler = build_write_handlers(policy, HFTransport(StubTokenStore()))["posts.reply"]
     with pytest.raises(PermissionError):
         handler(tid=44, message="Offline reply", confirm_live=False)
     assert calls == []
     result = handler(tid=44, message="Offline reply", confirm_live=True)
-    assert calls == [{"route": "/write", "payload": {"asks": {"posts": {"_tid": 44, "_message": "Offline reply"}}}}]
+    assert calls == [
+        {
+            "route": "/write",
+            "payload": {"asks": {"posts": {"_tid": 44, "_message": "Offline reply"}}},
+        }
+    ]
     assert result["posts"] == [{"pid": "9001", "tid": "44"}]
     assert ("posts.read", (("tid", 44),)) in _flow_actions(result)
 
@@ -281,13 +357,13 @@ def test_write_helpers_decode_html_entities_in_mycode_text() -> None:
         transport=transport,
         fid=12,
         subject="Release &quot;0.2&quot;",
-        message='[code]{&quot;mode&quot;:&quot;raw&quot;}[/code] and `output_mode=&quot;structured&quot;`',
+        message="[code]{&quot;mode&quot;:&quot;raw&quot;}[/code] and `output_mode=&quot;structured&quot;`",
         confirm_live=True,
     )
     reply_to_thread_live(
         transport=transport,
         tid=44,
-        message='[code]{&quot;posts&quot;:[{&quot;pid&quot;:&quot;62946370&quot;}]}[/code]',
+        message="[code]{&quot;posts&quot;:[{&quot;pid&quot;:&quot;62946370&quot;}]}[/code]",
         confirm_live=True,
     )
 
@@ -326,7 +402,7 @@ def test_write_helpers_can_convert_markdown_messages_to_mycode() -> None:
     reply_to_thread_live(
         transport=transport,
         tid=44,
-        message="> quoted\n\n```json\n{\"ok\":true}\n```",
+        message='> quoted\n\n```json\n{"ok":true}\n```',
         message_format="markdown",
         confirm_live=True,
     )
@@ -353,7 +429,7 @@ def test_write_helpers_can_convert_markdown_messages_to_mycode() -> None:
             "asks": {
                 "posts": {
                     "_tid": 44,
-                    "_message": "[quote]quoted[/quote]\n\n[code]{\"ok\":true}\n[/code]",
+                    "_message": '[quote]quoted[/quote]\n\n[code]{"ok":true}\n[/code]',
                 }
             },
             "helper": None,
@@ -361,9 +437,13 @@ def test_write_helpers_can_convert_markdown_messages_to_mycode() -> None:
     ]
 
 
-def test_reply_can_publish_cached_preflight_draft_by_id_without_resending_message(tmp_path: Path) -> None:
+def test_reply_can_publish_cached_preflight_draft_by_id_without_resending_message(
+    tmp_path: Path,
+) -> None:
     transport = _CaptureTransport()
-    artifact = write_draft_artifact("**Approved**\n\n- cached draft body", "markdown", draft_dir=tmp_path)
+    artifact = write_draft_artifact(
+        "**Approved**\n\n- cached draft body", "markdown", draft_dir=tmp_path
+    )
 
     reply_to_thread_live(
         transport=transport,
@@ -392,7 +472,9 @@ def test_thread_create_can_publish_cached_preflight_draft_from_configured_dir(
     selector: str,
 ) -> None:
     transport = _CaptureTransport()
-    artifact = write_draft_artifact("**Approved**\n\n- thread draft body", "markdown", draft_dir=tmp_path)
+    artifact = write_draft_artifact(
+        "**Approved**\n\n- thread draft body", "markdown", draft_dir=tmp_path
+    )
     kwargs: dict[str, Any]
     if selector == "draft_id":
         kwargs = {"draft_id": artifact.draft_id}
@@ -469,7 +551,9 @@ def test_draft_loaded_preflight_failure_never_calls_transport(tmp_path: Path) ->
     assert transport.calls == []
 
 
-def test_draft_backed_publish_requires_confirm_live_before_transport(tmp_path: Path) -> None:
+def test_draft_backed_publish_requires_confirm_live_before_transport(
+    tmp_path: Path,
+) -> None:
     transport = _CaptureTransport()
     artifact = write_draft_artifact("approved body", "markdown", draft_dir=tmp_path)
 
@@ -485,7 +569,9 @@ def test_draft_backed_publish_requires_confirm_live_before_transport(tmp_path: P
     assert transport.calls == []
 
 
-def test_markdown_write_preflight_blocks_malformed_generated_mycode_before_transport() -> None:
+def test_markdown_write_preflight_blocks_malformed_generated_mycode_before_transport() -> (
+    None
+):
     transport = _CaptureTransport()
 
     with pytest.raises(WritePreflightError, match="unclosed list"):
@@ -502,7 +588,9 @@ def test_markdown_write_preflight_blocks_malformed_generated_mycode_before_trans
 
 def test_write_preflight_rejects_nested_code_blocks_and_placeholder_leaks() -> None:
     with pytest.raises(WritePreflightError, match="nested code blocks"):
-        validate_write_body("[code]outer [code]inner[/code][/code]", source_format="markdown")
+        validate_write_body(
+            "[code]outer [code]inner[/code][/code]", source_format="markdown"
+        )
 
     with pytest.raises(WritePreflightError, match="internal formatter placeholder"):
         validate_write_body("before \x00INLCODE0\x00 after", source_format="markdown")
@@ -513,10 +601,10 @@ def test_write_preflight_allows_balanced_markdown_conversion_output() -> None:
         (
             "[b]Update[/b]\n\n"
             "[list]\n"
-            "[*] [code]body_format=\"markdown\"[/code]\n"
+            '[*] [code]body_format="markdown"[/code]\n'
             "[*] [url=https://github.com/CortaLabs/hf_mcp]Project[/url]\n"
             "[/list]\n\n"
-            "[code]{\"tool\":\"posts.reply\"}[/code]"
+            '[code]{"tool":"posts.reply"}[/code]'
         ),
         source_format="markdown",
     )
@@ -532,20 +620,38 @@ def test_schema_surface_kwargs_invoke_core_write_handlers_truthfully() -> None:
             "bytes.withdraw",
             "bytes.bump",
         },
-        enabled_parameter_families={"selectors.forum", "selectors.thread", "selectors.bytes", "writes.content", "writes.bytes", "confirm.live"},
+        enabled_parameter_families={
+            "selectors.forum",
+            "selectors.thread",
+            "selectors.bytes",
+            "writes.content",
+            "writes.bytes",
+            "confirm.live",
+        },
     )
     transport = _CaptureTransport()
     handlers = build_write_handlers(policy, transport)
 
-    handlers["threads.create"](fid=101, subject="Title", message="Body", message_format="mycode", confirm_live=True)
-    handlers["posts.reply"](tid=202, message="Reply", message_format="mycode", confirm_live=True)
+    handlers["threads.create"](
+        fid=101,
+        subject="Title",
+        message="Body",
+        message_format="mycode",
+        confirm_live=True,
+    )
+    handlers["posts.reply"](
+        tid=202, message="Reply", message_format="mycode", confirm_live=True
+    )
     handlers["bytes.transfer"](target_uid=303, amount=4, confirm_live=True)
     handlers["bytes.deposit"](amount=5, confirm_live=True)
     handlers["bytes.withdraw"](amount=6, confirm_live=True)
     handlers["bytes.bump"](tid=707, confirm_live=True)
 
     assert transport.calls == [
-        {"asks": {"threads": {"_fid": 101, "_subject": "Title", "_message": "Body"}}, "helper": "threads"},
+        {
+            "asks": {"threads": {"_fid": 101, "_subject": "Title", "_message": "Body"}},
+            "helper": "threads",
+        },
         {"asks": {"posts": {"_tid": 202, "_message": "Reply"}}, "helper": None},
         {"asks": {"bytes": {"_uid": 303, "_amount": 4}}, "helper": "bytes"},
         {"asks": {"bytes": {"_deposit": 5}}, "helper": "bytes/deposit"},
@@ -606,7 +712,10 @@ def test_handlers_accept_kwargs_generated_from_repaired_write_schemas() -> None:
         handlers[tool_name](**kwargs)
 
     assert transport.calls == [
-        {"asks": {"threads": {"_fid": 1001, "_subject": "T", "_message": "M"}}, "helper": "threads"},
+        {
+            "asks": {"threads": {"_fid": 1001, "_subject": "T", "_message": "M"}},
+            "helper": "threads",
+        },
         {"asks": {"posts": {"_tid": 1002, "_message": "R"}}, "helper": None},
         {"asks": {"bytes": {"_uid": 1003, "_amount": 10}}, "helper": "bytes"},
         {"asks": {"bytes": {"_deposit": 11}}, "helper": "bytes/deposit"},

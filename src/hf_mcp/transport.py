@@ -28,14 +28,24 @@ class HFTransport:
         self._base_url = base_url.rstrip("/")
         self._timeout_seconds = timeout_seconds
 
-    def read(self, asks: Mapping[str, Any], helper: str | None = None) -> dict[str, Any]:
+    def read(
+        self, asks: Mapping[str, Any], helper: str | None = None
+    ) -> dict[str, Any]:
         return self._request(operation="read", asks=asks, helper=helper, normalize=True)
 
-    def read_raw(self, asks: Mapping[str, Any], helper: str | None = None) -> dict[str, Any]:
-        return self._request(operation="read", asks=asks, helper=helper, normalize=False)
+    def read_raw(
+        self, asks: Mapping[str, Any], helper: str | None = None
+    ) -> dict[str, Any]:
+        return self._request(
+            operation="read", asks=asks, helper=helper, normalize=False
+        )
 
-    def write(self, asks: Mapping[str, Any], helper: str | None = None) -> dict[str, Any]:
-        return self._request(operation="write", asks=asks, helper=helper, normalize=True)
+    def write(
+        self, asks: Mapping[str, Any], helper: str | None = None
+    ) -> dict[str, Any]:
+        return self._request(
+            operation="write", asks=asks, helper=helper, normalize=True
+        )
 
     def _request(
         self,
@@ -56,7 +66,9 @@ class HFTransport:
             "User-Agent": HF_BROWSER_USER_AGENT,
         }
 
-        response_payload = self._post_json(route=route, payload=payload, headers=headers)
+        response_payload = self._post_json(
+            route=route, payload=payload, headers=headers
+        )
         if not isinstance(response_payload, dict):
             raise ValueError("HF transport expected object JSON response payload.")
         if not normalize:
@@ -90,11 +102,15 @@ class HFTransport:
         )
 
         try:
-            with urllib.request.urlopen(request, timeout=self._timeout_seconds) as response:
+            with urllib.request.urlopen(
+                request, timeout=self._timeout_seconds
+            ) as response:
                 response_body = response.read().decode("utf-8")
         except urllib.error.HTTPError as error:
             error_body = error.read().decode("utf-8", errors="replace")
-            raise RuntimeError(f"HF {route} failed with HTTP {error.code}. {error_body}") from error
+            raise RuntimeError(
+                f"HF {route} failed with HTTP {error.code}. {error_body}"
+            ) from error
 
         parsed = json.loads(response_body)
         if not isinstance(parsed, dict):

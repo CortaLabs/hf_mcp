@@ -1,4 +1,5 @@
 """Offline regression coverage for the normal stdio entrypoint, on both wires."""
+
 from __future__ import annotations
 
 import json
@@ -79,7 +80,9 @@ def _assert_no_nested_hf_envelope_text(content: list[dict[str, object]]) -> None
         ), "nested HF result envelope found in text content"
 
 
-def _start_child_stderr_drain(process: subprocess.Popen[bytes]) -> tuple[threading.Thread, list[bytes]]:
+def _start_child_stderr_drain(
+    process: subprocess.Popen[bytes],
+) -> tuple[threading.Thread, list[bytes]]:
     assert process.stderr is not None
     lines: list[bytes] = []
 
@@ -91,8 +94,9 @@ def _start_child_stderr_drain(process: subprocess.Popen[bytes]) -> tuple[threadi
     thread.start()
     return thread, lines
 
+
 # No config file, live token store, credentials or network client is consulted.
-SERVER = '''
+SERVER = """
 import json
 import socket
 
@@ -169,7 +173,7 @@ settings = HFMCPSettings(
 )
 server.resolve_runtime_bundle = lambda _: RuntimeBundle(transport=transport, settings=settings)
 server.serve_stdio(settings)
-'''
+"""
 
 WIRE_PROBE_SCHEMA = {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -203,7 +207,11 @@ WIRE_PROBE_SCHEMA = {
         "nullable": {"type": ["string", "null"]},
         "text": {"type": "string", "minLength": 1},
         "timestamp": {"type": "string", "format": "date-time"},
-        "defaulted": {"type": "array", "items": {"type": "string"}, "default": ["safe"]},
+        "defaulted": {
+            "type": "array",
+            "items": {"type": "string"},
+            "default": ["safe"],
+        },
     },
     "required": ["count", "confirmed", "flag", "items", "details", "numbers", "text"],
     "additionalProperties": False,
@@ -217,7 +225,7 @@ WIRE_PROBE_SCHEMA = {
     "x-hf-reference-example": {"$ref": "https://example.invalid/annotation-only"},
 }
 
-WRITE_SERVER_TEMPLATE = '''
+WRITE_SERVER_TEMPLATE = """
 import json
 import socket
 import urllib.request
@@ -361,18 +369,24 @@ adapter.register_tool(
     handler=wire_probe_handler,
 )
 app.run(transport="stdio")
-'''
+"""
 
 
 @pytest.mark.core
 @pytest.mark.parametrize("modern", [False, True], ids=["legacy", "modern"])
 def test_normal_stdio_read_surface_and_pagination_on_actual_wire(modern: bool) -> None:
-    env = {"PATH": os.defpath, "PYTHONPATH": _child_pythonpath(), "PYTHONUNBUFFERED": "1"}
+    env = {
+        "PATH": os.defpath,
+        "PYTHONPATH": _child_pythonpath(),
+        "PYTHONUNBUFFERED": "1",
+    }
     expected_dependency_facts = _schema_dependency_facts()
     policy = CapabilityPolicy(
         HFMCPSettings(
             profile="custom",
-            enabled_capabilities=frozenset({"forums.index", "forums.read", "threads.read", "posts.read"}),
+            enabled_capabilities=frozenset(
+                {"forums.index", "forums.read", "threads.read", "posts.read"}
+            ),
             enabled_parameter_families=frozenset(
                 {
                     "selectors.forum",
@@ -400,10 +414,13 @@ def test_normal_stdio_read_surface_and_pagination_on_actual_wire(modern: bool) -
             nonlocal sequence
             sequence += 1
             if modern:
-                params = {**params, "_meta": {
-                    "io.modelcontextprotocol/protocolVersion": "2026-07-28",
-                    "io.modelcontextprotocol/clientCapabilities": {},
-                }}
+                params = {
+                    **params,
+                    "_meta": {
+                        "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+                        "io.modelcontextprotocol/clientCapabilities": {},
+                    },
+                }
             message = {"jsonrpc": "2.0", "method": method, "params": params}
             if not notification:
                 message["id"] = sequence
@@ -423,12 +440,24 @@ def test_normal_stdio_read_surface_and_pagination_on_actual_wire(modern: bool) -
 
         try:
             if not modern:
-                initialized = send("initialize", {"protocolVersion": "2025-11-25", "capabilities": {}, "clientInfo": {"name": "offline-test", "version": "1"}})
+                initialized = send(
+                    "initialize",
+                    {
+                        "protocolVersion": "2025-11-25",
+                        "capabilities": {},
+                        "clientInfo": {"name": "offline-test", "version": "1"},
+                    },
+                )
                 assert initialized["protocolVersion"] == "2025-11-25"
                 send("notifications/initialized", {}, notification=True)
 
             tools = {tool["name"]: tool for tool in send("tools/list", {})["tools"]}
-            assert set(tools) == {"forums_index", "forums_read", "threads_read", "posts_read"}
+            assert set(tools) == {
+                "forums_index",
+                "forums_read",
+                "threads_read",
+                "posts_read",
+            }
             for name, tool in tools.items():
                 assert tool["annotations"]["readOnlyHint"] is True
                 assert tool["annotations"]["destructiveHint"] is False
@@ -437,7 +466,11 @@ def test_normal_stdio_read_surface_and_pagination_on_actual_wire(modern: bool) -
                 if "title" not in expected_input_schema:
                     expected_input_schema["title"] = tool["inputSchema"]["title"]
                 for key, value in tuple(expected_input_schema.items()):
-                    if key.startswith("x-hf-") and value is None and key not in tool["inputSchema"]:
+                    if (
+                        key.startswith("x-hf-")
+                        and value is None
+                        and key not in tool["inputSchema"]
+                    ):
                         expected_input_schema.pop(key)
                 assert tool["inputSchema"] == expected_input_schema
                 expected_meta = build_tool_meta(spec)
@@ -448,11 +481,18 @@ def test_normal_stdio_read_surface_and_pagination_on_actual_wire(modern: bool) -
                     assert tool["_meta"].get(key) == value
                 assert "_meta" not in tool["annotations"]
                 expected_output_schema = build_tool_output_schema(spec)
-                if "title" in tool["outputSchema"] and "title" not in expected_output_schema:
+                if (
+                    "title" in tool["outputSchema"]
+                    and "title" not in expected_output_schema
+                ):
                     assert tool["outputSchema"]["title"] == "_StructuredOutput"
                     expected_output_schema["title"] = "_StructuredOutput"
                 for key, value in tuple(expected_output_schema.items()):
-                    if key.startswith("x-hf-") and value is None and key not in tool["outputSchema"]:
+                    if (
+                        key.startswith("x-hf-")
+                        and value is None
+                        and key not in tool["outputSchema"]
+                    ):
                         expected_output_schema.pop(key)
                 assert tool["outputSchema"] == expected_output_schema
                 if name != "forums_index":
@@ -468,14 +508,23 @@ def test_normal_stdio_read_surface_and_pagination_on_actual_wire(modern: bool) -
             assert "structuredContent" in catalog
             assert not catalog.get("isError", False)
             calls = 0
-            for name, selector in (("forums_read", {"fid": 123}), ("threads_read", {"fid": 123}), ("posts_read", {"tid": 456})):
+            for name, selector in (
+                ("forums_read", {"fid": 123}),
+                ("threads_read", {"fid": 123}),
+                ("posts_read", {"tid": 456}),
+            ):
                 minimal = send("tools/call", {"name": name, "arguments": selector})
                 calls += 1
                 assert not minimal.get("isError", False), minimal
                 assert minimal["structuredContent"]["offline_calls"] == str(calls)
                 assert minimal["structuredContent"]["offline_token_reads"] == str(calls)
                 assert minimal["structuredContent"]["offline_network_attempts"] == "0"
-                assert json.loads(minimal["structuredContent"]["offline_dependency_facts_json"]) == expected_dependency_facts
+                assert (
+                    json.loads(
+                        minimal["structuredContent"]["offline_dependency_facts_json"]
+                    )
+                    == expected_dependency_facts
+                )
                 assert minimal["structuredContent"]["offline_page"] == "1"
                 assert minimal["structuredContent"]["offline_per_page"] == "30"
 
@@ -506,36 +555,71 @@ def test_normal_stdio_read_surface_and_pagination_on_actual_wire(modern: bool) -
                         assert "$" in serialized_error
                         assert "UNTRUSTED-MESSAGE-DO-NOT-ECHO" not in serialized_error
                 for page, per_page in ((1, 1), (2, 30)):
-                    result = send("tools/call", {"name": name, "arguments": {**selector, "page": page, "per_page": per_page, "output_mode": "raw", "include_raw_payload": True}})
+                    result = send(
+                        "tools/call",
+                        {
+                            "name": name,
+                            "arguments": {
+                                **selector,
+                                "page": page,
+                                "per_page": per_page,
+                                "output_mode": "raw",
+                                "include_raw_payload": True,
+                            },
+                        },
+                    )
                     calls += 1
                     assert not result.get("isError", False), result
                     assert result["structuredContent"]["offline_calls"] == str(calls)
-                    assert result["structuredContent"]["offline_token_reads"] == str(calls)
-                    assert result["structuredContent"]["offline_network_attempts"] == "0"
+                    assert result["structuredContent"]["offline_token_reads"] == str(
+                        calls
+                    )
+                    assert (
+                        result["structuredContent"]["offline_network_attempts"] == "0"
+                    )
                     assert result["structuredContent"]["_hf_flow"]["version"] == 1
                     canonical_name = name.replace("_", ".")
                     assert result["content"][0] == {
                         "type": "text",
                         "text": f"{canonical_name} returned 1 row(s).",
                     }
-                    resources = [part for part in result["content"] if part["type"] == "resource"]
+                    resources = [
+                        part for part in result["content"] if part["type"] == "resource"
+                    ]
                     assert len(resources) == 1
                     resource = resources[0]["resource"]
                     assert resource["uri"] == f"hf-mcp://raw/{canonical_name}"
                     assert resource["mimeType"] == "application/json"
                     raw_payload = json.loads(resource["text"])
-                    root = "forums" if name.startswith("forums") else "threads" if name.startswith("threads") else "posts"
+                    root = (
+                        "forums"
+                        if name.startswith("forums")
+                        else "threads"
+                        if name.startswith("threads")
+                        else "posts"
+                    )
                     expected_raw_payload = {
-                        root: [{"fid": 123, "tid": 456, "pid": 789, "subject": "Offline fixture"}],
+                        root: [
+                            {
+                                "fid": 123,
+                                "tid": 456,
+                                "pid": 789,
+                                "subject": "Offline fixture",
+                            }
+                        ],
                         "offline_calls": calls,
                         "offline_token_reads": calls,
                         "offline_network_attempts": 0,
-                        "offline_dependency_facts_json": json.dumps(expected_dependency_facts),
+                        "offline_dependency_facts_json": json.dumps(
+                            expected_dependency_facts
+                        ),
                         "offline_page": page,
                         "offline_per_page": per_page,
                     }
                     assert raw_payload == expected_raw_payload
-                    assert resource["text"] == json.dumps(expected_raw_payload, ensure_ascii=False)
+                    assert resource["text"] == json.dumps(
+                        expected_raw_payload, ensure_ascii=False
+                    )
                     _assert_no_nested_hf_envelope_text(result["content"])
                     assert ("resultType" in result) is modern
             denied = send("tools/call", {"name": "posts_reply", "arguments": {}})
@@ -576,7 +660,13 @@ def test_write_and_composition_schema_matrix_on_actual_stdio(
         "HF_MCP_DRAFT_DIR": str(draft_dir),
     }
     capabilities = frozenset(
-        {"bytes.deposit", "bytes.withdraw", "posts.reply", "drafts.delete", "drafts.update"}
+        {
+            "bytes.deposit",
+            "bytes.withdraw",
+            "posts.reply",
+            "drafts.delete",
+            "drafts.update",
+        }
     )
     parameter_families = frozenset(
         {
@@ -620,7 +710,12 @@ def test_write_and_composition_schema_matrix_on_actual_stdio(
                         "io.modelcontextprotocol/clientCapabilities": {},
                     },
                 }
-            message = {"jsonrpc": "2.0", "method": method, "params": params, "id": sequence}
+            message = {
+                "jsonrpc": "2.0",
+                "method": method,
+                "params": params,
+                "id": sequence,
+            }
             process.stdin.write((json.dumps(message) + "\n").encode())
             process.stdin.flush()
             with selectors.DefaultSelector() as selector:
@@ -630,7 +725,11 @@ def test_write_and_composition_schema_matrix_on_actual_stdio(
             assert line, f"stdio server exited ({process.poll()})"
             response = json.loads(line)
             assert response["id"] == sequence
-            return response["result"] if "result" in response else {"jsonrpcError": response["error"]}
+            return (
+                response["result"]
+                if "result" in response
+                else {"jsonrpcError": response["error"]}
+            )
 
         try:
             if not modern:
@@ -645,7 +744,16 @@ def test_write_and_composition_schema_matrix_on_actual_stdio(
                 assert initialized["protocolVersion"] == "2025-11-25"
                 sequence += 1
                 process.stdin.write(
-                    (json.dumps({"jsonrpc": "2.0", "method": "notifications/initialized", "params": {}}) + "\n").encode()
+                    (
+                        json.dumps(
+                            {
+                                "jsonrpc": "2.0",
+                                "method": "notifications/initialized",
+                                "params": {},
+                            }
+                        )
+                        + "\n"
+                    ).encode()
                 )
                 process.stdin.flush()
 
@@ -657,7 +765,10 @@ def test_write_and_composition_schema_matrix_on_actual_stdio(
                 "drafts.delete",
                 "drafts.update",
             )
-            expected_wire_names = {get_tool_spec(name).tool_name.replace(".", "_") for name in canonical_names}
+            expected_wire_names = {
+                get_tool_spec(name).tool_name.replace(".", "_")
+                for name in canonical_names
+            }
             expected_wire_names |= {"wire_probe"}
             assert set(tool_rows) == expected_wire_names
             assert "hf_doctor" not in tool_rows
@@ -665,24 +776,40 @@ def test_write_and_composition_schema_matrix_on_actual_stdio(
                 spec = get_tool_spec(canonical_name)
                 expected_schema = build_tool_schema(spec, policy)
                 if "title" not in expected_schema:
-                    expected_schema["title"] = tool_rows[canonical_name.replace(".", "_")]["inputSchema"]["title"]
+                    expected_schema["title"] = tool_rows[
+                        canonical_name.replace(".", "_")
+                    ]["inputSchema"]["title"]
                 published = tool_rows[canonical_name.replace(".", "_")]["inputSchema"]
                 for key, value in tuple(expected_schema.items()):
-                    if key.startswith("x-hf-") and value is None and key not in published:
+                    if (
+                        key.startswith("x-hf-")
+                        and value is None
+                        and key not in published
+                    ):
                         expected_schema.pop(key)
                 assert published == expected_schema
             assert tool_rows["wire_probe"]["inputSchema"] == WIRE_PROBE_SCHEMA
             titles = [tool["inputSchema"]["title"] for tool in tool_rows.values()]
             assert len(set(titles)) == len(titles)
 
-            expected_handler_calls = {name: 0 for name in (*canonical_names, "wire_probe")}
+            expected_handler_calls = {
+                name: 0 for name in (*canonical_names, "wire_probe")
+            }
             id_value = "0123456789abcdef0123456789abcdef"
             valid_arguments = {
                 "bytes.deposit": {"amount": 100, "confirm_live": True},
                 "bytes.withdraw": {"amount": 100, "confirm_live": True},
-                "posts.reply": {"tid": 456, "message": "safe reply", "confirm_live": True},
+                "posts.reply": {
+                    "tid": 456,
+                    "message": "safe reply",
+                    "confirm_live": True,
+                },
                 "drafts.delete": {"draft_id": id_value, "confirm_delete": True},
-                "drafts.update": {"draft_id": id_value, "status": "draft", "title": "safe title"},
+                "drafts.update": {
+                    "draft_id": id_value,
+                    "status": "draft",
+                    "title": "safe title",
+                },
                 "wire_probe": {
                     "selector_b": "chosen-b",
                     "count": 1,
@@ -709,14 +836,20 @@ def test_write_and_composition_schema_matrix_on_actual_stdio(
                 assert not result.get("isError", False), result
                 structured = result["structuredContent"]
                 expected_handler_calls[canonical_name] += 1
-                assert structured["handler_calls"] == expected_handler_calls[canonical_name]
+                assert (
+                    structured["handler_calls"]
+                    == expected_handler_calls[canonical_name]
+                )
                 assert structured["tool"] == canonical_name
                 assert structured["transport_calls"] == 0
                 assert structured["draft_writes"] == 0
                 assert structured["config_loads"] == 0
                 assert structured["token_loads"] == 0
                 assert structured["network_attempts"] == 0
-                assert json.loads(structured["dependency_facts_json"]) == expected_dependency_facts
+                assert (
+                    json.loads(structured["dependency_facts_json"])
+                    == expected_dependency_facts
+                )
                 assert ("resultType" in result) is modern
                 return structured
 
@@ -741,7 +874,9 @@ def test_write_and_composition_schema_matrix_on_actual_stdio(
                 if untrusted_marker is not None:
                     assert untrusted_marker not in error_text
                 control = valid_call(canonical_name, valid_arguments[canonical_name])
-                assert control["handler_calls"] == expected_handler_calls[canonical_name]
+                assert (
+                    control["handler_calls"] == expected_handler_calls[canonical_name]
+                )
 
             for canonical_name in canonical_names:
                 valid_call(canonical_name, valid_arguments[canonical_name])
@@ -749,18 +884,59 @@ def test_write_and_composition_schema_matrix_on_actual_stdio(
             # Product-generated Bytes schemas preserve the 100-unit lower bound and strict JSON types.
             for canonical_name in ("bytes.deposit", "bytes.withdraw"):
                 valid_call(canonical_name, {"amount": 100.0, "confirm_live": True})
-                invalid_without_effect(canonical_name, {"amount": 99, "confirm_live": True}, "minimum", "$.amount")
-                invalid_without_effect(canonical_name, {"amount": True, "confirm_live": True}, "type", "$.amount")
-                invalid_without_effect(canonical_name, {"amount": "100", "confirm_live": True}, "type", "$.amount")
-                invalid_without_effect(canonical_name, {"amount": 100.5, "confirm_live": True}, "type", "$.amount")
-                invalid_without_effect(canonical_name, {"amount": 100, "confirm_live": False}, "const", "$.confirm_live")
-                invalid_without_effect(canonical_name, {"amount": 100, "confirm_live": 1}, "type", "$.confirm_live")
-                invalid_without_effect(canonical_name, {"amount": 100, "confirm_live": "true"}, "type", "$.confirm_live")
-                invalid_without_effect(canonical_name, {"amount": 100}, "required", "$")
-                invalid_without_effect(canonical_name, {"confirm_live": True}, "required", "$")
                 invalid_without_effect(
                     canonical_name,
-                    {"amount": 100, "confirm_live": True, "unknown": "UNTRUSTED-MESSAGE-DO-NOT-ECHO"},
+                    {"amount": 99, "confirm_live": True},
+                    "minimum",
+                    "$.amount",
+                )
+                invalid_without_effect(
+                    canonical_name,
+                    {"amount": True, "confirm_live": True},
+                    "type",
+                    "$.amount",
+                )
+                invalid_without_effect(
+                    canonical_name,
+                    {"amount": "100", "confirm_live": True},
+                    "type",
+                    "$.amount",
+                )
+                invalid_without_effect(
+                    canonical_name,
+                    {"amount": 100.5, "confirm_live": True},
+                    "type",
+                    "$.amount",
+                )
+                invalid_without_effect(
+                    canonical_name,
+                    {"amount": 100, "confirm_live": False},
+                    "const",
+                    "$.confirm_live",
+                )
+                invalid_without_effect(
+                    canonical_name,
+                    {"amount": 100, "confirm_live": 1},
+                    "type",
+                    "$.confirm_live",
+                )
+                invalid_without_effect(
+                    canonical_name,
+                    {"amount": 100, "confirm_live": "true"},
+                    "type",
+                    "$.confirm_live",
+                )
+                invalid_without_effect(canonical_name, {"amount": 100}, "required", "$")
+                invalid_without_effect(
+                    canonical_name, {"confirm_live": True}, "required", "$"
+                )
+                invalid_without_effect(
+                    canonical_name,
+                    {
+                        "amount": 100,
+                        "confirm_live": True,
+                        "unknown": "UNTRUSTED-MESSAGE-DO-NOT-ECHO",
+                    },
                     "additionalProperties",
                     "$",
                     untrusted_marker="UNTRUSTED-MESSAGE-DO-NOT-ECHO",
@@ -770,72 +946,256 @@ def test_write_and_composition_schema_matrix_on_actual_stdio(
             for arguments in (
                 {"tid": 456, "message": "draft body", "confirm_live": True},
                 {"tid": 456, "draft_id": id_value, "confirm_live": True},
-                {"tid": 456, "draft_path": str(draft_dir / "cached.json"), "confirm_live": True},
-                {"tid": 456, "message": "both selectors", "draft_id": id_value, "confirm_live": True},
+                {
+                    "tid": 456,
+                    "draft_path": str(draft_dir / "cached.json"),
+                    "confirm_live": True,
+                },
+                {
+                    "tid": 456,
+                    "message": "both selectors",
+                    "draft_id": id_value,
+                    "confirm_live": True,
+                },
             ):
                 output = valid_call("posts.reply", arguments)
                 assert output["arguments"]["message_format"] == "mycode"
-            invalid_without_effect("posts.reply", {"tid": "456", "message": "valid", "confirm_live": True}, "type", "$.tid")
-            invalid_without_effect("posts.reply", {"tid": True, "message": "valid", "confirm_live": True}, "type", "$.tid")
-            invalid_without_effect("posts.reply", {"tid": 456, "message": "", "confirm_live": True}, "minLength", "$.message")
-            invalid_without_effect("posts.reply", {"tid": 456, "message_format": "invalid", "message": "valid", "confirm_live": True}, "enum", "$.message_format")
-            invalid_without_effect("posts.reply", {"tid": 456, "draft_id": "not-a-valid-draft-id", "confirm_live": True}, "pattern", "$.draft_id")
-            invalid_without_effect("posts.reply", {"tid": 456, "draft_id": id_value, "confirm_live": False}, "const", "$.confirm_live")
-            invalid_without_effect("posts.reply", {"tid": 456, "draft_id": id_value, "confirm_live": 1}, "type", "$.confirm_live")
-            invalid_without_effect("posts.reply", {"tid": 456, "draft_id": id_value, "confirm_live": "true"}, "type", "$.confirm_live")
-            invalid_without_effect("posts.reply", {"tid": 456, "message": "valid"}, "required", "$")
-            invalid_without_effect("posts.reply", {"tid": 456, "confirm_live": True}, "anyOf", "$")
-            invalid_without_effect("posts.reply", {"tid": 456, "message": "valid", "confirm_live": True, "subject": "removed field"}, "additionalProperties", "$")
+            invalid_without_effect(
+                "posts.reply",
+                {"tid": "456", "message": "valid", "confirm_live": True},
+                "type",
+                "$.tid",
+            )
+            invalid_without_effect(
+                "posts.reply",
+                {"tid": True, "message": "valid", "confirm_live": True},
+                "type",
+                "$.tid",
+            )
+            invalid_without_effect(
+                "posts.reply",
+                {"tid": 456, "message": "", "confirm_live": True},
+                "minLength",
+                "$.message",
+            )
+            invalid_without_effect(
+                "posts.reply",
+                {
+                    "tid": 456,
+                    "message_format": "invalid",
+                    "message": "valid",
+                    "confirm_live": True,
+                },
+                "enum",
+                "$.message_format",
+            )
+            invalid_without_effect(
+                "posts.reply",
+                {"tid": 456, "draft_id": "not-a-valid-draft-id", "confirm_live": True},
+                "pattern",
+                "$.draft_id",
+            )
+            invalid_without_effect(
+                "posts.reply",
+                {"tid": 456, "draft_id": id_value, "confirm_live": False},
+                "const",
+                "$.confirm_live",
+            )
+            invalid_without_effect(
+                "posts.reply",
+                {"tid": 456, "draft_id": id_value, "confirm_live": 1},
+                "type",
+                "$.confirm_live",
+            )
+            invalid_without_effect(
+                "posts.reply",
+                {"tid": 456, "draft_id": id_value, "confirm_live": "true"},
+                "type",
+                "$.confirm_live",
+            )
+            invalid_without_effect(
+                "posts.reply", {"tid": 456, "message": "valid"}, "required", "$"
+            )
+            invalid_without_effect(
+                "posts.reply", {"tid": 456, "confirm_live": True}, "anyOf", "$"
+            )
+            invalid_without_effect(
+                "posts.reply",
+                {
+                    "tid": 456,
+                    "message": "valid",
+                    "confirm_live": True,
+                    "subject": "removed field",
+                },
+                "additionalProperties",
+                "$",
+            )
 
             # Local draft tools remain no-I/O sentinels while exercising draft status, selector, and confirmation schemas.
             for status in ("draft", "ready", "approved", "archived"):
-                valid_call("drafts.update", {"draft_id": id_value, "status": status, "title": "safe title"})
-            valid_call("drafts.update", {"draft_path": str(draft_dir / "metadata.json"), "status": "ready"})
-            invalid_without_effect("drafts.update", {**valid_arguments["drafts.update"], "status": "unknown"}, "enum", "$.status")
-            invalid_without_effect("drafts.update", {**valid_arguments["drafts.update"], "status": None}, "type", "$.status")
-            invalid_without_effect("drafts.update", {**valid_arguments["drafts.update"], "draft_id": "invalid-id"}, "pattern", "$.draft_id")
-            valid_call("drafts.delete", {"draft_path": str(draft_dir / "delete.json"), "confirm_delete": True})
-            invalid_without_effect("drafts.delete", {"draft_id": id_value, "confirm_delete": False}, "const", "$.confirm_delete")
-            invalid_without_effect("drafts.delete", {"draft_id": id_value, "confirm_delete": 1}, "type", "$.confirm_delete")
-            invalid_without_effect("drafts.delete", {"draft_id": id_value, "confirm_delete": "true"}, "type", "$.confirm_delete")
-            invalid_without_effect("drafts.delete", {"draft_id": id_value}, "required", "$")
-            invalid_without_effect("drafts.delete", {"confirm_delete": True}, "anyOf", "$")
+                valid_call(
+                    "drafts.update",
+                    {"draft_id": id_value, "status": status, "title": "safe title"},
+                )
+            valid_call(
+                "drafts.update",
+                {"draft_path": str(draft_dir / "metadata.json"), "status": "ready"},
+            )
+            invalid_without_effect(
+                "drafts.update",
+                {**valid_arguments["drafts.update"], "status": "unknown"},
+                "enum",
+                "$.status",
+            )
+            invalid_without_effect(
+                "drafts.update",
+                {**valid_arguments["drafts.update"], "status": None},
+                "type",
+                "$.status",
+            )
+            invalid_without_effect(
+                "drafts.update",
+                {**valid_arguments["drafts.update"], "draft_id": "invalid-id"},
+                "pattern",
+                "$.draft_id",
+            )
+            valid_call(
+                "drafts.delete",
+                {"draft_path": str(draft_dir / "delete.json"), "confirm_delete": True},
+            )
+            invalid_without_effect(
+                "drafts.delete",
+                {"draft_id": id_value, "confirm_delete": False},
+                "const",
+                "$.confirm_delete",
+            )
+            invalid_without_effect(
+                "drafts.delete",
+                {"draft_id": id_value, "confirm_delete": 1},
+                "type",
+                "$.confirm_delete",
+            )
+            invalid_without_effect(
+                "drafts.delete",
+                {"draft_id": id_value, "confirm_delete": "true"},
+                "type",
+                "$.confirm_delete",
+            )
+            invalid_without_effect(
+                "drafts.delete", {"draft_id": id_value}, "required", "$"
+            )
+            invalid_without_effect(
+                "drafts.delete", {"confirm_delete": True}, "anyOf", "$"
+            )
 
             # The local synthetic probe covers composed schemas, nested objects/items, and defaults on the actual SDK wire.
             probe_args = valid_arguments["wire_probe"]
             wire_probe_result = valid_call("wire_probe", probe_args)
             assert wire_probe_result["arguments"]["selector_a"] == "A"
             assert wire_probe_result["arguments"]["defaulted"] == ["safe"]
-            assert wire_probe_result["arguments"]["timestamp"] == "not-validated-as-a-date-time-annotation"
+            assert (
+                wire_probe_result["arguments"]["timestamp"]
+                == "not-validated-as-a-date-time-annotation"
+            )
             assert wire_probe_result["arguments"]["nullable"] is None
             selector_a_only = {**probe_args, "selector_a": "explicit-a"}
             selector_a_only.pop("selector_b")
             selector_a_result = valid_call("wire_probe", selector_a_only)
             assert selector_a_result["arguments"]["selector_b"] == "B"
-            valid_call("wire_probe", {**probe_args, "selector_a": "explicit-a", "selector_b": "explicit-b"})
+            valid_call(
+                "wire_probe",
+                {**probe_args, "selector_a": "explicit-a", "selector_b": "explicit-b"},
+            )
             valid_call("wire_probe", {**probe_args, "count": 1.0})
-            invalid_without_effect("wire_probe", {**probe_args, "count": True}, "type", "$.count")
-            invalid_without_effect("wire_probe", {**probe_args, "count": "1"}, "type", "$.count")
-            invalid_without_effect("wire_probe", {**probe_args, "count": 1.5}, "type", "$.count")
-            invalid_without_effect("wire_probe", {**probe_args, "count": 0}, "minimum", "$.count")
-            invalid_without_effect("wire_probe", {**probe_args, "count": 4}, "maximum", "$.count")
-            invalid_without_effect("wire_probe", {**probe_args, "items": [{"code": "UPPER"}]}, "pattern", "$.items[0].code")
-            invalid_without_effect("wire_probe", {**probe_args, "items": [{"code": "valid", "extra": 1}]}, "additionalProperties", "$.items[0]")
-            invalid_without_effect("wire_probe", {**probe_args, "details": "{}"}, "type", "$.details")
-            invalid_without_effect("wire_probe", {**probe_args, "details": {"label": ""}}, "minLength", "$.details.label")
-            invalid_without_effect("wire_probe", {**probe_args, "details": {"label": "valid", "extra": 1}}, "additionalProperties", "$.details")
-            invalid_without_effect("wire_probe", {**probe_args, "numbers": "[1]"}, "type", "$.numbers")
-            invalid_without_effect("wire_probe", {**probe_args, "numbers": [True]}, "type", "$.numbers[0]")
-            invalid_without_effect("wire_probe", {**probe_args, "text": ""}, "minLength", "$.text")
-            invalid_without_effect("wire_probe", {**probe_args, "text": None}, "type", "$.text")
-            invalid_without_effect("wire_probe", {**probe_args, "choice": "unlisted"}, "enum", "$.choice")
-            invalid_without_effect("wire_probe", {**probe_args, "choice": "blocked"}, "not", "$")
-            invalid_without_effect("wire_probe", {**probe_args, "mode": "x"}, "oneOf", "$")
-            invalid_without_effect("wire_probe", {key: value for key, value in probe_args.items() if key not in {"selector_a", "selector_b"}}, "anyOf", "$")
-            invalid_without_effect("wire_probe", {**probe_args, "confirmed": False}, "const", "$.confirmed")
-            invalid_without_effect("wire_probe", {**probe_args, "confirmed": 1}, "type", "$.confirmed")
-            invalid_without_effect("wire_probe", {**probe_args, "confirmed": "true"}, "type", "$.confirmed")
-            invalid_without_effect("wire_probe", {**probe_args, "unknown": "UNTRUSTED-MESSAGE-DO-NOT-ECHO"}, "additionalProperties", "$", untrusted_marker="UNTRUSTED-MESSAGE-DO-NOT-ECHO")
+            invalid_without_effect(
+                "wire_probe", {**probe_args, "count": True}, "type", "$.count"
+            )
+            invalid_without_effect(
+                "wire_probe", {**probe_args, "count": "1"}, "type", "$.count"
+            )
+            invalid_without_effect(
+                "wire_probe", {**probe_args, "count": 1.5}, "type", "$.count"
+            )
+            invalid_without_effect(
+                "wire_probe", {**probe_args, "count": 0}, "minimum", "$.count"
+            )
+            invalid_without_effect(
+                "wire_probe", {**probe_args, "count": 4}, "maximum", "$.count"
+            )
+            invalid_without_effect(
+                "wire_probe",
+                {**probe_args, "items": [{"code": "UPPER"}]},
+                "pattern",
+                "$.items[0].code",
+            )
+            invalid_without_effect(
+                "wire_probe",
+                {**probe_args, "items": [{"code": "valid", "extra": 1}]},
+                "additionalProperties",
+                "$.items[0]",
+            )
+            invalid_without_effect(
+                "wire_probe", {**probe_args, "details": "{}"}, "type", "$.details"
+            )
+            invalid_without_effect(
+                "wire_probe",
+                {**probe_args, "details": {"label": ""}},
+                "minLength",
+                "$.details.label",
+            )
+            invalid_without_effect(
+                "wire_probe",
+                {**probe_args, "details": {"label": "valid", "extra": 1}},
+                "additionalProperties",
+                "$.details",
+            )
+            invalid_without_effect(
+                "wire_probe", {**probe_args, "numbers": "[1]"}, "type", "$.numbers"
+            )
+            invalid_without_effect(
+                "wire_probe", {**probe_args, "numbers": [True]}, "type", "$.numbers[0]"
+            )
+            invalid_without_effect(
+                "wire_probe", {**probe_args, "text": ""}, "minLength", "$.text"
+            )
+            invalid_without_effect(
+                "wire_probe", {**probe_args, "text": None}, "type", "$.text"
+            )
+            invalid_without_effect(
+                "wire_probe", {**probe_args, "choice": "unlisted"}, "enum", "$.choice"
+            )
+            invalid_without_effect(
+                "wire_probe", {**probe_args, "choice": "blocked"}, "not", "$"
+            )
+            invalid_without_effect(
+                "wire_probe", {**probe_args, "mode": "x"}, "oneOf", "$"
+            )
+            invalid_without_effect(
+                "wire_probe",
+                {
+                    key: value
+                    for key, value in probe_args.items()
+                    if key not in {"selector_a", "selector_b"}
+                },
+                "anyOf",
+                "$",
+            )
+            invalid_without_effect(
+                "wire_probe", {**probe_args, "confirmed": False}, "const", "$.confirmed"
+            )
+            invalid_without_effect(
+                "wire_probe", {**probe_args, "confirmed": 1}, "type", "$.confirmed"
+            )
+            invalid_without_effect(
+                "wire_probe", {**probe_args, "confirmed": "true"}, "type", "$.confirmed"
+            )
+            invalid_without_effect(
+                "wire_probe",
+                {**probe_args, "unknown": "UNTRUSTED-MESSAGE-DO-NOT-ECHO"},
+                "additionalProperties",
+                "$",
+                untrusted_marker="UNTRUSTED-MESSAGE-DO-NOT-ECHO",
+            )
 
         finally:
             process.stdin.close()

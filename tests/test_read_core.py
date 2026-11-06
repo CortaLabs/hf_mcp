@@ -1,16 +1,11 @@
 from __future__ import annotations
 
 import json
-import sys
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-PRODUCT_ROOT = Path(__file__).resolve().parents[1]
-SRC_PATH = PRODUCT_ROOT / "src"
-if str(SRC_PATH) not in sys.path:
-    sys.path.insert(0, str(SRC_PATH))
 
 from hf_mcp.capabilities import CAPABILITY_PARAMETER_FAMILIES, CapabilityPolicy
 from hf_mcp.config import HFMCPSettings
@@ -29,6 +24,9 @@ from hf_mcp.tools.read_core import (
     list_threads,
 )
 from hf_mcp.transport import HFTransport
+
+PRODUCT_ROOT = Path(__file__).resolve().parents[1]
+SRC_PATH = PRODUCT_ROOT / "src"
 
 
 class _CaptureServer:
@@ -57,12 +55,16 @@ class _CaptureServer:
 @pytest.mark.parametrize("tool_name", ["me.read", "users.read"])
 @pytest.mark.parametrize("output_mode", ["structured", "raw"])
 def test_account_reads_use_generic_route_in_all_output_modes(
-    monkeypatch: pytest.MonkeyPatch, tool_name: str, output_mode: str,
+    monkeypatch: pytest.MonkeyPatch,
+    tool_name: str,
+    output_mode: str,
 ) -> None:
     calls: list[dict[str, Any]] = []
     resource = tool_name.split(".")[0]
 
-    def fake_post(self: HFTransport, route: str, payload: dict[str, Any], headers: dict[str, str]) -> dict[str, Any]:
+    def fake_post(
+        self: HFTransport, route: str, payload: dict[str, Any], headers: dict[str, str]
+    ) -> dict[str, Any]:
         calls.append({"route": route, "payload": payload})
         if route != "/read":
             raise RuntimeError("HF helper route failed with HTTP 404")
@@ -90,7 +92,9 @@ class _StubTokenStore:
         return TokenBundle(access_token="token", token_type="Bearer", scope=frozenset())
 
 
-def _policy(*, enabled_capabilities: set[str], enabled_parameter_families: set[str]) -> CapabilityPolicy:
+def _policy(
+    *, enabled_capabilities: set[str], enabled_parameter_families: set[str]
+) -> CapabilityPolicy:
     return CapabilityPolicy(
         HFMCPSettings(
             profile="test",
@@ -110,15 +114,24 @@ def test_core_read_specs_match_registry_rows_and_parameter_families() -> None:
         "posts.read",
     }
     for spec in specs:
-        assert set(spec.parameter_families) == set(CAPABILITY_PARAMETER_FAMILIES[spec.capability_family])
+        assert set(spec.parameter_families) == set(
+            CAPABILITY_PARAMETER_FAMILIES[spec.capability_family]
+        )
 
 
 def test_build_core_read_handlers_registers_only_policy_allowed_core_rows() -> None:
     policy = _policy(
         enabled_capabilities={"me.read", "threads.read"},
-        enabled_parameter_families={"selectors.user", "fields.me.basic", "selectors.forum", "selectors.thread"},
+        enabled_parameter_families={
+            "selectors.user",
+            "fields.me.basic",
+            "selectors.forum",
+            "selectors.thread",
+        },
     )
-    transport = HFTransport(token_store=_StubTokenStore(), base_url="https://example.test")
+    transport = HFTransport(
+        token_store=_StubTokenStore(), base_url="https://example.test"
+    )
 
     handlers = build_core_read_handlers(policy, transport)
 
@@ -143,7 +156,13 @@ def test_me_schema_prunes_advanced_parameter_when_family_not_allowed() -> None:
 def test_threads_and_posts_schema_accept_any_supported_selector() -> None:
     policy = _policy(
         enabled_capabilities={"threads.read", "posts.read"},
-        enabled_parameter_families={"selectors.forum", "selectors.thread", "selectors.post", "filters.pagination", "fields.posts.body"},
+        enabled_parameter_families={
+            "selectors.forum",
+            "selectors.thread",
+            "selectors.post",
+            "filters.pagination",
+            "fields.posts.body",
+        },
     )
 
     threads_schema = build_tool_schema(get_tool_spec("threads.read"), policy)
@@ -151,17 +170,29 @@ def test_threads_and_posts_schema_accept_any_supported_selector() -> None:
 
     assert {"fid", "tid", "uid"} <= set(threads_schema["properties"])
     assert "required" not in threads_schema
-    assert threads_schema["anyOf"] == [{"required": ["fid"]}, {"required": ["tid"]}, {"required": ["uid"]}]
+    assert threads_schema["anyOf"] == [
+        {"required": ["fid"]},
+        {"required": ["tid"]},
+        {"required": ["uid"]},
+    ]
 
     assert {"pid", "tid", "uid"} <= set(posts_schema["properties"])
     assert "required" not in posts_schema
-    assert posts_schema["anyOf"] == [{"required": ["pid"]}, {"required": ["tid"]}, {"required": ["uid"]}]
+    assert posts_schema["anyOf"] == [
+        {"required": ["pid"]},
+        {"required": ["tid"]},
+        {"required": ["uid"]},
+    ]
 
 
 def test_dispatcher_output_excludes_disabled_core_read_capability() -> None:
     policy = _policy(
         enabled_capabilities={"users.read"},
-        enabled_parameter_families={"selectors.user", "fields.users.profile", "filters.pagination"},
+        enabled_parameter_families={
+            "selectors.user",
+            "fields.users.profile",
+            "filters.pagination",
+        },
     )
     server = _CaptureServer()
 
@@ -190,7 +221,9 @@ def test_list_posts_delegates_to_generic_transport_and_returns_normalized_output
 
     monkeypatch.setattr(HFTransport, "_post_json", _fake_post_json)
 
-    transport = HFTransport(token_store=_StubTokenStore(), base_url="https://example.test")
+    transport = HFTransport(
+        token_store=_StubTokenStore(), base_url="https://example.test"
+    )
     result = list_posts(
         transport=transport,
         tid=123,
@@ -232,10 +265,14 @@ def test_me_handler_reads_authenticated_profile_without_uid_selector(
         enabled_capabilities={"me.read"},
         enabled_parameter_families={"selectors.user", "fields.me.basic"},
     )
-    transport = HFTransport(token_store=_StubTokenStore(), base_url="https://example.test")
+    transport = HFTransport(
+        token_store=_StubTokenStore(), base_url="https://example.test"
+    )
     handlers = build_core_read_handlers(policy, transport)
 
-    result = handlers["me.read"](include_basic_fields=None, include_advanced_fields=True)
+    result = handlers["me.read"](
+        include_basic_fields=None, include_advanced_fields=True
+    )
 
     assert captured["route"] == "/read"
     me_asks = captured["payload"]["asks"]["me"]
@@ -264,11 +301,15 @@ def test_me_handler_reads_authenticated_profile_without_uid_selector(
     assert "totalpms" not in me_asks
     assert "lastactive" not in me_asks
     assert "warningpoints" not in me_asks
-    assert result["structuredContent"]["me"] == [{"uid": "5", "username": "forge", "unreadpms": "99"}]
+    assert result["structuredContent"]["me"] == [
+        {"uid": "5", "username": "forge", "unreadpms": "99"}
+    ]
     assert result["content"][0]["type"] == "text"
 
 
-def test_get_profile_omits_uid_selector_when_called_directly(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_get_profile_omits_uid_selector_when_called_directly(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     captured: dict[str, Any] = {}
 
     def _fake_post_json(
@@ -284,7 +325,9 @@ def test_get_profile_omits_uid_selector_when_called_directly(monkeypatch: pytest
 
     monkeypatch.setattr(HFTransport, "_post_json", _fake_post_json)
 
-    transport = HFTransport(token_store=_StubTokenStore(), base_url="https://example.test")
+    transport = HFTransport(
+        token_store=_StubTokenStore(), base_url="https://example.test"
+    )
     result = get_profile(transport=transport)
 
     assert captured["route"] == "/read"
@@ -329,12 +372,18 @@ def test_get_profile_includes_advanced_fields_only_when_opted_in_and_allowed(
         captured["route"] = route
         captured["payload"] = payload
         captured["headers"] = headers
-        return {"me": {"uid": 5, "username": "forge", "unreadpms": 3, "unreadalerts": 2}}
+        return {
+            "me": {"uid": 5, "username": "forge", "unreadpms": 3, "unreadalerts": 2}
+        }
 
     monkeypatch.setattr(HFTransport, "_post_json", _fake_post_json)
 
-    transport = HFTransport(token_store=_StubTokenStore(), base_url="https://example.test")
-    result = get_profile(transport=transport, include_advanced_fields=True, allow_advanced_fields=True)
+    transport = HFTransport(
+        token_store=_StubTokenStore(), base_url="https://example.test"
+    )
+    result = get_profile(
+        transport=transport, include_advanced_fields=True, allow_advanced_fields=True
+    )
 
     me_asks = captured["payload"]["asks"]["me"]
     assert captured["route"] == "/read"
@@ -391,7 +440,9 @@ def test_get_profile_includes_advanced_fields_only_when_opted_in_and_allowed(
     assert captured["headers"]["Authorization"] == "Bearer token"
     assert "content" not in result
     assert "structuredContent" not in result
-    assert result["me"] == [{"uid": "5", "username": "forge", "unreadpms": "3", "unreadalerts": "2"}]
+    assert result["me"] == [
+        {"uid": "5", "username": "forge", "unreadpms": "3", "unreadalerts": "2"}
+    ]
 
 
 def test_get_user_defaults_optional_values_and_requests_profile_bundle(
@@ -412,8 +463,16 @@ def test_get_user_defaults_optional_values_and_requests_profile_bundle(
 
     monkeypatch.setattr(HFTransport, "_post_json", _fake_post_json)
 
-    transport = HFTransport(token_store=_StubTokenStore(), base_url="https://example.test")
-    result = get_user(transport=transport, uid=5, page=None, per_page=None, include_profile_fields=True)
+    transport = HFTransport(
+        token_store=_StubTokenStore(), base_url="https://example.test"
+    )
+    result = get_user(
+        transport=transport,
+        uid=5,
+        page=None,
+        per_page=None,
+        include_profile_fields=True,
+    )
 
     user_asks = captured["payload"]["asks"]["users"]
     assert captured["route"] == "/read"
@@ -481,7 +540,9 @@ def test_list_threads_defaults_optional_values_and_requests_record_fields(
 
     monkeypatch.setattr(HFTransport, "_post_json", _fake_post_json)
 
-    transport = HFTransport(token_store=_StubTokenStore(), base_url="https://example.test")
+    transport = HFTransport(
+        token_store=_StubTokenStore(), base_url="https://example.test"
+    )
     result = list_threads(transport=transport, fid=375, page=None, per_page=None)
 
     thread_asks = captured["payload"]["asks"]["threads"]
@@ -542,7 +603,9 @@ def test_list_threads_supports_tid_and_uid_selectors_with_exact_hf_keys(
 
     monkeypatch.setattr(HFTransport, "_post_json", _fake_post_json)
 
-    transport = HFTransport(token_store=_StubTokenStore(), base_url="https://example.test")
+    transport = HFTransport(
+        token_store=_StubTokenStore(), base_url="https://example.test"
+    )
     list_threads(transport=transport, tid=123, uid=5, page=None, per_page=None)
 
     thread_asks = captured["payload"]["asks"]["threads"]
@@ -555,7 +618,9 @@ def test_list_threads_supports_tid_and_uid_selectors_with_exact_hf_keys(
 
 
 def test_list_threads_requires_at_least_one_selector() -> None:
-    transport = HFTransport(token_store=_StubTokenStore(), base_url="https://example.test")
+    transport = HFTransport(
+        token_store=_StubTokenStore(), base_url="https://example.test"
+    )
 
     with pytest.raises(ValueError, match="threads.read requires at least one selector"):
         list_threads(transport=transport, fid=None, tid=None, uid=None)
@@ -586,7 +651,9 @@ def test_list_forums_defaults_optional_values_and_requests_forum_card_fields(
 
     monkeypatch.setattr(HFTransport, "_post_json", _fake_post_json)
 
-    transport = HFTransport(token_store=_StubTokenStore(), base_url="https://example.test")
+    transport = HFTransport(
+        token_store=_StubTokenStore(), base_url="https://example.test"
+    )
     result = list_forums(transport=transport, fid=375, page=None, per_page=None)
 
     forum_asks = captured["payload"]["asks"]["forums"]
@@ -598,12 +665,25 @@ def test_list_forums_defaults_optional_values_and_requests_forum_card_fields(
     assert forum_asks["name"] is True
     assert forum_asks["description"] is True
     assert forum_asks["type"] is True
-    assert set(forum_asks.keys()) == {"_fid", "_page", "_perpage", "fid", "name", "description", "type"}
+    assert set(forum_asks.keys()) == {
+        "_fid",
+        "_page",
+        "_perpage",
+        "fid",
+        "name",
+        "description",
+        "type",
+    }
     assert captured["headers"]["Authorization"] == "Bearer token"
     assert "content" not in result
     assert "structuredContent" not in result
     assert result["forums"] == [
-        {"fid": "375", "name": "General", "description": "General discussion", "type": "f"}
+        {
+            "fid": "375",
+            "name": "General",
+            "description": "General discussion",
+            "type": "f",
+        }
     ]
 
 
@@ -625,7 +705,9 @@ def test_list_posts_defaults_optional_values_and_requests_record_fields(
 
     monkeypatch.setattr(HFTransport, "_post_json", _fake_post_json)
 
-    transport = HFTransport(token_store=_StubTokenStore(), base_url="https://example.test")
+    transport = HFTransport(
+        token_store=_StubTokenStore(), base_url="https://example.test"
+    )
     result = list_posts(
         transport=transport,
         tid=123,
@@ -668,7 +750,9 @@ def test_list_posts_defaults_optional_values_and_requests_record_fields(
     assert captured["headers"]["Authorization"] == "Bearer token"
     assert "content" not in result
     assert "structuredContent" not in result
-    assert result["posts"] == [{"pid": "88", "subject": "No PID filter", "message": "Text"}]
+    assert result["posts"] == [
+        {"pid": "88", "subject": "No PID filter", "message": "Text"}
+    ]
 
 
 def test_list_posts_supports_uid_selector_without_tid(
@@ -689,8 +773,12 @@ def test_list_posts_supports_uid_selector_without_tid(
 
     monkeypatch.setattr(HFTransport, "_post_json", _fake_post_json)
 
-    transport = HFTransport(token_store=_StubTokenStore(), base_url="https://example.test")
-    list_posts(transport=transport, uid=5, page=None, per_page=None, include_post_body=None)
+    transport = HFTransport(
+        token_store=_StubTokenStore(), base_url="https://example.test"
+    )
+    list_posts(
+        transport=transport, uid=5, page=None, per_page=None, include_post_body=None
+    )
 
     post_asks = captured["payload"]["asks"]["posts"]
     assert captured["route"] == "/read"
@@ -719,8 +807,12 @@ def test_list_posts_supports_pid_selector_without_tid_or_uid(
 
     monkeypatch.setattr(HFTransport, "_post_json", _fake_post_json)
 
-    transport = HFTransport(token_store=_StubTokenStore(), base_url="https://example.test")
-    list_posts(transport=transport, pid=88, page=None, per_page=None, include_post_body=False)
+    transport = HFTransport(
+        token_store=_StubTokenStore(), base_url="https://example.test"
+    )
+    list_posts(
+        transport=transport, pid=88, page=None, per_page=None, include_post_body=False
+    )
 
     post_asks = captured["payload"]["asks"]["posts"]
     assert captured["route"] == "/read"
@@ -733,7 +825,9 @@ def test_list_posts_supports_pid_selector_without_tid_or_uid(
 
 
 def test_list_posts_requires_at_least_one_selector() -> None:
-    transport = HFTransport(token_store=_StubTokenStore(), base_url="https://example.test")
+    transport = HFTransport(
+        token_store=_StubTokenStore(), base_url="https://example.test"
+    )
 
     with pytest.raises(ValueError, match="posts.read requires at least one selector"):
         list_posts(transport=transport, tid=None, pid=None, uid=None)
@@ -757,7 +851,9 @@ def test_list_posts_include_post_body_false_removes_only_message(
 
     monkeypatch.setattr(HFTransport, "_post_json", _fake_post_json)
 
-    transport = HFTransport(token_store=_StubTokenStore(), base_url="https://example.test")
+    transport = HFTransport(
+        token_store=_StubTokenStore(), base_url="https://example.test"
+    )
     result = list_posts(
         transport=transport,
         tid=123,
@@ -816,7 +912,9 @@ def test_registered_posts_handler_formats_mycode_body_fields_by_default(
         }
     }
 
-    monkeypatch.setattr(HFTransport, "read", lambda self, asks, helper=None: normalize_response(payload))
+    monkeypatch.setattr(
+        HFTransport, "read", lambda self, asks, helper=None: normalize_response(payload)
+    )
 
     settings = HFMCPSettings(
         profile="test",
@@ -824,17 +922,28 @@ def test_registered_posts_handler_formats_mycode_body_fields_by_default(
         enabled_parameter_families=frozenset({"selectors.thread", "fields.posts.body"}),
     )
     policy = CapabilityPolicy(settings)
-    transport = HFTransport(token_store=_StubTokenStore(), base_url="https://example.test")
+    transport = HFTransport(
+        token_store=_StubTokenStore(), base_url="https://example.test"
+    )
     handler = build_core_read_handlers(policy, transport)["posts.read"]
 
     markdown_result = handler(tid=123)
-    assert markdown_result["structuredContent"]["posts"][0]["message"] == "**Bold** [link](https://example.test)"
+    assert (
+        markdown_result["structuredContent"]["posts"][0]["message"]
+        == "**Bold** [link](https://example.test)"
+    )
 
     clean_result = handler(tid=123, body_format="clean")
-    assert clean_result["structuredContent"]["posts"][0]["message"] == "Bold link (https://example.test)"
+    assert (
+        clean_result["structuredContent"]["posts"][0]["message"]
+        == "Bold link (https://example.test)"
+    )
 
     raw_result = handler(tid=123, body_format="raw")
-    assert raw_result["structuredContent"]["posts"][0]["message"] == "[b]Bold[/b] [url=https://example.test]link[/url]"
+    assert (
+        raw_result["structuredContent"]["posts"][0]["message"]
+        == "[b]Bold[/b] [url=https://example.test]link[/url]"
+    )
 
 
 def test_registered_threads_handler_returns_rich_markdown_thread_content(
@@ -858,20 +967,29 @@ def test_registered_threads_handler_returns_rich_markdown_thread_content(
         ]
     }
 
-    monkeypatch.setattr(HFTransport, "read", lambda self, asks, helper=None: normalized_payload)
+    monkeypatch.setattr(
+        HFTransport, "read", lambda self, asks, helper=None: normalized_payload
+    )
 
     settings = HFMCPSettings(
         profile="test",
         enabled_capabilities=frozenset({"threads.read"}),
-        enabled_parameter_families=frozenset({"selectors.thread", "filters.pagination"}),
+        enabled_parameter_families=frozenset(
+            {"selectors.thread", "filters.pagination"}
+        ),
     )
     policy = CapabilityPolicy(settings)
-    transport = HFTransport(token_store=_StubTokenStore(), base_url="https://example.test")
+    transport = HFTransport(
+        token_store=_StubTokenStore(), base_url="https://example.test"
+    )
     handler = build_core_read_handlers(policy, transport)["threads.read"]
 
     result = handler(tid=6324346, output_mode="readable", include_raw_payload=False)
 
-    assert result["structuredContent"]["threads"][0]["firstpost"]["message"] == "**Line one**\n  Line two"
+    assert (
+        result["structuredContent"]["threads"][0]["firstpost"]["message"]
+        == "**Line one**\n  Line two"
+    )
     assert result["content"][0]["type"] == "text"
     assert "## Release notes" in result["content"][0]["text"]
     assert "- tid: 6324346" in result["content"][0]["text"]
@@ -923,11 +1041,15 @@ def test_registered_posts_handler_supports_output_modes_and_raw_payload_attachme
         }
     }
 
-    def _fake_read(self: HFTransport, asks: dict[str, Any], helper: str | None = None) -> dict[str, Any]:
+    def _fake_read(
+        self: HFTransport, asks: dict[str, Any], helper: str | None = None
+    ) -> dict[str, Any]:
         captured["read"].append({"asks": asks, "helper": helper})
         return normalized_payload
 
-    def _fake_read_raw(self: HFTransport, asks: dict[str, Any], helper: str | None = None) -> dict[str, Any]:
+    def _fake_read_raw(
+        self: HFTransport, asks: dict[str, Any], helper: str | None = None
+    ) -> dict[str, Any]:
         captured["read_raw"].append({"asks": asks, "helper": helper})
         return raw_payload
 
@@ -937,14 +1059,27 @@ def test_registered_posts_handler_supports_output_modes_and_raw_payload_attachme
     settings = HFMCPSettings(
         profile="test",
         enabled_capabilities=frozenset({"posts.read"}),
-        enabled_parameter_families=frozenset({"selectors.thread", "selectors.post", "filters.pagination", "fields.posts.body"}),
-        read_output_defaults=ReadOutputDefaults(mode="structured", include_raw_payload=True),
+        enabled_parameter_families=frozenset(
+            {
+                "selectors.thread",
+                "selectors.post",
+                "filters.pagination",
+                "fields.posts.body",
+            }
+        ),
+        read_output_defaults=ReadOutputDefaults(
+            mode="structured", include_raw_payload=True
+        ),
     )
     policy = CapabilityPolicy(settings)
-    transport = HFTransport(token_store=_StubTokenStore(), base_url="https://example.test")
+    transport = HFTransport(
+        token_store=_StubTokenStore(), base_url="https://example.test"
+    )
     handler = build_core_read_handlers(policy, transport)["posts.read"]
 
-    readable_result = handler(tid=123, output_mode="readable", include_raw_payload=False)
+    readable_result = handler(
+        tid=123, output_mode="readable", include_raw_payload=False
+    )
     assert readable_result["structuredContent"]["posts"] == formatted_payload["posts"]
     assert readable_result["structuredContent"]["_hf_flow"]["version"] == 1
     assert readable_result["content"][0]["type"] == "text"
@@ -953,15 +1088,22 @@ def test_registered_posts_handler_supports_output_modes_and_raw_payload_attachme
     assert "Line one\nLine two" in readable_result["content"][0]["text"]
     assert len(readable_result["content"]) == 1
 
-    structured_result = handler(tid=123, output_mode="structured", include_raw_payload=False)
+    structured_result = handler(
+        tid=123, output_mode="structured", include_raw_payload=False
+    )
     assert structured_result["structuredContent"]["posts"] == formatted_payload["posts"]
     assert structured_result["structuredContent"]["_hf_flow"]["version"] == 1
-    assert structured_result["content"] == [{"type": "text", "text": "posts.read returned 1 row(s)."}]
+    assert structured_result["content"] == [
+        {"type": "text", "text": "posts.read returned 1 row(s)."}
+    ]
 
     raw_result = handler(tid=123, output_mode="raw", include_raw_payload=False)
     assert raw_result["structuredContent"]["posts"] == normalized_payload["posts"]
     assert raw_result["structuredContent"]["_hf_flow"]["version"] == 1
-    assert raw_result["content"][0] == {"type": "text", "text": "posts.read returned 1 row(s)."}
+    assert raw_result["content"][0] == {
+        "type": "text",
+        "text": "posts.read returned 1 row(s).",
+    }
     assert raw_result["content"][1]["type"] == "resource"
     assert raw_result["content"][1]["resource"]["uri"] == "hf-mcp://raw/posts.read"
     assert raw_result["content"][1]["resource"]["mimeType"] == "application/json"
@@ -970,7 +1112,10 @@ def test_registered_posts_handler_supports_output_modes_and_raw_payload_attachme
     defaults_result = handler(tid=123)
     assert defaults_result["structuredContent"]["posts"] == formatted_payload["posts"]
     assert defaults_result["structuredContent"]["_hf_flow"]["version"] == 1
-    assert defaults_result["content"][0] == {"type": "text", "text": "posts.read returned 1 row(s)."}
+    assert defaults_result["content"][0] == {
+        "type": "text",
+        "text": "posts.read returned 1 row(s).",
+    }
     assert defaults_result["content"][1]["type"] == "resource"
     assert json.loads(defaults_result["content"][1]["resource"]["text"]) == raw_payload
 
@@ -984,43 +1129,98 @@ def test_core_read_flow_chain_adds_hf_flow_and_preserves_endpoint_root_payloads(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     payload_by_helper = {
-        "forums": {"forums": [{"fid": "375", "name": "General", "children": [{"fid": "901", "name": "Subforum"}]}]},
-        "threads": {"threads": [{"tid": "6324346", "fid": "375", "uid": "5", "subject": "Release notes"}]},
-        "posts": {"posts": [{"pid": "7", "tid": "6324346", "fid": "375", "uid": "5", "subject": "Re: Release notes"}]},
+        "forums": {
+            "forums": [
+                {
+                    "fid": "375",
+                    "name": "General",
+                    "children": [{"fid": "901", "name": "Subforum"}],
+                }
+            ]
+        },
+        "threads": {
+            "threads": [
+                {"tid": "6324346", "fid": "375", "uid": "5", "subject": "Release notes"}
+            ]
+        },
+        "posts": {
+            "posts": [
+                {
+                    "pid": "7",
+                    "tid": "6324346",
+                    "fid": "375",
+                    "uid": "5",
+                    "subject": "Re: Release notes",
+                }
+            ]
+        },
     }
 
-    def _fake_read(self: HFTransport, asks: dict[str, Any], helper: str | None = None) -> dict[str, Any]:
+    def _fake_read(
+        self: HFTransport, asks: dict[str, Any], helper: str | None = None
+    ) -> dict[str, Any]:
         assert helper is None
         return payload_by_helper[next(iter(asks))]
 
     monkeypatch.setattr(HFTransport, "read", _fake_read)
 
     policy = _policy(
-        enabled_capabilities={"forums.read", "threads.read", "posts.read", "users.read"},
-        enabled_parameter_families={"selectors.forum", "selectors.thread", "selectors.post", "selectors.user", "filters.pagination"},
+        enabled_capabilities={
+            "forums.read",
+            "threads.read",
+            "posts.read",
+            "users.read",
+        },
+        enabled_parameter_families={
+            "selectors.forum",
+            "selectors.thread",
+            "selectors.post",
+            "selectors.user",
+            "filters.pagination",
+        },
     )
-    transport = HFTransport(token_store=_StubTokenStore(), base_url="https://example.test")
+    transport = HFTransport(
+        token_store=_StubTokenStore(), base_url="https://example.test"
+    )
     handlers = build_core_read_handlers(policy, transport)
 
     forums_result = handlers["forums.read"](fid=375)
-    assert forums_result["structuredContent"]["forums"] == payload_by_helper["forums"]["forums"]
+    assert (
+        forums_result["structuredContent"]["forums"]
+        == payload_by_helper["forums"]["forums"]
+    )
     forums_flow = forums_result["structuredContent"]["_hf_flow"]
-    forum_actions = {(action["tool"], tuple(sorted(action["arguments"].items()))) for action in forums_flow["next_actions"]}
+    forum_actions = {
+        (action["tool"], tuple(sorted(action["arguments"].items())))
+        for action in forums_flow["next_actions"]
+    }
     assert ("threads.read", (("fid", 375),)) in forum_actions
     assert ("forums.read", (("fid", 901),)) in forum_actions
 
     threads_result = handlers["threads.read"](fid=375)
-    assert threads_result["structuredContent"]["threads"] == payload_by_helper["threads"]["threads"]
+    assert (
+        threads_result["structuredContent"]["threads"]
+        == payload_by_helper["threads"]["threads"]
+    )
     threads_flow = threads_result["structuredContent"]["_hf_flow"]
-    thread_actions = {(action["tool"], tuple(sorted(action["arguments"].items()))) for action in threads_flow["next_actions"]}
+    thread_actions = {
+        (action["tool"], tuple(sorted(action["arguments"].items())))
+        for action in threads_flow["next_actions"]
+    }
     assert ("posts.read", (("tid", 6324346),)) in thread_actions
     assert ("users.read", (("uid", 5),)) in thread_actions
     assert ("forums.read", (("fid", 375),)) in thread_actions
 
     posts_result = handlers["posts.read"](tid=6324346)
-    assert posts_result["structuredContent"]["posts"] == payload_by_helper["posts"]["posts"]
+    assert (
+        posts_result["structuredContent"]["posts"]
+        == payload_by_helper["posts"]["posts"]
+    )
     posts_flow = posts_result["structuredContent"]["_hf_flow"]
-    post_actions = {(action["tool"], tuple(sorted(action["arguments"].items()))) for action in posts_flow["next_actions"]}
+    post_actions = {
+        (action["tool"], tuple(sorted(action["arguments"].items())))
+        for action in posts_flow["next_actions"]
+    }
     assert ("threads.read", (("tid", 6324346),)) in post_actions
     assert ("users.read", (("uid", 5),)) in post_actions
     assert ("forums.read", (("fid", 375),)) in post_actions

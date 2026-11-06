@@ -40,7 +40,14 @@ YAML_EXAMPLE = "products/hf_mcp/config.example.yaml"
 TOML_EXAMPLE = "products/hf_mcp/config.example.toml"
 SKILLS_SUBTREE = "products/hf_mcp/skills/**"
 CATALOG_DATA_SUBTREE = "products/hf_mcp/src/hf_mcp/data/**"
-FORBIDDEN_EXPORT_REFERENCES = (".council", ".scribe", ".claude", ".codex", "../", "..\\")
+FORBIDDEN_EXPORT_REFERENCES = (
+    ".council",
+    ".scribe",
+    ".claude",
+    ".codex",
+    "../",
+    "..\\",
+)
 EXPECTED_MANIFEST_LINES = {
     "include README.md",
     "include pyproject.toml",
@@ -60,12 +67,16 @@ EXPECTED_MANIFEST_LINES = {
 
 def _validate_allowlist(entries: list[str]) -> None:
     for entry in entries:
-        assert entry.startswith(ALLOWED_PREFIX), f"Allowlist entry escapes product subtree: {entry}"
+        assert entry.startswith(ALLOWED_PREFIX), (
+            f"Allowlist entry escapes product subtree: {entry}"
+        )
         assert ".." not in entry, f"Allowlist entry contains parent traversal: {entry}"
 
 
 def _allowlist_product_path(entry: str) -> Path:
-    assert entry.startswith(ALLOWED_PREFIX), f"Allowlist entry escapes product subtree: {entry}"
+    assert entry.startswith(ALLOWED_PREFIX), (
+        f"Allowlist entry escapes product subtree: {entry}"
+    )
     return PRODUCT_ROOT / entry.removeprefix(ALLOWED_PREFIX)
 
 
@@ -108,7 +119,9 @@ def test_export_root_resolves_from_standalone_product_checkout(tmp_path: Path) -
 @pytest.mark.build
 @pytest.mark.regression
 def test_publisher_trigger_containment() -> None:
-    workflow = yaml.load(PUBLISH_WORKFLOW_PATH.read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
+    workflow = yaml.load(
+        PUBLISH_WORKFLOW_PATH.read_text(encoding="utf-8"), Loader=yaml.BaseLoader
+    )
     triggers = workflow["on"]
     event_cases = (
         ("source push", "push", False),
@@ -130,15 +143,27 @@ def test_docs_define_yaml_env_and_token_path_responsibilities() -> None:
     configuration_doc = CONFIGURATION_DOC_PATH.read_text(encoding="utf-8")
     export_boundary_doc = EXPORT_BOUNDARY_DOC_PATH.read_text(encoding="utf-8")
 
-    assert "YAML is the canonical runtime config input for non-secret policy" in configuration_doc
+    assert (
+        "YAML is the canonical runtime config input for non-secret policy"
+        in configuration_doc
+    )
     assert "must not be used to choose non-secret runtime policy" in configuration_doc
-    assert "must resolve to an absolute path outside the tracked repository" in configuration_doc
+    assert (
+        "must resolve to an absolute path outside the tracked repository"
+        in configuration_doc
+    )
 
-    assert "Runtime policy is YAML-first: non-secret policy belongs in `config.yaml`." in export_boundary_doc
+    assert (
+        "Runtime policy is YAML-first: non-secret policy belongs in `config.yaml`."
+        in export_boundary_doc
+    )
     assert "reserved for secrets and machine-local overrides" in export_boundary_doc
     assert "must not define" in export_boundary_doc
     assert "profile/capability/parameter policy" in export_boundary_doc
-    assert "Token-store location must be an absolute path outside the tracked repository" in export_boundary_doc
+    assert (
+        "Token-store location must be an absolute path outside the tracked repository"
+        in export_boundary_doc
+    )
 
 
 @pytest.mark.core
@@ -192,24 +217,32 @@ def test_pyproject_release_contract_and_metadata_boundary() -> None:
     assert project["keywords"] == ["hackforums", "mcp", "model-context-protocol"]
     assert "Programming Language :: Python :: 3.11" in project["classifiers"]
     assert pyproject["tool"]["setuptools"]["package-data"]["hf_mcp"] == ["data/*.json"]
-    assert pyproject["tool"]["setuptools"]["data-files"]["skills/hf-mycode/references"] == [
-        "skills/hf-mycode/references/MYCODE_REFERENCE.md"
-    ]
+    assert pyproject["tool"]["setuptools"]["data-files"][
+        "skills/hf-mycode/references"
+    ] == ["skills/hf-mycode/references/MYCODE_REFERENCE.md"]
 
     pyproject_text = PYPROJECT_PATH.read_text(encoding="utf-8").lower()
     for forbidden in FORBIDDEN_EXPORT_REFERENCES:
-        assert forbidden not in pyproject_text, f"Forbidden reference in pyproject metadata: {forbidden}"
+        assert forbidden not in pyproject_text, (
+            f"Forbidden reference in pyproject metadata: {forbidden}"
+        )
 
 
 @pytest.mark.core
 @pytest.mark.build
 def test_sdist_manifest_is_explicit_and_package_local() -> None:
     manifest_text = SDIST_MANIFEST_PATH.read_text(encoding="utf-8")
-    lines = [line.strip() for line in manifest_text.splitlines() if line.strip() and not line.strip().startswith("#")]
+    lines = [
+        line.strip()
+        for line in manifest_text.splitlines()
+        if line.strip() and not line.strip().startswith("#")
+    ]
 
     assert set(lines) == EXPECTED_MANIFEST_LINES
     for forbidden in FORBIDDEN_EXPORT_REFERENCES:
-        assert forbidden not in manifest_text.lower(), f"Forbidden reference in MANIFEST.in: {forbidden}"
+        assert forbidden not in manifest_text.lower(), (
+            f"Forbidden reference in MANIFEST.in: {forbidden}"
+        )
 
 
 @pytest.mark.core
@@ -245,8 +278,7 @@ def test_dev_tools_are_exactly_pinned_without_runtime_dependency_drift() -> None
         for requirement in project["optional-dependencies"]["dev"]
     ]
     dev_names = [
-        requirement.name.lower().replace("_", "-")
-        for requirement in dev_requirements
+        requirement.name.lower().replace("_", "-") for requirement in dev_requirements
     ]
     assert len(dev_names) == len(set(dev_names))
     assert {
@@ -297,7 +329,9 @@ def test_version_resolution_prefers_source_then_distribution_then_unknown(
     monkeypatch.setattr(
         hf_mcp,
         "distribution_version",
-        lambda _name: pytest.fail("installed metadata must not override the source version"),
+        lambda _name: pytest.fail(
+            "installed metadata must not override the source version"
+        ),
     )
     hf_mcp._resolve_version.cache_clear()
     try:
@@ -460,12 +494,18 @@ def test_smoke_rejects_missing_artifacts_without_writing_a_pass_receipt(
         [
             sys.executable,
             str(PRODUCT_ROOT / "scripts" / "smoke_installed.py"),
-            "--artifact-dir", str(artifact_dir),
-            "--work-dir", str(work_dir),
-            "--wheelhouse", str(wheelhouse),
-            "--source-revision", "a" * 40,
-            "--expected-version", "0.4.5",
-            "--receipt", str(receipt),
+            "--artifact-dir",
+            str(artifact_dir),
+            "--work-dir",
+            str(work_dir),
+            "--wheelhouse",
+            str(wheelhouse),
+            "--source-revision",
+            "a" * 40,
+            "--expected-version",
+            "0.4.5",
+            "--receipt",
+            str(receipt),
         ],
         cwd=tmp_path,
         env=isolated_child_context.environment(),
@@ -507,7 +547,14 @@ def _make_controlled_release_archives(
         wheel_files["hf_mcp/data/forums_index.json"] = b"{}\n"
     else:
         wheel_files.pop("hf_mcp/data/forums_index.json")
-    for skill in ("hf-api-v2", "hf-mcp", "hf-mcp-bootstrap", "hf-mcp-reads", "hf-mcp-writes", "hf-mycode"):
+    for skill in (
+        "hf-api-v2",
+        "hf-mcp",
+        "hf-mcp-bootstrap",
+        "hf-mcp-reads",
+        "hf-mcp-writes",
+        "hf-mycode",
+    ):
         wheel_files[f"hf_mcp-0.4.5.data/data/skills/{skill}/SKILL.md"] = b"skill\n"
     if failure_mode != "skill_reference":
         wheel_files[
@@ -542,7 +589,14 @@ def _make_controlled_release_archives(
         "PKG-INFO": b"Name: hf-mcp\nVersion: 0.4.5\n",
     }
     if failure_mode != "resource":
-        for skill in ("hf-api-v2", "hf-mcp", "hf-mcp-bootstrap", "hf-mcp-reads", "hf-mcp-writes", "hf-mycode"):
+        for skill in (
+            "hf-api-v2",
+            "hf-mcp",
+            "hf-mcp-bootstrap",
+            "hf-mcp-reads",
+            "hf-mcp-writes",
+            "hf-mycode",
+        ):
             sdist_files[f"skills/{skill}/SKILL.md"] = b"skill\n"
     else:
         sdist_files.pop("src/hf_mcp/data/forums_index.json")
@@ -590,7 +644,9 @@ def test_installed_smoke_cli_records_controlled_failure(
         tmp_path, failure_mode=failure_mode
     )
     if failure_mode == "duplicate":
-        (artifact_dir / "hf_mcp-0.4.5-duplicate.whl").write_bytes(wheel_path.read_bytes())
+        (artifact_dir / "hf_mcp-0.4.5-duplicate.whl").write_bytes(
+            wheel_path.read_bytes()
+        )
     work_dir = PRODUCT_ROOT if failure_mode == "unsafe_work" else tmp_path / "work"
     receipt = tmp_path / "receipt.json"
     child_env = isolated_child_context.environment()
@@ -600,12 +656,18 @@ def test_installed_smoke_cli_records_controlled_failure(
         [
             sys.executable,
             str(PRODUCT_ROOT / "scripts" / "smoke_installed.py"),
-            "--artifact-dir", str(artifact_dir),
-            "--work-dir", str(work_dir),
-            "--wheelhouse", str(wheelhouse),
-            "--source-revision", "a" * 40,
-            "--expected-version", "0.4.5",
-            "--receipt", str(receipt),
+            "--artifact-dir",
+            str(artifact_dir),
+            "--work-dir",
+            str(work_dir),
+            "--wheelhouse",
+            str(wheelhouse),
+            "--source-revision",
+            "a" * 40,
+            "--expected-version",
+            "0.4.5",
+            "--receipt",
+            str(receipt),
         ],
         cwd=tmp_path,
         env=child_env,
@@ -766,9 +828,7 @@ def test_installed_probe_state_guard_passes_clean_state_and_receipts_each_write(
 
     receipt_path = tmp_path / "state-leak-receipt.json"
     receipt = smoke["_failure_receipt_document"](
-        smoke["argparse"].Namespace(
-            source_revision="a" * 40, expected_version="0.6.1"
-        ),
+        smoke["argparse"].Namespace(source_revision="a" * 40, expected_version="0.6.1"),
         failure.value,
     )
     receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
@@ -796,12 +856,18 @@ def test_smoke_failure_receipt_binds_safe_check_exit_and_argv(
         [
             sys.executable,
             str(PRODUCT_ROOT / "scripts" / "smoke_installed.py"),
-            "--artifact-dir", str(artifact_dir),
-            "--work-dir", str(work_dir),
-            "--wheelhouse", str(wheelhouse),
-            "--source-revision", "a" * 40,
-            "--expected-version", "0.4.5",
-            "--receipt", str(receipt),
+            "--artifact-dir",
+            str(artifact_dir),
+            "--work-dir",
+            str(work_dir),
+            "--wheelhouse",
+            str(wheelhouse),
+            "--source-revision",
+            "a" * 40,
+            "--expected-version",
+            "0.4.5",
+            "--receipt",
+            str(receipt),
         ],
         cwd=tmp_path,
         env=child_env,

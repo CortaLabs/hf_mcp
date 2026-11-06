@@ -1,20 +1,18 @@
 from __future__ import annotations
 
 import json
-import sys
 from pathlib import Path
 from typing import Any
 
-PRODUCT_ROOT = Path(__file__).resolve().parents[1]
-SRC_PATH = PRODUCT_ROOT / "src"
-if str(SRC_PATH) not in sys.path:
-    sys.path.insert(0, str(SRC_PATH))
 
 from hf_mcp.capabilities import CapabilityPolicy
 from hf_mcp.config import HFMCPSettings
 from hf_mcp.dispatcher import RuntimeBundle, register_tools
 from hf_mcp.registry import mcp_tool_name
 from hf_mcp.tools.forum_index import build_forum_index_handlers
+
+PRODUCT_ROOT = Path(__file__).resolve().parents[1]
+SRC_PATH = PRODUCT_ROOT / "src"
 
 
 class _CaptureServer:
@@ -45,7 +43,9 @@ def _policy() -> CapabilityPolicy:
         HFMCPSettings(
             profile="test",
             enabled_capabilities=frozenset({"forums.read"}),
-            enabled_parameter_families=frozenset({"selectors.forum", "filters.pagination"}),
+            enabled_parameter_families=frozenset(
+                {"selectors.forum", "filters.pagination"}
+            ),
         )
     )
 
@@ -88,7 +88,9 @@ def test_forums_index_handler_supports_flat_and_tree_views() -> None:
     assert all("children" in node for node in tree_nodes)
 
 
-def test_forums_index_registers_without_transport_and_keeps_structured_content_protocol() -> None:
+def test_forums_index_registers_without_transport_and_keeps_structured_content_protocol() -> (
+    None
+):
     policy = _policy()
     server = _CaptureServer()
 
@@ -131,13 +133,17 @@ def test_forums_index_hf_flow_targets_forums_read_only_for_real_forums() -> None
     assert _extract_action_fids(tree_flow["next_actions"]) == action_fids
 
 
-def test_forums_index_raw_output_uses_local_catalog_resource_without_claiming_upstream_raw_payload() -> None:
+def test_forums_index_raw_output_uses_local_catalog_resource_without_claiming_upstream_raw_payload() -> (
+    None
+):
     handler = build_forum_index_handlers()["forums.index"]
     raw_mode_result = handler(output_mode="raw")
     include_raw_result = handler(output_mode="structured", include_raw_payload=True)
 
     for result in (raw_mode_result, include_raw_result):
-        resources = [entry for entry in result["content"] if entry.get("type") == "resource"]
+        resources = [
+            entry for entry in result["content"] if entry.get("type") == "resource"
+        ]
         assert len(resources) == 1
         resource = resources[0]["resource"]
         assert resource["uri"] == "hf-mcp://catalog/forums.index"
@@ -151,10 +157,18 @@ def test_forums_index_include_inactive_controls_payload_and_actions() -> None:
     default_result = handler()
     include_inactive_result = handler(include_inactive=True)
 
-    default_fids = {node["fid"] for node in default_result["structuredContent"]["nodes"]}
-    include_inactive_fids = {node["fid"] for node in include_inactive_result["structuredContent"]["nodes"]}
+    default_fids = {
+        node["fid"] for node in default_result["structuredContent"]["nodes"]
+    }
+    include_inactive_fids = {
+        node["fid"] for node in include_inactive_result["structuredContent"]["nodes"]
+    }
     assert default_fids == include_inactive_fids
 
-    default_action_fids = _extract_action_fids(default_result["structuredContent"]["_hf_flow"]["next_actions"])
-    include_action_fids = _extract_action_fids(include_inactive_result["structuredContent"]["_hf_flow"]["next_actions"])
+    default_action_fids = _extract_action_fids(
+        default_result["structuredContent"]["_hf_flow"]["next_actions"]
+    )
+    include_action_fids = _extract_action_fids(
+        include_inactive_result["structuredContent"]["_hf_flow"]["next_actions"]
+    )
     assert default_action_fids == include_action_fids

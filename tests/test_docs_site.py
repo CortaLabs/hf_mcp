@@ -15,7 +15,9 @@ TOOL_OVERVIEW_PAGE = DOCS_DIR / "tool_overview.md"
 EXAMPLES_PAGE = DOCS_DIR / "examples.md"
 COVERAGE_MATRIX_PAGE = DOCS_DIR / "coverage_matrix.md"
 EXPORT_BOUNDARY_PAGE = DOCS_DIR / "export_boundary.md"
-READS_SKILL_PAGE = Path(__file__).resolve().parents[1] / "skills" / "hf-mcp-reads" / "SKILL.md"
+READS_SKILL_PAGE = (
+    Path(__file__).resolve().parents[1] / "skills" / "hf-mcp-reads" / "SKILL.md"
+)
 CALLBACK_SHA256 = "51a73ca4359b088577d5d3ffb087055d30f940c657a12a2d562a622be39532dd"
 PUBLIC_DOCS_BANNED_TERMS = (
     "council",
@@ -125,7 +127,9 @@ def test_docs_publish_compounding_flow_contract_without_relaxing_write_guards() 
     assert "successful results from existing guarded" in tool_overview
     assert "confirmed or stubbed execution" in tool_overview
     assert "Concrete chain:" in examples
-    assert "`forums.index` -> `forums.read` -> `threads.read` -> `posts.read`" in examples
+    assert (
+        "`forums.index` -> `forums.read` -> `threads.read` -> `posts.read`" in examples
+    )
     assert "maintained package data and can drift from live HF" in examples
     assert "forums.read` still requires `fid`; it is not root discovery" in examples
     assert "forums_index" in examples
@@ -138,7 +142,10 @@ def test_docs_publish_compounding_flow_contract_without_relaxing_write_guards() 
     assert "forums.index" in coverage
     assert "local catalog-backed root discovery" in coverage
     assert "can drift from live HF" in coverage
-    assert "forums.read` remains `fid`-required and is not root discovery" in export_boundary
+    assert (
+        "forums.read` remains `fid`-required and is not root discovery"
+        in export_boundary
+    )
     assert "_hf_flow" in export_boundary
     assert "supported extended reads" in export_boundary
     assert "`bytes.read`" in export_boundary

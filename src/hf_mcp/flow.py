@@ -119,7 +119,17 @@ def _collect_entity_ids(
     tool_name: str,
     normalized_payload: Mapping[str, Any],
     arguments: Mapping[str, Any],
-) -> tuple[set[int], set[int], set[int], set[int], set[int], set[int], set[int], set[int], set[int]]:
+) -> tuple[
+    set[int],
+    set[int],
+    set[int],
+    set[int],
+    set[int],
+    set[int],
+    set[int],
+    set[int],
+    set[int],
+]:
     forum_ids: set[int] = set()
     thread_ids: set[int] = set()
     post_ids: set[int] = set()
@@ -229,7 +239,15 @@ def _collect_entity_ids(
     if argument_user_id is not None:
         user_ids.add(argument_user_id)
 
-    for user_arg in ("target_uid", "from_uid", "to_uid", "seller", "buyer", "claimantuid", "defendantuid"):
+    for user_arg in (
+        "target_uid",
+        "from_uid",
+        "to_uid",
+        "seller",
+        "buyer",
+        "claimantuid",
+        "defendantuid",
+    ):
         arg_uid = _coerce_positive_id(arguments.get(user_arg))
         if arg_uid is not None:
             user_ids.add(arg_uid)
@@ -261,6 +279,7 @@ def _collect_entity_ids(
     if tool_name == "forums.index":
         nodes = normalized_payload.get("nodes")
         if isinstance(nodes, list):
+
             def _walk_catalog_node(node: Mapping[str, Any]) -> None:
                 if not isinstance(node, Mapping):
                     return
@@ -337,7 +356,12 @@ def build_hf_flow(
     ) -> None:
         action_key = (
             target_tool,
-            tuple(sorted((str(key), repr(value)) for key, value in normalized_arguments.items())),
+            tuple(
+                sorted(
+                    (str(key), repr(value))
+                    for key, value in normalized_arguments.items()
+                )
+            ),
         )
         if action_key in seen_actions:
             return
@@ -393,7 +417,9 @@ def build_hf_flow(
             requires_confirmation=requires_confirmation,
         )
 
-    draft_ids = _collect_local_draft_ids(normalized_payload=normalized_payload, arguments=resolved_arguments)
+    draft_ids = _collect_local_draft_ids(
+        normalized_payload=normalized_payload, arguments=resolved_arguments
+    )
 
     if tool_name == "forums.index":
         for forum_id in sorted(forum_ids):
@@ -484,7 +510,13 @@ def build_hf_flow(
                 action_arguments={"tid": thread_id},
                 label=f"Load posts in thread {thread_id}",
             )
-    elif tool_name in {"bytes.read", "bytes.transfer", "bytes.deposit", "bytes.withdraw", "bytes.bump"}:
+    elif tool_name in {
+        "bytes.read",
+        "bytes.transfer",
+        "bytes.deposit",
+        "bytes.withdraw",
+        "bytes.bump",
+    }:
         for user_id in sorted(user_ids):
             _add_action(
                 target_tool="bytes.read",
@@ -689,7 +721,9 @@ def build_hf_flow(
     }
 
 
-def attach_hf_flow(normalized_payload: dict[str, Any], flow: Mapping[str, Any]) -> dict[str, Any]:
+def attach_hf_flow(
+    normalized_payload: dict[str, Any], flow: Mapping[str, Any]
+) -> dict[str, Any]:
     payload_with_flow = dict(normalized_payload)
     payload_with_flow[FLOW_KEY] = dict(flow)
     return payload_with_flow

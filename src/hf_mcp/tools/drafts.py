@@ -12,7 +12,9 @@ from hf_mcp.formatting_engine import (
 from hf_mcp.flow import attach_hf_flow, build_hf_flow
 
 
-def _selector_kwargs(*, draft_id: str | None, draft_path: str | Path | None) -> dict[str, Any]:
+def _selector_kwargs(
+    *, draft_id: str | None, draft_path: str | Path | None
+) -> dict[str, Any]:
     has_draft_id = draft_id is not None
     has_draft_path = draft_path is not None
     if has_draft_id == has_draft_path:
