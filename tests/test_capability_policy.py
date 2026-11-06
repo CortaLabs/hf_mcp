@@ -115,7 +115,7 @@ def test_full_api_profile_is_explicit_opt_in_and_registers_every_tool(
 
     assert settings.enabled_capabilities == ALL_CAPABILITIES
     assert settings.enabled_parameter_families == ALL_PARAMETER_FAMILIES
-    assert len(TOOLS) == 24
+    assert len(TOOLS) == 27
     assert all(policy.can_register(spec.name) for spec in TOOLS)
 
 
