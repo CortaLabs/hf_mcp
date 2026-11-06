@@ -68,7 +68,7 @@ Use this skill for local hf-mcp setup and readiness, from first install through 
 7. Hand off API internals to `hf-api-v2`.
    If the user asks for full OAuth/API mechanics or raw `asks` payload design, route to `hf-api-v2` instead of expanding this bootstrap skill into an API tutorial.
 
-8. Keep draft scheduling claims truthful.
+8. Keep draft scheduling claims accurate.
    If draft metadata includes `scheduled_at`, treat it as metadata only.
    There is no built-in scheduler/queue that executes live writes automatically.
 

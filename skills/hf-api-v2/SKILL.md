@@ -54,7 +54,7 @@ Use this skill when work touches the Hack Forums API v2, including OAuth app set
    - rate pressure: inspect `x-rate-limit-remaining`
 
 7. Account for API write-path content sanitization.
-   Treat quote-entity conversion in API-written post bodies as a natural HF security/safety behavior. Live MCP probes showed quote-heavy content written through `posts.reply` can read back with double quotes canonicalized to `&quot;`, including inside `[code]` blocks and inline text; pre-encoding quotes as decimal numeric entities (`&#34;`) did not remain distinct and also read back as `&quot;`. Do not assume API-written JSON snippets are copy-ready on the public forum page. If exact code fidelity matters, use a safer delivery shape such as quote-light examples, attachments, paste links, screenshots, or a read-side decoded representation for MCP consumers while preserving the raw upstream payload.
+   Hack Forums rewrites double quotes, including `&#34;`, to `&quot;` in post bodies written through the API, inside `[code]` blocks and in inline text. Do not assume API-written JSON snippets keep literal double quotes on the public forum page. If exact code matters, use a safer delivery shape such as quote-light examples, attachments, paste links, or screenshots, or decode entities on the read side for MCP consumers while preserving the raw upstream payload.
 
 8. For write-capable designs, add operational guardrails.
    Recommend explicit confirmation, dry-run previews where possible, rate-limit awareness, and server-side secret storage. If the integration is for this repo, keep write automation downstream of the MCP surface rather than embedding forum-posting logic directly into unrelated components.

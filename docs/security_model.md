@@ -35,8 +35,8 @@ as open-world input/output, so controls default to fail-closed behavior.
 - Hack Forums canonicalizes quotes and HTML entities in posted content (for
   example `&#34;` becomes `&quot;`). Treat that as the API sanitizing input, not
   something to work around.
-- Signature Market calls may return `INVALID_KEY_SCOPE_3` when your API app lacks
-  that scope. That is scope enforcement, not a bug.
+- Calls that need an API scope your Hack Forums app does not have are refused by
+  Hack Forums.
 - Keep audit logs and the token file outside any repository you commit.
 
 ## Related docs

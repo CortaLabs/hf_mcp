@@ -45,8 +45,10 @@ Other commands: `hf-mcp auth status` shows token and config state.
 
 ## Tools
 
-Tool names use dots, for example `threads.read`. Full details and selectors are in
-[`docs/tool_overview.md`](docs/tool_overview.md).
+Clients list these tools with underscores instead of dots (for example
+`threads_read` for `threads.read`). These docs and the config file use the
+dotted names; both refer to the same tool.
+Full details and selectors are in [`docs/tool_overview.md`](docs/tool_overview.md).
 
 **Read** (talk to the Hack Forums API)
 

@@ -3,6 +3,10 @@
 This page summarizes the shipped MCP tool surface defined in
 `src/hf_mcp/registry.py` for users and operators.
 
+Clients list tools with underscores instead of dots (for example
+`threads_read` for `threads.read`). These docs and the config file use the
+dotted names; both refer to the same tool.
+
 ## Availability labels
 
 - `available now`: concrete and registered for downstream MCP clients
@@ -15,8 +19,9 @@ Evidence tags used in this document and the coverage matrix:
 - `OpenAPI-confirmed`
 - `PHP-source-confirmed`
 - `HF_API_REFERENCE-confirmed`
-- `live-proven`
-- `unproven`
+- `none` (no source confirms it)
+
+Live status values: `tested live` and `untested`.
 
 ## Read output contract
 

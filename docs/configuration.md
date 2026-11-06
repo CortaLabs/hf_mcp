@@ -147,7 +147,7 @@ Overlay fields are additive/subtractive and validated against known names:
 
 Unknown capability or parameter-family names fail settings load.
 
-## Setup, bootstrap, and doctor path truth
+## Setup, bootstrap, and doctor paths
 
 Commands below share the same path-resolution model above for config and token state:
 

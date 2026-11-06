@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import re
 import json
 import os
 import runpy
@@ -897,13 +898,12 @@ def test_release_metadata_describes_current_release() -> None:
 @pytest.mark.core
 @pytest.mark.build
 def test_public_docs_have_no_internal_process_language() -> None:
-    banned = (
-        "this wave",
-        "6083735",
-        "fid 375",
-        "operator-approved",
-        "hackforums-council",
-        "export boundary",
+    banned = re.compile(
+        r"this wave|operator-approved|hackforums-council|export boundary"
+        r"|\b(?:probes?|readback|truths?|proof|prove[sn]?|proven)\b"
+        r"|acceptance|baseline|sandbox"
+        r"|(?:tid|fid|thread|forum)\W{0,3}\d{5,}",
+        re.IGNORECASE,
     )
     public_files = [
         README_PATH,
@@ -913,9 +913,10 @@ def test_public_docs_have_no_internal_process_language() -> None:
         *sorted((PRODUCT_ROOT / "skills").rglob("*.md")),
     ]
     for path in public_files:
-        text = path.read_text(encoding="utf-8").lower()
-        for term in banned:
-            assert term not in text, f"{term!r} found in {path.name}"
+        text = path.read_text(encoding="utf-8")
+        text = re.sub(r"https?://\S+", "", text)
+        match = banned.search(text)
+        assert match is None, f"{match.group(0)!r} found in {path.name}"
 
 
 @pytest.mark.core

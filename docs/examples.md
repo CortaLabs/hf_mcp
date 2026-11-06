@@ -3,6 +3,10 @@
 All examples are `JSON-first` and use structured request/response shapes that
 match the current public tool registry.
 
+Clients list these tools with underscores instead of dots (for example
+`threads_read` for `threads.read`). These docs and the config file use the
+dotted names; both refer to the same tool.
+
 ## Zero-ID exploration chain (`forums.index`)
 
 Use `forums.index` (alias `forums_index`) as local catalog-backed root discovery
@@ -504,7 +508,7 @@ Response (illustrative):
 Use fake transport/local test lanes for routine verification. Live mutations
 stay operator-controlled.
 
-## Draft metadata and scheduling truth
+## Draft metadata and scheduling
 
 Draft artifacts may include metadata fields such as `scheduled_at`, but this is
 metadata only for operator workflow and review. `hf-mcp` does not ship an

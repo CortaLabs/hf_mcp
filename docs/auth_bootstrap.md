@@ -109,7 +109,7 @@ Shipped bootstrap knobs:
 - `HF_MCP_TOKEN_URL` (token endpoint override)
 - `HF_MCP_AUTH_TIMEOUT_SECONDS` (callback wait timeout in seconds, integer)
 
-## Token path, status, and doctor truth
+## Token path, status, and doctor output
 
 Token path behavior:
 

@@ -28,14 +28,14 @@ Use this skill when you need reliable MyCode (BBCode) output for MyBB-style foru
 1. Classify target scope before writing tags.
    If the target is Hack Forums, treat helpdoc 45 as the authoritative syntax boundary. If the target is generic MyBB, keep output to conservative core tags unless forum-specific support is confirmed.
 
-2. Build a portable baseline first.
+2. Build a portable core first.
    Start with core tags such as `[b]`, `[i]`, `[u]`, `[s]`, `[url]`, `[quote]`, `[code]`, and list syntax. Keep nesting explicit, close all tags, and avoid custom/plugin tags by default.
 
 3. Apply HF-specific overlay only when requested or when target is HF.
    For HF guidance, use helpdoc 45-compatible forms such as `[help]`, `[pmme=Subject]...[/pmme]`, `[soundcloud]...[/soundcloud]`, `[skype]...[/skype]`, and spoiler/image/list variants documented for HF.
 
 4. Account for HF API write-path quote sanitization.
-   Treat double-quote entity conversion in content posted through the HF API/MCP write path as an expected HF safety behavior, not a parser surprise. Live probes showed raw double quotes in API-written JSON/code examples, and decimal numeric quote entities (`&#34;`), both read back as `&quot;` in `[code]` and inline text. Do not promise that JSON or other quote-heavy snippets posted through `hf-mcp` will preserve copy-ready literal double quotes on the public forum page. Prefer quote-light examples, YAML-ish examples, single-quoted formats where valid, screenshots, attachments, paste links, or explicitly labeled non-copyable examples when the exact code matters.
+   Hack Forums rewrites double quotes, including the entity `&#34;`, to `&quot;` in content posted through the API, in `[code]` blocks and inline text alike. Do not promise that JSON or other quote-heavy snippets posted through `hf-mcp` will keep literal double quotes on the public forum page. Prefer quote-light examples, YAML-ish examples, single-quoted formats where valid, screenshots, attachments, paste links, or explicitly labeled non-copyable examples when the exact code matters.
 
 5. Mark uncertain or non-core tags as conditional.
    If a tag is common in other BBCode dialects but not in HF helpdoc 45, either convert to a supported equivalent or label it as unverified before recommending it.

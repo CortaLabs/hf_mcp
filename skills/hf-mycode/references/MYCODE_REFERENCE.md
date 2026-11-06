@@ -2,7 +2,7 @@
 
 Use this file for dense syntax lookups, conversions, and HF-specific boundaries. Keep workflow decisions in the root skill.
 
-## HF Helpdoc 45 Truth Surface
+## HF Helpdoc 45 Supported Tags
 
 Hack Forums helpdoc 45 (mirrored in the HF wiki MyCode page) documents these tag families as HF-supported:
 
@@ -13,7 +13,7 @@ Hack Forums helpdoc 45 (mirrored in the HF wiki MyCode page) documents these tag
 
 Practical rule: if a tag is missing from the list above, treat it as unverified for HF unless the user provides current forum evidence.
 
-## Conservative Cross-MyBB Baseline
+## Conservative Cross-MyBB Core
 
 For unknown MyBB deployments, default to:
 
@@ -46,11 +46,11 @@ When inputs include tags not covered by HF helpdoc 45 (for example `[table]`, `[
 
 When content is posted through the HF API write path, treat double-quote entity conversion as expected HF security/sanitization behavior.
 
-Observed live behavior from `hf-mcp posts.reply` probes on thread `6324346`:
+Behavior of content posted through `hf-mcp posts.reply`:
 
 - Raw double quotes in `[code]` JSON examples read back as `&quot;`.
 - Inline raw double quotes read back as `&quot;`.
-- Decimal numeric quote entities (`&#34;`) were canonicalized to `&quot;`, so pre-encoding quotes is not a proven escape hatch.
+- Decimal numeric quote entities (`&#34;`) were canonicalized to `&quot;`, so pre-encoding quotes does not help.
 - Single quotes stayed readable in YAML-ish examples, but that is a formatting workaround, not JSON fidelity.
 
 Practical guidance:
