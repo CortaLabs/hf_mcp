@@ -6,17 +6,19 @@ from pathlib import Path
 import pytest
 
 
-import hf_mcp.formatting_engine as formatting_engine
-from hf_mcp.formatting_engine import (
+import hf_mcp.draft_store as draft_store
+from hf_mcp.draft_store import (
     DraftMetadata,
-    prepare_formatting_report,
     delete_draft_artifact,
     list_draft_artifacts,
     read_cached_source_text,
     read_draft_artifact,
-    simulate_hf_canonicalization,
     update_draft_metadata,
     write_draft_artifact,
+)
+from hf_mcp.formatting_engine import (
+    prepare_formatting_report,
+    simulate_hf_canonicalization,
 )
 from hf_mcp.mycode import analyze_conversion
 from hf_mcp.tools.formatting import preflight_formatting
@@ -118,26 +120,24 @@ def test_cached_source_file_can_be_preflighted_and_loaded_from_default_cache(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    monkeypatch.setattr(
-        formatting_engine, "DEFAULT_DRAFT_DIR", tmp_path / "default-drafts"
-    )
-    source_path = formatting_engine.DEFAULT_DRAFT_DIR / "approval-draft.md"
+    monkeypatch.setattr(draft_store, "DEFAULT_DRAFT_DIR", tmp_path / "default-drafts")
+    source_path = draft_store.DEFAULT_DRAFT_DIR / "approval-draft.md"
     source_path.parent.mkdir(parents=True, exist_ok=True)
     source_path.write_text("**Approved**\n\n- posted from disk", encoding="utf-8")
 
     artifact = write_draft_artifact(
         message_format="markdown",
         source_path=source_path,
-        draft_dir=formatting_engine.DEFAULT_DRAFT_DIR,
+        draft_dir=draft_store.DEFAULT_DRAFT_DIR,
     )
     loaded = read_draft_artifact(
-        draft_id=artifact.draft_id, draft_dir=formatting_engine.DEFAULT_DRAFT_DIR
+        draft_id=artifact.draft_id, draft_dir=draft_store.DEFAULT_DRAFT_DIR
     )
 
     assert (
         read_cached_source_text(
             source_path,
-            draft_dir=formatting_engine.DEFAULT_DRAFT_DIR,
+            draft_dir=draft_store.DEFAULT_DRAFT_DIR,
         )
         == "**Approved**\n\n- posted from disk"
     )

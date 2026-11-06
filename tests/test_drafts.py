@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 
-from hf_mcp.formatting_engine import write_draft_artifact
+from hf_mcp.draft_store import write_draft_artifact
 from hf_mcp.tools.drafts import delete_draft, list_drafts, read_draft, update_draft
 
 PRODUCT_ROOT = Path(__file__).resolve().parents[1]
