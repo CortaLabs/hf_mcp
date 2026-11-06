@@ -77,7 +77,7 @@ def read_draft(
 ) -> dict[str, Any]:
     selector = _selector_kwargs(draft_id=draft_id, draft_path=draft_path)
     artifact = read_draft_artifact(draft_dir=draft_dir, **selector)
-    summary = artifact.summary()
+    summary = artifact.detail()
     flow = build_hf_flow(
         tool_name="drafts.read",
         normalized_payload=summary,

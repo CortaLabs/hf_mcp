@@ -93,6 +93,8 @@ Read tools return readable text plus normalized JSON in `structuredContent`. Pas
 `include_raw_payload=true` to attach the exact upstream response as an extra resource.
 Results carry an `_hf_flow.next_actions` hint so a client can chain
 `forums.index` → `forums.read` → `threads.read` → `posts.read` without guessing IDs.
+`_hf_flow.server.version` reports the running hf-mcp version, which is handy in clients
+that do not show the MCP handshake.
 Examples are in [`docs/examples.md`](docs/examples.md).
 
 ## Configuration

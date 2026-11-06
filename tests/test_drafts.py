@@ -73,3 +73,26 @@ def test_update_and_delete_emit_local_followups_and_preserve_structured_metadata
     )
     assert deleted["structuredContent"]["deleted"] is True
     assert _action_tools(deleted) == {"drafts.list"}
+
+
+def test_read_returns_full_stored_mycode_while_list_keeps_previews(
+    tmp_path: Path,
+) -> None:
+    source = (
+        " ".join(f"word{n}" for n in range(600))
+        + "\n\n![logo](https://example.com/a.png)"
+    )
+    artifact = write_draft_artifact(source, "markdown", draft_dir=tmp_path)
+
+    read_result = read_draft(draft_dir=tmp_path, draft_id=artifact.draft_id)
+    for payload in (read_result, read_result["structuredContent"]):
+        assert payload["mycode"] == artifact.report.mycode
+        assert len(payload["mycode"]) > 2000
+        assert payload["source_text"] == source
+        assert [f["code"] for f in payload["conversion_findings"]] == ["image_alt_loss"]
+
+    listed = list_drafts(draft_dir=tmp_path)["drafts"][0]
+    assert "mycode" not in listed
+    assert "source_text" not in listed
+    assert "conversion_findings" not in listed
+    assert len(listed["mycode_preview"]) <= 500

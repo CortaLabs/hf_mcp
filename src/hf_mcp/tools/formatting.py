@@ -23,7 +23,10 @@ def preflight_formatting(
             "type": "text",
             "text": (
                 "formatting.preflight prepared draft "
-                f"{artifact.draft_id} with integrity {artifact.report.integrity}."
+                f"{artifact.draft_id} with integrity {artifact.report.integrity}. "
+                "The full MyCode is in structuredContent.mycode; "
+                f"{len(artifact.report.conversion_findings)} conversion finding(s) "
+                "are in structuredContent.conversion_findings."
             ),
         }
     ]
@@ -32,6 +35,8 @@ def preflight_formatting(
         "path": artifact.path,
         "integrity": artifact.report.integrity,
         "issues": summary["issues"],
+        "mycode": artifact.report.mycode,
+        "conversion_findings": artifact.report.findings_payload(),
         "mycode_preview": summary["mycode_preview"],
         "simulated_agent_markdown_preview": summary["simulated_agent_markdown_preview"],
     }

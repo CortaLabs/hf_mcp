@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 
+import hf_mcp
 from hf_mcp.flow import FLOW_KEY, attach_hf_flow, build_hf_flow
 
 PRODUCT_ROOT = Path(__file__).resolve().parents[1]
@@ -330,3 +331,17 @@ def test_local_draft_flow_chain_emits_local_followups_only() -> None:
         arguments={},
     )
     assert set(_action_tools(delete_flow)) == {"drafts.list"}
+
+
+def test_flow_envelope_reports_server_name_and_package_version() -> None:
+    cases = [
+        ("forums.read", {"forums": [{"fid": "375"}]}, {"fid": 375}),
+        ("drafts.list", {"drafts": [{"draft_id": "a" * 32}]}, {}),
+        ("formatting.preflight", {"draft_id": "a" * 32}, {}),
+    ]
+    for tool_name, payload, arguments in cases:
+        flow = build_hf_flow(
+            tool_name=tool_name, normalized_payload=payload, arguments=arguments
+        )
+        assert flow["version"] == 1
+        assert flow["server"] == {"name": "hf-mcp", "version": hf_mcp.__version__}

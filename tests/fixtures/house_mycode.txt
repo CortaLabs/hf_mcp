@@ -1,0 +1,25 @@
+[css=68]
+[center][size=7][b]Weekend Build Log[/b][/size][/center]
+
+[center][img]https://images.example.test/header_banner.png[/img][/center]
+
+[center][size=2][color=#888888][b]Notes from a small project[/b][/color][/size][/center]
+
+[hr]
+
+[center][size=5][b]1) What changed[/b][/size][/center]
+
+[align=left]The parser now handles nested quotes and keeps its output stable between runs. Most of the work was deleting code that had grown in three different places.[/align]
+
+[hr]
+
+[center][size=5][b]2) What is left[/b][/size][/center]
+
+[list]
+[*]Stress test with very long inputs
+[*][color=red]Fix[/color] the flaky timer test
+[*]Write the short usage guide
+[/list]
+
+[align=center][size=2]Thanks for reading. Questions are welcome below.[/size][/align]
+[/css]

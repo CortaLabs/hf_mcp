@@ -53,6 +53,7 @@ Use this skill for read-only hf-mcp usage so tool selection, selector usage, and
    - `raw` attaches the upstream JSON payload as a resource; `include_raw_payload=true` adds that raw resource to `readable` or `structured`.
    - For `threads.read`, readable output should show the formatted thread body from nested `firstpost.message` plus useful thread and first-post fields when Hack Forums returns them.
    - `_hf_flow.next_actions` is the machine-readable handoff layer emitted by `forums.index`, core reads, supported extended reads, local draft/preflight tools, and successful results from implemented guarded writes (live writes still require explicit confirmation).
+   - `_hf_flow.server.version` is the running hf-mcp package version, while `_hf_flow.version` is the flow-format version.
 
 6. Keep output handling JSON-first.
    - Treat request/response payloads as structured JSON.

@@ -674,6 +674,7 @@ def test_fastmcp_adapter_converts_hf_envelope_dict_to_protocol_call_tool_result(
             "me": [{"uid": "5"}],
             "_hf_flow": {
                 "version": 1,
+                "server": {"name": "hf-mcp", "version": hf_mcp.__version__},
                 "entry_tool": "me.read",
                 "breadcrumbs": ["me"],
                 "entities": {

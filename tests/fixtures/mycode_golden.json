@@ -1,0 +1,45 @@
+[
+  {"id": "G1 heading", "markdown": "## Setup\nRun it.", "mycode": "[b]Setup[/b]\nRun it.", "findings": []},
+  {"id": "G2 ordered", "markdown": "1. one\n2. two", "mycode": "[list=1]\n[*]one\n[*]two\n[/list]", "findings": []},
+  {"id": "G3 nested", "markdown": "- a\n  - b\n- c", "mycode": "[list]\n[*]a\n[list]\n[*]b\n[/list]\n[*]c\n[/list]", "findings": []},
+  {"id": "G4 rule", "markdown": "above\n\n---\n\nbelow", "mycode": "above\n\n[hr]\n\nbelow", "findings": []},
+  {
+    "id": "G5 table",
+    "markdown": "| a | b |\n|---|---|\n| 1 | 2 |",
+    "mycode": "[code]\n| a | b |\n|---|---|\n| 1 | 2 |\n[/code]",
+    "findings": ["table_as_code"]
+  },
+  {"id": "G6 inline code", "markdown": "Run `pip install hf-mcp` now.", "mycode": "Run [font=monospace]pip install hf-mcp[/font] now.", "findings": []},
+  {
+    "id": "G7 inline code with brackets",
+    "markdown": "Use `[b]` for bold.",
+    "mycode": "Use [code][b][/code] for bold.",
+    "findings": ["inline_code_as_block"]
+  },
+  {"id": "G8 escape", "markdown": "\\*x\\*", "mycode": "*x*", "findings": []},
+  {
+    "id": "G9 image",
+    "markdown": "![logo](https://example.com/a.png)",
+    "mycode": "[img]https://example.com/a.png[/img]",
+    "findings": ["image_alt_loss"]
+  },
+  {
+    "id": "G10 fence",
+    "markdown": "```json\n{\"a\": \"&quot;x\"}\n```",
+    "mycode": "[code]\n{\"a\": \"&quot;x\"}\n[/code]",
+    "findings": []
+  },
+  {
+    "id": "G11 link with parentheses",
+    "markdown": "[docs](https://example.com/a_(b))",
+    "mycode": "[url=https://example.com/a_(b)]docs[/url]",
+    "findings": []
+  },
+  {
+    "id": "G12 house MyCode",
+    "markdown": "[css=68][center][size=5][b]Title[/b][/size][/center][/css]",
+    "mycode": "[css=68][center][size=5][b]Title[/b][/size][/center][/css]",
+    "findings": []
+  },
+  {"id": "G13 emphasis", "markdown": "**bold** and _it_", "mycode": "[b]bold[/b] and [i]it[/i]", "findings": []}
+]

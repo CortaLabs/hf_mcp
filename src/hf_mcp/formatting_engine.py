@@ -9,7 +9,9 @@ from typing import Literal, cast
 from uuid import uuid4
 
 from .mycode import (
+    ConversionFinding,
     MessageFormat,
+    analyze_conversion,
     coerce_message_format,
     format_body_text,
     format_write_text,
@@ -49,6 +51,7 @@ class FormattingReport:
     simulated_agent_markdown: str
     integrity: float
     issues: tuple[FormattingIssue, ...]
+    conversion_findings: tuple[ConversionFinding, ...] = ()
 
     def as_dict(self) -> dict[str, object]:
         return {
@@ -59,7 +62,19 @@ class FormattingReport:
             "simulated_agent_markdown": self.simulated_agent_markdown,
             "integrity": self.integrity,
             "issues": [asdict(issue) for issue in self.issues],
+            "conversion_findings": self.findings_payload(),
         }
+
+    def findings_payload(self) -> list[dict[str, object]]:
+        return [
+            {
+                "code": finding.code,
+                "kind": finding.kind,
+                "start": finding.start,
+                "end": finding.end,
+            }
+            for finding in self.conversion_findings
+        ]
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,6 +98,15 @@ class DraftArtifact:
             "simulated_agent_markdown_preview": _preview(
                 self.report.simulated_agent_markdown
             ),
+        }
+
+    def detail(self) -> dict[str, object]:
+        """The summary plus the full stored MyCode, source and conversion findings."""
+        return {
+            **self.summary(),
+            "mycode": self.report.mycode,
+            "source_text": self.report.source_text,
+            "conversion_findings": self.report.findings_payload(),
         }
 
 
@@ -112,14 +136,16 @@ def prepare_formatting_report(
     simulated_hf_mycode = simulate_hf_canonicalization(mycode)
     simulated_agent_markdown = format_body_text(simulated_hf_mycode, "markdown")
     issues = validation_issues + mutation_issues
+    findings = analyze_conversion(value, source_format)
     return FormattingReport(
         source_format=source_format,
         source_text=value,
         mycode=mycode,
         simulated_hf_mycode=simulated_hf_mycode,
         simulated_agent_markdown=simulated_agent_markdown,
-        integrity=_integrity_score(issues),
+        integrity=_integrity_score(issues, findings),
         issues=issues,
+        conversion_findings=findings,
     )
 
 
@@ -390,8 +416,13 @@ def _mutation_issues(mycode: str) -> tuple[FormattingIssue, ...]:
     return tuple(issues)
 
 
-def _integrity_score(issues: tuple[FormattingIssue, ...]) -> float:
+def _integrity_score(
+    issues: tuple[FormattingIssue, ...],
+    findings: tuple[ConversionFinding, ...] = (),
+) -> float:
     score = 1.0
+    # Anything lost in conversion keeps integrity below 1.0 (0.04 each, capped).
+    score -= min(0.2, 0.04 * sum(1 for item in findings if item.kind == "loss"))
     for issue in issues:
         if issue.severity == "error":
             score -= 0.35
@@ -570,7 +601,30 @@ def _report_from_payload(payload: dict[str, object]) -> FormattingReport:
         simulated_agent_markdown=str(payload.get("simulated_agent_markdown", "")),
         integrity=float(cast("str | float", payload.get("integrity", 0.0))),
         issues=tuple(issues),
+        conversion_findings=_findings_from_payload(payload.get("conversion_findings")),
     )
+
+
+def _findings_from_payload(payload: object) -> tuple[ConversionFinding, ...]:
+    if not isinstance(payload, list):
+        return ()
+    findings: list[ConversionFinding] = []
+    for item in payload:
+        if not isinstance(item, dict):
+            raise ValueError("Draft report conversion findings must be objects.")
+        kind = item.get("kind")
+        if kind not in {"unsupported", "loss"}:
+            raise ValueError("Draft report conversion finding has an invalid kind.")
+        findings.append(
+            ConversionFinding(
+                code=str(item.get("code", "")),
+                kind=kind,
+                stage="readable" if item.get("stage") == "readable" else "mycode",
+                start=int(item.get("start", 0)),
+                end=int(item.get("end", 0)),
+            )
+        )
+    return tuple(findings)
 
 
 __all__ = [
