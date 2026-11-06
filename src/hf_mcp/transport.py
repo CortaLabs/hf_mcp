@@ -18,6 +18,18 @@ HF_BROWSER_USER_AGENT = (
 )
 
 MAX_RETRY_AFTER_SECONDS = 3600
+MAX_LOCAL_MESSAGE_CHARS = 200
+
+
+class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Never follow a redirect: a 3xx surfaces as HTTPError, so a POST is sent
+    once and the bearer token cannot be forwarded to another host."""
+
+    def redirect_request(self, *args: Any, **kwargs: Any) -> None:
+        return None
+
+
+_OPENER = urllib.request.build_opener(_NoRedirectHandler)
 
 # One fixed, safe sentence per code. Remote and transport codes never carry
 # upstream text, URLs, identifiers, or exception contents.
@@ -58,7 +70,17 @@ _READ_STATUS_CODES: dict[int, str] = {
     429: "RATE_LIMITED",
 }
 _RETRYABLE_READ_STATUSES = frozenset({429, 503})
-_REJECTED_SUCCESS_STRINGS = frozenset({"0"})
+_REJECTED_SUCCESS_STRINGS = frozenset({"0", "false"})
+
+
+def _is_safe_local_message(message: str) -> bool:
+    """A package-authored sentence: short, non-empty, and free of path text."""
+    return (
+        bool(message.strip())
+        and len(message) <= MAX_LOCAL_MESSAGE_CHARS
+        and "/" not in message
+        and "\\" not in message
+    )
 
 
 def build_error(
@@ -79,7 +101,11 @@ def build_error(
         raise ValueError("Unknown ErrorV1 operation.")
     if mutation_outcome not in _MUTATION_OUTCOMES:
         raise ValueError("Unknown ErrorV1 mutation outcome.")
-    if message is None or code not in _LOCAL_MESSAGE_CODES or not message.strip():
+    if (
+        message is None
+        or code not in _LOCAL_MESSAGE_CODES
+        or not _is_safe_local_message(message)
+    ):
         message = _ERROR_MESSAGES[code]
     if http_status is not None and not 100 <= http_status <= 599:
         http_status = None
@@ -246,9 +272,7 @@ class HFTransport:
         failure: _WireFailure | None = None
         parsed: Any = None
         try:
-            with urllib.request.urlopen(
-                request, timeout=self._timeout_seconds
-            ) as response:
+            with _OPENER.open(request, timeout=self._timeout_seconds) as response:
                 response_body = response.read()
             parsed = json.loads(response_body.decode("utf-8"))
         except urllib.error.HTTPError as error:
@@ -256,6 +280,7 @@ class HFTransport:
             if error.headers is not None:
                 header_value = error.headers.get("Retry-After")
             failure = _WireFailure("http", error.code, header_value)
+            error.close()
         except urllib.error.URLError as error:
             timed_out = isinstance(error.reason, TimeoutError)
             failure = _WireFailure("timeout" if timed_out else "network")
@@ -338,7 +363,7 @@ def _is_rejected_success(value: Any) -> bool:
         return value is False
     if isinstance(value, (int, float)):
         return value == 0
-    return isinstance(value, str) and value in _REJECTED_SUCCESS_STRINGS
+    return isinstance(value, str) and value.strip().lower() in _REJECTED_SUCCESS_STRINGS
 
 
 def _classify_payload(

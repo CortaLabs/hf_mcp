@@ -18,12 +18,13 @@ from hf_mcp.config import HFMCPSettings, PRESET_CAPABILITIES, PRESET_PARAMETER_F
 from hf_mcp.dispatcher import RuntimeBundle, register_tools
 from hf_mcp.metadata import get_tool_specs
 from hf_mcp.registry import get_documented_write_specs, mcp_tool_name
-from hf_mcp.server import _MCPServerToolAdapter
+from hf_mcp.server import _MCPServerToolAdapter, _with_schema_signature
 from hf_mcp.server import create_server, serve_stdio
 from hf_mcp.token_store import TokenBundle
 from hf_mcp.tools.read_core import build_core_read_handlers
 from hf_mcp.tools.read_extended import build_extended_read_handlers
 from hf_mcp.transport import HFTransport
+from hf_mcp.write_preflight import WritePreflightError
 
 PRODUCT_ROOT = Path(__file__).resolve().parents[1]
 SRC_PATH = PRODUCT_ROOT / "src"
@@ -2044,8 +2045,7 @@ def test_runtime_stdio_client_session_returns_error_v1_for_failed_read_and_write
 import email.message
 import io
 import urllib.error
-import urllib.request
-
+import hf_mcp.transport as hf_transport
 from hf_mcp.capabilities import CapabilityPolicy
 from hf_mcp.config import HFMCPSettings, PRESET_PARAMETER_FAMILIES
 from hf_mcp.dispatcher import RuntimeBundle, register_tools
@@ -2058,16 +2058,17 @@ class _ProbeTokenStore:
     def require_bundle(self):
         return TokenBundle(access_token="TOKENSEED", token_type="Bearer", scope=frozenset({"read"}))
 
-def _failing_urlopen(request, timeout=None):
-    if request.full_url.endswith("/write"):
-        raise TimeoutError("WRITESEED upstream text")
-    headers = email.message.Message()
-    headers["Retry-After"] = "7"
-    raise urllib.error.HTTPError(
-        request.full_url, 503, "unavailable", headers, io.BytesIO(b"BODYSEED upstream text")
-    )
+class _FailingOpener:
+    def open(self, request, timeout=None):
+        if request.full_url.endswith("/write"):
+            raise TimeoutError("WRITESEED upstream text")
+        headers = email.message.Message()
+        headers["Retry-After"] = "7"
+        raise urllib.error.HTTPError(
+            request.full_url, 503, "unavailable", headers, io.BytesIO(b"BODYSEED upstream text")
+        )
 
-urllib.request.urlopen = _failing_urlopen
+hf_transport._OPENER = _FailingOpener()
 transport = HFTransport(token_store=_ProbeTokenStore(), base_url="https://example.test")
 settings = HFMCPSettings(
     profile="test",
@@ -2157,3 +2158,107 @@ app.run(transport="stdio")
         dumped = result.model_dump_json(by_alias=True)
         for seed in ("TOKENSEED", "BODYSEED", "WRITESEED", "example.test"):
             assert seed not in dumped
+
+
+def _validation_error() -> Exception:
+    from pydantic import BaseModel, ValidationError
+
+    class _Arguments(BaseModel):
+        count: int
+
+    try:
+        _Arguments(count="SECRETSEED")  # type: ignore[arg-type]
+    except ValidationError as error:
+        return error
+    raise AssertionError("expected a validation error")
+
+
+@pytest.mark.parametrize("is_async", [False, True])
+@pytest.mark.parametrize(
+    ("error", "code", "message"),
+    [
+        (
+            WritePreflightError("Write body contains nested code blocks."),
+            "FORMAT_NOT_READY",
+            "Write body contains nested code blocks.",
+        ),
+        (
+            ValueError("tid must be positive."),
+            "INVALID_ARGUMENT",
+            "tid must be positive.",
+        ),
+        (
+            PermissionError("Tool requires confirm_live=True."),
+            "INVALID_ARGUMENT",
+            "Tool requires confirm_live=True.",
+        ),
+        (
+            TypeError("SECRETSEED bad type"),
+            "INVALID_ARGUMENT",
+            "The request arguments are invalid.",
+        ),
+        (
+            _validation_error(),
+            "INVALID_ARGUMENT",
+            "Invalid arguments: count",
+        ),
+        (
+            RuntimeError("SECRETSEED /path"),
+            "INTERNAL_ERROR",
+            "An internal error occurred.",
+        ),
+    ],
+)
+def test_wrapped_handler_maps_every_exception_to_error_v1(
+    caplog: pytest.LogCaptureFixture,
+    is_async: bool,
+    error: Exception,
+    code: str,
+    message: str,
+) -> None:
+    import logging
+
+    if is_async:
+
+        async def handler() -> dict[str, Any]:
+            raise error
+
+    else:
+
+        def handler() -> dict[str, Any]:  # type: ignore[misc]
+            raise error
+
+    wrapped = _with_schema_signature(
+        "posts_reply", handler, {"type": "object", "properties": {}}
+    )
+    caplog.set_level(logging.DEBUG)
+    result = anyio.run(wrapped) if is_async else wrapped()
+
+    assert result.is_error is True
+    assert set(result.structured_content) == {"error"}
+    data = result.structured_content["error"]
+    assert set(data) == {
+        "code",
+        "operation",
+        "tool",
+        "message",
+        "http_status",
+        "retry_after",
+        "retryable",
+        "correlation_id",
+        "mutation_outcome",
+    }
+    assert (data["code"], data["tool"], data["message"]) == (
+        code,
+        "posts_reply",
+        message,
+    )
+    assert (data["operation"], data["retryable"], data["mutation_outcome"]) == (
+        "local",
+        False,
+        "not_attempted",
+    )
+    assert [part.type for part in result.content] == ["text"]
+    assert result.content[0].text == f"{code}: {message}"
+    assert "SECRETSEED" not in result.model_dump_json(by_alias=True)
+    assert "SECRETSEED" not in caplog.text

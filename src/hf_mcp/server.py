@@ -510,6 +510,13 @@ def _error_call_tool_result(tool_name: str, error: Exception) -> Any:
     )
 
 
+def _is_package_authored(error: Exception) -> bool:
+    """Only plain ValueError and errno-less PermissionError carry our sentences."""
+    if type(error) is ValueError:
+        return True
+    return type(error) is PermissionError and error.errno is None
+
+
 def _error_v1_for_exception(tool_name: str, error: Exception) -> dict[str, object]:
     if isinstance(error, HFAPIError):
         return {**error.error, "tool": tool_name}
@@ -525,10 +532,13 @@ def _error_v1_for_exception(tool_name: str, error: Exception) -> dict[str, objec
         return build_error(
             "FORMAT_NOT_READY", operation="local", tool=tool_name, message=str(error)
         )
-    if isinstance(error, (ValueError, TypeError, PermissionError)):
+    if _is_package_authored(error):
         return build_error(
             "INVALID_ARGUMENT", operation="local", tool=tool_name, message=str(error)
         )
+    if isinstance(error, (ValueError, TypeError, PermissionError)):
+        # Stdlib or OS text (paths, decoder positions): fixed sentence only.
+        return build_error("INVALID_ARGUMENT", operation="local", tool=tool_name)
     return build_error("INTERNAL_ERROR", operation="local", tool=tool_name)
 
 

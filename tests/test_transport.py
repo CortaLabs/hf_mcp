@@ -7,6 +7,8 @@ import io
 import json
 import logging
 import urllib.error
+import urllib.request
+import urllib.response
 import uuid
 from collections.abc import Callable
 from typing import Any
@@ -15,7 +17,9 @@ import pytest
 
 from hf_mcp.normalizers import normalize_extended_payload, normalize_response
 from hf_mcp.token_store import TokenBundle
-from hf_mcp.transport import HFAPIError, HFTransport
+from hf_mcp.server import _error_call_tool_result
+from hf_mcp.transport import HFAPIError, HFTransport, _NoRedirectHandler
+from hf_mcp.write_preflight import WritePreflightError
 
 ERROR_V1_FIELDS = {
     "code",
@@ -73,20 +77,25 @@ def _http_error(
     )
 
 
-def _install_urlopen(
-    monkeypatch: pytest.MonkeyPatch, behavior: Callable[[], Any]
-) -> list[Any]:
-    """Replace the network edge; ``behavior`` returns bytes or raises."""
-    requests: list[Any] = []
+class _FakeOpener:
+    def __init__(self, behavior: Callable[[], Any], requests: list[Any]) -> None:
+        self._behavior = behavior
+        self._requests = requests
 
-    def _fake_urlopen(request: Any, timeout: float | None = None) -> _FakeResponse:
-        requests.append(request)
-        result = behavior()
+    def open(self, request: Any, timeout: float | None = None) -> _FakeResponse:
+        self._requests.append(request)
+        result = self._behavior()
         return _FakeResponse(
             result if isinstance(result, bytes) else json.dumps(result).encode()
         )
 
-    monkeypatch.setattr("hf_mcp.transport.urllib.request.urlopen", _fake_urlopen)
+
+def _install_urlopen(
+    monkeypatch: pytest.MonkeyPatch, behavior: Callable[[], Any]
+) -> list[Any]:
+    """Replace the network edge; ``behavior`` returns bytes/JSON or raises."""
+    requests: list[Any] = []
+    monkeypatch.setattr("hf_mcp.transport._OPENER", _FakeOpener(behavior, requests))
     return requests
 
 
@@ -139,7 +148,7 @@ def _assert_no_seeds(*texts: str) -> None:
 
 
 @pytest.mark.parametrize("method", METHODS)
-@pytest.mark.parametrize("flag", [0, "0", False, 0.0])
+@pytest.mark.parametrize("flag", [0, "0", False, 0.0, "false", "False"])
 @pytest.mark.parametrize("position", ["top", "envelope"])
 def test_success_zero_is_upstream_rejected_before_normalization(
     monkeypatch: pytest.MonkeyPatch, method: str, flag: Any, position: str
@@ -731,3 +740,152 @@ def test_read_raw_returns_the_untouched_json(monkeypatch: pytest.MonkeyPatch) ->
     _install_urlopen(monkeypatch, lambda: copy.deepcopy(body))
 
     assert _transport().read_raw(asks={"bytes": {"id": True}}, helper="bytes") == body
+
+
+# ------------------------------------------------- redirects are never followed
+
+
+class _RedirectingHTTPS(urllib.request.HTTPSHandler):
+    def __init__(self, seen: list[tuple[str, str, str | None]]) -> None:
+        super().__init__()
+        self._seen = seen
+
+    def https_open(self, req: Any) -> Any:
+        self._seen.append(
+            (req.get_method(), req.full_url, req.get_header("Authorization"))
+        )
+        headers = email.message.Message()
+        headers["Location"] = "https://redirect-target.invalid/steal"
+        response = urllib.response.addinfourl(
+            io.BytesIO(b""), headers, req.full_url, 302
+        )
+        response.msg = "Found"
+        return response
+
+
+@pytest.mark.parametrize(
+    ("method", "code", "outcome"),
+    [
+        ("read", "UPSTREAM_REJECTED", "not_attempted"),
+        ("read_raw", "UPSTREAM_REJECTED", "not_attempted"),
+        ("write", "WRITE_OUTCOME_UNKNOWN", "unknown"),
+    ],
+)
+def test_redirects_are_not_followed_and_token_is_not_forwarded(
+    monkeypatch: pytest.MonkeyPatch, method: str, code: str, outcome: str
+) -> None:
+    seen: list[tuple[str, str, str | None]] = []
+    opener = urllib.request.build_opener(_NoRedirectHandler, _RedirectingHTTPS(seen))
+    monkeypatch.setattr("hf_mcp.transport._OPENER", opener)
+
+    with pytest.raises(HFAPIError) as raised:
+        _call(_transport(), method)
+
+    data = _assert_error_v1(raised.value)
+    assert (data["code"], data["mutation_outcome"], data["http_status"]) == (
+        code,
+        outcome,
+        302,
+    )
+    assert len(seen) == 1
+    assert seen[0][1].startswith(f"https://{SEED_HOST}/")
+    assert "redirect-target" not in json.dumps(data)
+
+
+# ----------------------------------------- handler-wrapper exception mapping
+
+FIXED_INVALID = "The request arguments are invalid."
+FIXED_FORMAT = "The content is not ready to be written."
+FIXED_INTERNAL = "An internal error occurred."
+OS_PATH = f"/mnt/seeded/{SEED_TOKEN}/draft.json"
+
+
+def _wrapped_result(error: Exception) -> dict[str, Any]:
+    result = _error_call_tool_result("posts_reply", error)
+    assert result.is_error is True
+    assert [part.type for part in result.content] == ["text"]
+    structured = result.structured_content
+    assert structured is not None and set(structured) == {"error"}
+    assert set(structured["error"]) == ERROR_V1_FIELDS
+    assert structured["error"]["tool"] == "posts_reply"
+    assert result.content[0].text == (
+        f"{structured['error']['code']}: {structured['error']['message']}"
+    )
+    return dict(structured["error"])
+
+
+@pytest.mark.parametrize(
+    ("error", "code", "message"),
+    [
+        (
+            ValueError("threads.read requires a selector."),
+            "INVALID_ARGUMENT",
+            "threads.read requires a selector.",
+        ),
+        (
+            PermissionError("Tool requires confirm_live=True."),
+            "INVALID_ARGUMENT",
+            "Tool requires confirm_live=True.",
+        ),
+        (
+            WritePreflightError("Write body contains nested code blocks."),
+            "FORMAT_NOT_READY",
+            "Write body contains nested code blocks.",
+        ),
+        (ValueError(f"cannot open {OS_PATH}"), "INVALID_ARGUMENT", FIXED_INVALID),
+        (ValueError(SEED_TOKEN * 40), "INVALID_ARGUMENT", FIXED_INVALID),
+        (
+            PermissionError(13, "Permission denied", OS_PATH),
+            "INVALID_ARGUMENT",
+            FIXED_INVALID,
+        ),
+        (TypeError(f"unexpected {SEED_TOKEN}"), "INVALID_ARGUMENT", FIXED_INVALID),
+        (
+            UnicodeDecodeError("utf-8", b"\xff", 0, 1, SEED_TOKEN),
+            "INVALID_ARGUMENT",
+            FIXED_INVALID,
+        ),
+        (
+            json.JSONDecodeError(SEED_TOKEN, "doc", 0),
+            "INVALID_ARGUMENT",
+            FIXED_INVALID,
+        ),
+        (
+            WritePreflightError(f"bad {SEED_TOKEN} at {OS_PATH}"),
+            "FORMAT_NOT_READY",
+            FIXED_FORMAT,
+        ),
+        (RuntimeError(OS_PATH), "INTERNAL_ERROR", FIXED_INTERNAL),
+        (KeyError(SEED_TOKEN), "INTERNAL_ERROR", FIXED_INTERNAL),
+    ],
+)
+def test_wrapper_maps_exceptions_without_leaking_paths_or_stdlib_text(
+    error: Exception, code: str, message: str
+) -> None:
+    data = _wrapped_result(error)
+
+    assert data["code"] == code
+    assert data["message"] == message
+    assert data["operation"] == "local"
+    assert data["mutation_outcome"] == "not_attempted"
+    assert SEED_TOKEN not in json.dumps(data) or message == str(error)
+
+
+def test_wrapper_passes_hf_api_errors_through_with_the_tool_name() -> None:
+    original = HFAPIError(
+        {
+            "code": "RATE_LIMITED",
+            "operation": "read",
+            "tool": None,
+            "message": "Hack Forums rate limit reached. Try again later.",
+            "http_status": 429,
+            "retry_after": 5,
+            "retryable": True,
+            "correlation_id": str(uuid.uuid4()),
+            "mutation_outcome": "not_attempted",
+        }
+    )
+
+    data = _wrapped_result(original)
+
+    assert data == {**original.error, "tool": "posts_reply"}
