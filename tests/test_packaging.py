@@ -129,3 +129,30 @@ def test_smoke_script_fails_with_a_clear_message_when_the_server_never_answers()
         silent.kill()
         silent.wait()
     assert "no answer to initialize" in str(raised.value)
+
+
+@pytest.mark.core
+@pytest.mark.build
+@pytest.mark.regression
+def test_smoke_script_reads_both_lines_when_two_arrive_in_one_write() -> None:
+    namespace = runpy.run_path(str(PRODUCT_ROOT / "scripts" / "smoke_installed.py"))
+    script = (
+        "import sys\n"
+        "sys.stdin.readline()\n"
+        'sys.stdout.write(\'{"jsonrpc":"2.0","id":1,"result":{"a":1}}\\n\''
+        ' \'{"jsonrpc":"2.0","id":2,"result":{"b":2}}\\n\')\n'
+        "sys.stdout.flush()\n"
+        "sys.stdin.read()\n"
+    )
+    server = subprocess.Popen(
+        [sys.executable, "-c", script],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        assert namespace["exchange"](server, "first", {}, 1, timeout=5) == {"a": 1}
+        assert namespace["exchange"](server, "second", {}, 2, timeout=5) == {"b": 2}
+    finally:
+        server.kill()
+        server.wait()

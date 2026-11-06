@@ -160,3 +160,31 @@ def test_preflight_still_rejects_a_list_item_outside_a_list() -> None:
     with pytest.raises(WritePreflightError, match="list item outside a list"):
         validate_write_body("[b][*]x[/b]", source_format="markdown")
     validate_write_body("[list][b]y[/b][*]x[/list]", source_format="markdown")
+
+
+@pytest.mark.regression
+def test_deeply_nested_blockquotes_convert_without_recursion_error() -> None:
+    from hf_mcp.tools.formatting import convert_formatting
+
+    text = ">" * INPUT_CAP
+    started = time.process_time()
+    result = convert_formatting(message=text, message_format="markdown")
+    elapsed = time.process_time() - started
+
+    assert isinstance(result["structuredContent"]["mycode"], str)
+    assert elapsed < TIME_BOUND_SECONDS, f"{elapsed:.2f}s CPU at {INPUT_CAP}"
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize(
+    ("opener", "closer"), [("[code]", "[/php]"), ("[img]", "[/uimg]")]
+)
+def test_mixed_closer_pairing_stays_near_linear(opener: str, closer: str) -> None:
+    unit = opener + "x"
+    body = unit * ((INPUT_CAP - len(closer)) // len(unit) + 1)
+    text = (body[: INPUT_CAP - len(closer)]) + closer
+    assert len(text) == INPUT_CAP
+
+    elapsed = _cpu_seconds(text)
+
+    assert elapsed < TIME_BOUND_SECONDS, f"{opener}/{closer}: {elapsed:.2f}s CPU"

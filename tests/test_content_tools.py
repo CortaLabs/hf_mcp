@@ -532,28 +532,52 @@ def test_render_repeated_placeholder_over_the_cap_is_invalid_argument(
     assert result.structured_content["error"]["code"] == "INVALID_ARGUMENT"
 
 
+def _padded_draft_source(draft_dir: Path, length: int) -> str:
+    """An existing draft source whose path string is exactly `length` characters.
+
+    `.` segments and repeated slashes collapse on resolution, so the padding adds
+    length without changing the file the path names.
+    """
+    source = draft_dir / "source.md"
+    source.write_text("hello", encoding="utf-8")
+    prefix = f"{draft_dir}/"
+    padding = length - len(prefix) - len(source.name)
+    assert padding >= 0
+    return prefix + "/" * (padding % 2) + "./" * (padding // 2) + source.name
+
+
 @pytest.mark.parametrize(
-    ("tool", "field", "limit", "extra"),
+    ("tool", "field", "limit"),
     [
-        ("drafts_list", "title", MAX_SHORT_TEXT_CHARS, {}),
-        ("drafts_list", "category", MAX_SHORT_TEXT_CHARS, {}),
-        ("formatting_preflight", "source_path", MAX_PATH_CHARS, {}),
+        ("drafts_list", "title", MAX_SHORT_TEXT_CHARS),
+        ("drafts_list", "category", MAX_SHORT_TEXT_CHARS),
+        ("formatting_preflight", "source_path", MAX_PATH_CHARS),
     ],
 )
 def test_new_text_limits_accept_the_limit_and_refuse_one_over(
+    tmp_path: Path,
     templates_dir: Path,
     tool: str,
     field: str,
     limit: int,
-    extra: dict[str, Any],
 ) -> None:
-    server = _reader(templates_dir)
-    over = _call(server, tool, {field: "a" * (limit + 1), **extra})
+    draft_dir = tmp_path / "drafts"
+    draft_dir.mkdir()
+    server = _server(
+        _settings("full_api", templates_dir=templates_dir, draft_dir=draft_dir)
+    )
+    over = _call(server, tool, {field: "a" * (limit + 1)})
     assert over.is_error
     assert over.structured_content["error"]["code"] == "INVALID_ARGUMENT"
-    at_limit = _call(server, tool, {field: "a" * limit, **extra})
-    error = (at_limit.structured_content or {}).get("error", {})
-    assert error.get("code") != "INVALID_ARGUMENT" or "maxLength" not in str(error)
+    assert field in over.structured_content["error"]["message"]
+    value = (
+        _padded_draft_source(draft_dir, limit)
+        if field == "source_path"
+        else "a" * limit
+    )
+    assert len(value) == limit
+    at_limit = _call(server, tool, {field: value})
+    assert not at_limit.is_error, at_limit.structured_content
 
 
 def test_name_collision_between_md_and_mycode_counts_as_invalid(

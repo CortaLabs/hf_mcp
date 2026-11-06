@@ -777,3 +777,49 @@ def test_house_mycode_layout_passes_through_unchanged() -> None:
     assert not any(
         finding.kind == "loss" for finding in analyze_conversion(body, "markdown")
     )
+
+
+def _nested_quote(levels: int) -> str:
+    return "\n".join("> " * level + "x" for level in range(1, levels + 1))
+
+
+def _truncation_findings(levels: int) -> list[ConversionFinding]:
+    return [
+        f
+        for f in analyze_conversion(_nested_quote(levels), "markdown")
+        if f.code == "blockquote_depth_truncated"
+    ]
+
+
+@pytest.mark.regression
+def test_blockquote_nesting_past_the_cap_reports_one_truncation_finding() -> None:
+    cap = mycode._MAX_BLOCKQUOTE_DEPTH
+    assert _truncation_findings(cap) == []
+    (finding,) = _truncation_findings(20)
+    assert finding.kind == "loss" and finding.stage == "mycode"
+    # Levels 1..cap convert exactly as before: the same nesting without the extra
+    # levels is a prefix of the deeper conversion's open tags.
+    assert markdown_to_mycode(_nested_quote(20)).count("[quote]") == cap
+    assert markdown_to_mycode(_nested_quote(cap)).count("[quote]") == cap
+
+
+_OLD_CODE_BLOCK_PATTERN = re.compile(
+    r"\[(code|php)\](.*?)\[/\1\]", re.IGNORECASE | re.DOTALL
+)
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("[code]a[/php]b[/code]", ["[code]a[/php]b[/code]"]),
+        ("[code]a[code]b[/code]c[/code]", ["[code]a[code]b[/code]"]),
+        ("[code]open only, [php]x[/php]", ["[php]x[/php]"]),
+        ("[CODE]a[/Code][PHP]b[/PHP]", ["[CODE]a[/Code]", "[PHP]b[/PHP]"]),
+    ],
+)
+def test_finditer_code_blocks_pairs_like_the_backreference_regex(
+    text: str, expected: list[str]
+) -> None:
+    found = [match.group(0) for match in mycode.finditer_code_blocks(text)]
+    assert found == expected
+    assert found == [m.group(0) for m in _OLD_CODE_BLOCK_PATTERN.finditer(text)]
