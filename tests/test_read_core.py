@@ -9,10 +9,10 @@ import pytest
 
 from hf_mcp.capabilities import CapabilityPolicy
 from hf_mcp.config import HFMCPSettings
-from hf_mcp.dispatcher import RuntimeBundle, register_tools
+from hf_mcp.dispatcher import build_handlers
 from hf_mcp.normalizers import normalize_response
 from hf_mcp.output_modes import ReadOutputDefaults
-from hf_mcp.registry import get_specs, get_tool_spec, mcp_tool_name
+from hf_mcp.registry import get_specs, get_tool_spec
 from hf_mcp.token_store import TokenBundle
 from hf_mcp.tools.read_core import (
     build_core_read_handlers,
@@ -26,29 +26,6 @@ from hf_mcp.transport import HFTransport
 
 PRODUCT_ROOT = Path(__file__).resolve().parents[1]
 SRC_PATH = PRODUCT_ROOT / "src"
-
-
-class _CaptureServer:
-    def __init__(self) -> None:
-        self.tools: dict[str, dict[str, Any]] = {}
-
-    def register_tool(
-        self,
-        *,
-        name: str,
-        description: str,
-        input_schema: dict[str, Any],
-        annotations: dict[str, Any],
-        output_schema: dict[str, object] | None = None,
-        handler: Any,
-    ) -> None:
-        self.tools[name] = {
-            "description": description,
-            "input_schema": input_schema,
-            "annotations": annotations,
-            "output_schema": output_schema,
-            "handler": handler,
-        }
 
 
 @pytest.mark.parametrize("tool_name", ["me.read", "users.read"])
@@ -184,21 +161,17 @@ def test_threads_and_posts_schema_accept_any_supported_selector() -> None:
 
 
 def test_dispatcher_output_excludes_disabled_core_read_capability() -> None:
-    policy = _policy(
-        enabled_capabilities={"users.read"},
-        enabled_parameter_families={
-            "selectors.user",
-            "fields.users.profile",
-            "filters.pagination",
-        },
+    settings = HFMCPSettings(
+        profile="test",
+        enabled_capabilities=frozenset({"users.read"}),
+        enabled_parameter_families=frozenset(
+            {"selectors.user", "fields.users.profile", "filters.pagination"}
+        ),
     )
-    server = _CaptureServer()
 
-    register_tools(server, policy, RuntimeBundle())
+    handlers = build_handlers(CapabilityPolicy(settings), settings, None)
 
-    assert mcp_tool_name("users.read") not in server.tools
-    assert mcp_tool_name("me.read") not in server.tools
-    assert mcp_tool_name("forums.read") not in server.tools
+    assert handlers == {}
 
 
 def test_list_posts_delegates_to_generic_transport_and_returns_normalized_output(

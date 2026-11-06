@@ -1,55 +1,47 @@
 from __future__ import annotations
 
 import json
-import inspect
+import logging
 import os
+import re
 import sys
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
 import anyio
+import mcp.types as types
 import pytest
+from jsonschema import Draft202012Validator
+from mcp import ClientSession
+from mcp.client import Client
+from mcp.client.stdio import StdioServerParameters, stdio_client
 
 import hf_mcp
-
-
 from hf_mcp.capabilities import CapabilityPolicy
 from hf_mcp.config import HFMCPSettings, PRESET_CAPABILITIES, PRESET_PARAMETER_FAMILIES
-from hf_mcp.dispatcher import RuntimeBundle, register_tools
-from hf_mcp.registry import get_specs, mcp_tool_name
-from hf_mcp.server import _MCPServerToolAdapter, _with_schema_signature
-from hf_mcp.server import create_server, serve_stdio
+from hf_mcp.dispatcher import Handler, build_handlers
+from hf_mcp.registry import TOOLS, get_specs, mcp_tool_name
+from hf_mcp.server import build_server, create_server, serve_stdio
 from hf_mcp.token_store import TokenBundle
 from hf_mcp.tools.read_core import build_core_read_handlers
 from hf_mcp.tools.read_extended import build_extended_read_handlers
-from hf_mcp.transport import HFTransport
+from hf_mcp.transport import HFAPIError, HFTransport, build_error
 from hf_mcp.write_preflight import WritePreflightError
 
 PRODUCT_ROOT = Path(__file__).resolve().parents[1]
 SRC_PATH = PRODUCT_ROOT / "src"
-
-
-class _CaptureServer:
-    def __init__(self) -> None:
-        self.tools: dict[str, dict[str, Any]] = {}
-
-    def register_tool(
-        self,
-        *,
-        name: str,
-        description: str,
-        input_schema: dict[str, Any],
-        annotations: dict[str, Any],
-        handler: Any,
-        output_schema: dict[str, object] | None = None,
-    ) -> None:
-        self.tools[name] = {
-            "description": description,
-            "input_schema": input_schema,
-            "annotations": annotations,
-            "output_schema": output_schema,
-            "handler": handler,
-        }
+ERROR_V1_FIELDS = {
+    "code",
+    "operation",
+    "tool",
+    "message",
+    "http_status",
+    "retry_after",
+    "retryable",
+    "correlation_id",
+    "mutation_outcome",
+}
 
 
 class _StubTokenStore:
@@ -77,28 +69,131 @@ class _StubReadTransport:
         raise AssertionError(f"unexpected helper: {helper}")
 
 
-def _runtime_bundle() -> RuntimeBundle:
-    transport = HFTransport(
-        token_store=_StubTokenStore(), base_url="https://example.test"
+class _CountingTransport(HFTransport):
+    """A real HFTransport whose network seam is a counter and a canned reply."""
+
+    def __init__(self) -> None:
+        super().__init__(token_store=_StubTokenStore(), base_url="https://example.test")
+        self.calls = 0
+
+    def _post_json(self, route: str, payload: Any, headers: Any) -> dict[str, Any]:
+        self.calls += 1
+        return {
+            "posts": [{"pid": "1", "tid": "1", "uid": "5", "message": "hello"}],
+            "threads": [{"tid": "1", "fid": "2", "subject": "s"}],
+            "me": [{"uid": "5", "username": "forge"}],
+        }
+
+
+def _transport() -> HFTransport:
+    return HFTransport(token_store=_StubTokenStore(), base_url="https://example.test")
+
+
+def _settings(
+    capabilities: set[str] | frozenset[str],
+    families: set[str] | frozenset[str],
+    **extra: Any,
+) -> HFMCPSettings:
+    return HFMCPSettings(
+        profile="test",
+        enabled_capabilities=frozenset(capabilities),
+        enabled_parameter_families=frozenset(families),
+        **extra,
     )
-    return RuntimeBundle(
-        transport=transport,
-        auth_context=TokenBundle(
-            access_token="token", token_type="Bearer", scope=frozenset({"read"})
-        ),
+
+
+def _preset_settings(profile: str) -> HFMCPSettings:
+    return HFMCPSettings(
+        profile=profile,
+        enabled_capabilities=PRESET_CAPABILITIES[profile],
+        enabled_parameter_families=PRESET_PARAMETER_FAMILIES[profile],
     )
 
 
 def _policy(
     *, enabled_capabilities: set[str], enabled_parameter_families: set[str]
 ) -> CapabilityPolicy:
-    return CapabilityPolicy(
-        HFMCPSettings(
-            profile="test",
-            enabled_capabilities=frozenset(enabled_capabilities),
-            enabled_parameter_families=frozenset(enabled_parameter_families),
-        )
+    return CapabilityPolicy(_settings(enabled_capabilities, enabled_parameter_families))
+
+
+def _handlers(
+    settings: HFMCPSettings, transport: HFTransport | None = None
+) -> dict[str, Handler]:
+    return build_handlers(CapabilityPolicy(settings), settings, transport)
+
+
+def _server(
+    settings: HFMCPSettings,
+    transport: HFTransport | None = None,
+    handlers: dict[str, Handler] | None = None,
+) -> Any:
+    policy = CapabilityPolicy(settings)
+    return build_server(
+        policy,
+        handlers
+        if handlers is not None
+        else build_handlers(policy, settings, transport),
     )
+
+
+def _session(server: Any, scenario: Callable[[Client], Awaitable[Any]]) -> Any:
+    """Run ``scenario`` against ``server`` through the SDK's in-memory client."""
+
+    async def _run() -> Any:
+        async with Client(server) as client:
+            return await scenario(client)
+
+    return anyio.run(_run)
+
+
+def _listed(
+    settings: HFMCPSettings, transport: HFTransport | None = None
+) -> dict[str, types.Tool]:
+    async def scenario(client: Client) -> dict[str, types.Tool]:
+        return {tool.name: tool for tool in (await client.list_tools()).tools}
+
+    return _session(_server(settings, transport), scenario)
+
+
+def _call(server: Any, name: str, arguments: dict[str, Any]) -> types.CallToolResult:
+    async def scenario(client: Client) -> types.CallToolResult:
+        return await client.call_tool(name, arguments)
+
+    return _session(server, scenario)
+
+
+def _annotation_flags(tool: types.Tool) -> dict[str, bool]:
+    assert tool.annotations is not None
+    return tool.annotations.model_dump(by_alias=True, exclude_none=True)
+
+
+def _counting(
+    handlers: dict[str, Handler], counter: dict[str, int]
+) -> dict[str, Handler]:
+    def wrap(name: str, handler: Handler) -> Handler:
+        def counted(**kwargs: Any) -> Any:
+            counter[name] = counter.get(name, 0) + 1
+            return handler(**kwargs)
+
+        return counted
+
+    return {name: wrap(name, handler) for name, handler in handlers.items()}
+
+
+def _assert_error(
+    result: types.CallToolResult, code: str, tool: str | None = None
+) -> dict[str, Any]:
+    assert result.is_error is True
+    assert result.structured_content is not None
+    assert set(result.structured_content) == {"error"}
+    error = result.structured_content["error"]
+    assert set(error) == ERROR_V1_FIELDS
+    assert error["code"] == code
+    if tool is not None:
+        assert error["tool"] == tool
+    assert [part.type for part in result.content] == ["text"]
+    assert result.content[0].text == f"{error['code']}: {error['message']}"
+    return error
 
 
 def _assert_rejects_nested_envelope_json_text(result: Any) -> None:
@@ -131,878 +226,88 @@ def _assert_not_placeholder_handler(handler: Any) -> None:
     assert all("not implemented yet" not in constant for constant in string_constants)
 
 
-@pytest.mark.core
-@pytest.mark.registry
-def test_sdk_adapter_uses_defensive_original_schema_before_argument_coercion(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from mcp.server.mcpserver import MCPServer
-    from pydantic import ValidationError
-    import jsonschema
-
-    schema: dict[str, Any] = {
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "title": "Caller-owned title",
-        "type": "object",
-        "$defs": {"choice": {"type": "string", "enum": ["allowed", "blocked"]}},
-        "properties": {
-            "selector_a": {"type": "string", "default": "A"},
-            "selector_b": {"type": "string", "default": "B"},
-            "choice": {"$ref": "#/$defs/choice"},
-            "count": {"type": "integer"},
-            "items": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "properties": {"code": {"type": "string", "pattern": "^[a-z]+$"}},
-                    "required": ["code"],
-                    "additionalProperties": False,
-                },
-            },
-            "details": {
-                "type": "object",
-                "properties": {"label": {"type": "string", "minLength": 1}},
-                "required": ["label"],
-                "additionalProperties": False,
-            },
-            "array_numbers": {
-                "type": "array",
-                "items": {"type": "integer", "minimum": 1},
-            },
-            "text": {"type": "string", "minLength": 1},
-            "flag": {"type": "boolean"},
-            "mode": {"type": "string"},
-            "nullable": {"type": ["string", "null"]},
-            "timestamp": {"type": "string", "format": "date-time"},
-            "defaulted": {
-                "type": "array",
-                "items": {"type": "string"},
-                "default": ["safe"],
-            },
-            "confirmed": {"type": "boolean", "const": True},
-        },
-        "required": ["confirmed", "count", "items", "details", "array_numbers", "text"],
-        "additionalProperties": False,
-        "anyOf": [{"required": ["selector_a"]}, {"required": ["selector_b"]}],
-        "oneOf": [
-            {"required": ["flag"]},
-            {"required": ["flag", "mode"], "properties": {"mode": {"const": "x"}}},
-        ],
-        "allOf": [{"properties": {"count": {"minimum": 1, "maximum": 3}}}],
-        "not": {"properties": {"choice": {"const": "blocked"}}, "required": ["choice"]},
-        "x-hf-probe": {"complete": True},
-    }
-    calls: list[dict[str, Any]] = []
-
-    def handler(
-        *,
-        selector_a: str,
-        selector_b: str,
-        choice: str | None = None,
-        count: int,
-        items: list[dict[str, str]],
-        details: dict[str, str],
-        array_numbers: list[int],
-        text: str,
-        flag: bool,
-        mode: str | None = None,
-        nullable: str | None = None,
-        timestamp: str | None = None,
-        defaulted: list[str],
-        confirmed: bool,
-    ) -> dict[str, Any]:
-        result = {
-            "selector_a": selector_a,
-            "selector_b": selector_b,
-            "choice": choice,
-            "count": count,
-            "items": items,
-            "details": details,
-            "array_numbers": array_numbers,
-            "text": text,
-            "flag": flag,
-            "mode": mode,
-            "nullable": nullable,
-            "timestamp": timestamp,
-            "defaulted": defaulted,
-            "confirmed": confirmed,
-        }
-        calls.append(result)
-        return result
-
-    compiled_tool_schemas = 0
-    draft_validator = jsonschema.Draft202012Validator
-
-    def _count_validator_construction(
-        schema_to_compile: Any, *args: Any, **kwargs: Any
-    ) -> Any:
-        nonlocal compiled_tool_schemas
-        if (
-            isinstance(schema_to_compile, dict)
-            and schema_to_compile.get("title") == "Caller-owned title"
-        ):
-            compiled_tool_schemas += 1
-        return draft_validator(schema_to_compile, *args, **kwargs)
-
-    _count_validator_construction.check_schema = draft_validator.check_schema
-    monkeypatch.setattr(
-        jsonschema, "Draft202012Validator", _count_validator_construction
-    )
-    app = MCPServer(name="hf-mcp-adapter-probe")
-    adapter = _MCPServerToolAdapter(app)
-    adapter.register_tool(
-        name="wire_probe",
-        description="Strict adapter probe",
-        input_schema=schema,
-        annotations={"title": "wire_probe", "readOnlyHint": True},
-        handler=handler,
-    )
-    schema["$defs"]["choice"]["enum"] = ["caller-mutated"]
-    schema["properties"]["selector_a"]["default"] = "caller-mutated"
-    schema["properties"]["defaulted"]["default"].append("caller-mutated")
-    schema["x-hf-probe"]["complete"] = False
-
-    tool = app._tool_manager.get_tool("wire_probe")
-    assert tool is not None
-    published_schema = tool.parameters
-    assert published_schema["title"] == "Caller-owned title"
-    assert published_schema["$defs"]["choice"]["enum"] == ["allowed", "blocked"]
-    assert published_schema["properties"]["selector_a"]["default"] == "A"
-    assert published_schema["x-hf-probe"] == {"complete": True}
-    assert published_schema["properties"]["timestamp"]["format"] == "date-time"
-    validator = tool.fn_metadata._input_validator
-    assert validator is not None
-
-    valid_arguments = {
-        "selector_a": "explicit-a",
-        "selector_b": "explicit-b",
-        "choice": "allowed",
-        "count": 1,
-        "items": [{"code": "valid"}],
-        "details": {"label": "valid"},
-        "array_numbers": [1],
-        "text": "valid",
-        "flag": True,
-        "nullable": None,
-        "timestamp": "not-validated-as-a-date-time-annotation",
-        "confirmed": True,
-    }
-    validated = tool.fn_metadata.validate_arguments(valid_arguments)
-    assert validated == {**valid_arguments, "defaulted": ["safe"]}
-    assert type(validated["count"]) is int
-    assert compiled_tool_schemas == 1
-    assert tool.fn_metadata._input_validator is validator
-
-    without_selector_a = {**valid_arguments}
-    without_selector_a.pop("selector_a")
-    defaulted_selector = tool.fn_metadata.validate_arguments(without_selector_a)
-    assert defaulted_selector["selector_a"] == "A"
-    without_selectors = {
-        key: value
-        for key, value in valid_arguments.items()
-        if key not in {"selector_a", "selector_b"}
-    }
-    invalid_cases = (
-        (
-            "boolean is not an integer",
-            {**valid_arguments, "count": True},
-            "type",
-            "$.count",
-        ),
-        (
-            "numeric strings are not integers",
-            {**valid_arguments, "count": "1"},
-            "type",
-            "$.count",
-        ),
-        (
-            "fractional integers reject",
-            {**valid_arguments, "count": 1.5},
-            "type",
-            "$.count",
-        ),
-        ("allOf minimum", {**valid_arguments, "count": 0}, "minimum", "$.count"),
-        ("allOf maximum", {**valid_arguments, "count": 4}, "maximum", "$.count"),
-        (
-            "enum rejects",
-            {**valid_arguments, "choice": "unlisted-choice"},
-            "enum",
-            "$.choice",
-        ),
-        ("not rejects", {**valid_arguments, "choice": "blocked"}, "not", "$"),
-        ("oneOf rejects double match", {**valid_arguments, "mode": "x"}, "oneOf", "$"),
-        (
-            "nested pattern",
-            {**valid_arguments, "items": [{"code": "UPPER"}]},
-            "pattern",
-            "$.items[0].code",
-        ),
-        (
-            "nested closed object",
-            {**valid_arguments, "items": [{"code": "valid", "extra": 1}]},
-            "additionalProperties",
-            "$.items[0]",
-        ),
-        (
-            "encoded object string",
-            {**valid_arguments, "details": "{}"},
-            "type",
-            "$.details",
-        ),
-        (
-            "encoded array string",
-            {**valid_arguments, "array_numbers": "[1]"},
-            "type",
-            "$.array_numbers",
-        ),
-        (
-            "array item bool",
-            {**valid_arguments, "array_numbers": [True]},
-            "type",
-            "$.array_numbers[0]",
-        ),
-        ("nonnullable null", {**valid_arguments, "text": None}, "type", "$.text"),
-        (
-            "additional root property",
-            {**valid_arguments, "unknown": "secret-value"},
-            "additionalProperties",
-            "$",
-        ),
-        (
-            "const false",
-            {**valid_arguments, "confirmed": False},
-            "const",
-            "$.confirmed",
-        ),
-        ("const numeric", {**valid_arguments, "confirmed": 1}, "type", "$.confirmed"),
-        (
-            "const string",
-            {**valid_arguments, "confirmed": "true"},
-            "type",
-            "$.confirmed",
-        ),
-        (
-            "missing required confirmation",
-            {
-                key: value
-                for key, value in valid_arguments.items()
-                if key != "confirmed"
-            },
-            "required",
-            "$",
-        ),
-        ("selector defaults cannot satisfy anyOf", without_selectors, "anyOf", "$"),
-    )
-    for case_name, invalid, constraint, path in invalid_cases:
-        with pytest.raises(ValidationError) as error:
-            tool.fn_metadata.validate_arguments(invalid)
-        error_text = str(error.value)
-        assert constraint in error_text, case_name
-        assert path in error_text, case_name
-        assert "secret-value" not in error_text
-    with pytest.raises(ValidationError):
-        tool.fn_metadata.validate_arguments(["must-be-an-object"])
-    assert compiled_tool_schemas == 1
-    assert calls == []
-
-    async def invoke(arguments_to_call: dict[str, Any]) -> Any:
-        raw_validated = tool.fn_metadata.validate_arguments(arguments_to_call)
-        return await tool.fn_metadata.call_fn(tool.fn, tool.is_async, raw_validated)
-
-    result = anyio.run(invoke, without_selector_a)
-    assert result["count"] == 1
-    assert result["selector_a"] == "A"
-    assert result["nullable"] is None
-    assert result["timestamp"] == "not-validated-as-a-date-time-annotation"
-    assert result["defaulted"] == ["safe"]
-    assert result["confirmed"] is True
-    result["defaulted"].append("call-mutated")
-    repeat_validation = tool.fn_metadata.validate_arguments(without_selector_a)
-    assert repeat_validation["defaulted"] == ["safe"]
-
-    float_result = anyio.run(invoke, {**valid_arguments, "count": 1.0})
-    assert type(float_result["count"]) is float
-    assert float_result["count"] == 1.0
-    assert calls == [result, float_result]
-    assert compiled_tool_schemas == 1
+# ---------------------------------------------------------------- registration
 
 
 @pytest.mark.core
 @pytest.mark.registry
-def test_sdk_adapter_rejects_incompatible_registry_before_tool_exposure() -> None:
-    class _IncompatibleApp:
-        def add_tool(self, handler: Any, **kwargs: Any) -> None:
-            del handler, kwargs
-
-    adapter = _MCPServerToolAdapter(_IncompatibleApp())
-    with pytest.raises(RuntimeError, match="tool manager.*metadata capability"):
-        adapter.register_tool(
-            name="unsupported_probe",
-            description="Unsupported SDK probe",
-            input_schema={"type": "object", "properties": {}},
-            annotations={},
-            handler=lambda: None,
-        )
-
-
-@pytest.mark.parametrize(
-    "schema",
-    [
-        {
-            "type": "object",
-            "properties": {"value": {"type": "integer", "minimum": "low"}},
-        },
-        {
-            "type": "object",
-            "properties": {"value": {"$ref": "https://example.invalid/schema"}},
-        },
-        {"type": "object", "properties": {"value": {"$ref": "#/$defs/missing"}}},
-        {
-            "type": "object",
-            "properties": {
-                "value": {"$dynamicRef": "https://example.invalid/no-fetch"}
-            },
-        },
-        {"type": "object", "properties": {"value": {"$dynamicRef": "#/$defs/missing"}}},
-    ],
-    ids=[
-        "invalid-draft-schema",
-        "nonlocal-reference",
-        "unresolved-local-reference",
-        "nonlocal-dynamic-reference",
-        "unresolved-local-dynamic-reference",
-    ],
-)
-@pytest.mark.core
-@pytest.mark.registry
-def test_sdk_adapter_rejects_invalid_or_remote_schema_before_tool_exposure(
-    schema: dict[str, Any],
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    import http.client
-    from mcp.server.mcpserver import MCPServer
-
-    network_attempts: list[str] = []
-
-    def _deny_network(self: Any) -> None:
-        network_attempts.append(type(self).__name__)
-        raise AssertionError("schema reference resolution attempted network access")
-
-    monkeypatch.setattr(http.client.HTTPConnection, "connect", _deny_network)
-    monkeypatch.setattr(http.client.HTTPSConnection, "connect", _deny_network)
-    app = MCPServer(name="hf-mcp-schema-probe")
-    adapter = _MCPServerToolAdapter(app)
-    with pytest.raises(ValueError, match="Invalid Draft 2020-12 input schema"):
-        adapter.register_tool(
-            name="invalid_schema_probe",
-            description="Invalid schema probe",
-            input_schema=schema,
-            annotations={},
-            handler=lambda **kwargs: kwargs,
-        )
-    assert app._tool_manager.get_tool("invalid_schema_probe") is None
-    assert network_attempts == []
-
-
-@pytest.mark.core
-@pytest.mark.registry
-def test_sdk_adapter_keeps_resolvable_local_dynamic_reference() -> None:
-    from mcp.server.mcpserver import MCPServer
-    from pydantic import ValidationError
-
-    app = MCPServer(name="hf-mcp-dynamic-reference-probe")
-    adapter = _MCPServerToolAdapter(app)
-    adapter.register_tool(
-        name="dynamic_reference_probe",
-        description="Local dynamic reference probe",
-        input_schema={
-            "type": "object",
-            "$id": "https://example.invalid/schema-root",
-            "$defs": {
-                "nested": {
-                    "$id": "nested",
-                    "type": "object",
-                    "$defs": {
-                        "choice": {
-                            "$dynamicAnchor": "choice",
-                            "type": "string",
-                            "enum": ["allowed"],
-                        }
-                    },
-                    "properties": {"value": {"$dynamicRef": "#choice"}},
-                    "required": ["value"],
-                    "additionalProperties": False,
-                }
-            },
-            "x-hf-reference-example": {
-                "$ref": "https://example.invalid/annotation-only"
-            },
-            "properties": {"nested": {"$ref": "#/$defs/nested"}},
-            "required": ["nested"],
-            "additionalProperties": False,
-        },
-        annotations={},
-        handler=lambda *, value: {"value": value},
-    )
-    tool = app._tool_manager.get_tool("dynamic_reference_probe")
-    assert tool is not None
-    assert tool.parameters["x-hf-reference-example"] == {
-        "$ref": "https://example.invalid/annotation-only"
-    }
-    assert tool.fn_metadata.validate_arguments({"nested": {"value": "allowed"}}) == {
-        "nested": {"value": "allowed"}
-    }
-    with pytest.raises(ValidationError):
-        tool.fn_metadata.validate_arguments({"nested": {"value": "rejected"}})
-
-
-@pytest.mark.core
-@pytest.mark.registry
-def test_sdk_adapter_checks_inserted_schema_default_against_its_property_schema() -> (
-    None
-):
-    from mcp.server.mcpserver import MCPServer
-    from pydantic import ValidationError
-
-    calls: list[int] = []
-
-    def handler(*, value: int) -> dict[str, int]:
-        calls.append(value)
-        return {"value": value}
-
-    app = MCPServer(name="hf-mcp-default-probe")
-    adapter = _MCPServerToolAdapter(app)
-    adapter.register_tool(
-        name="default_probe",
-        description="Default validation probe",
-        input_schema={
-            "type": "object",
-            "properties": {"value": {"type": "integer", "default": "1"}},
-            "additionalProperties": False,
-        },
-        annotations={},
-        handler=handler,
-    )
-    tool = app._tool_manager.get_tool("default_probe")
-    assert tool is not None
-    with pytest.raises(ValidationError) as error:
-        tool.fn_metadata.validate_arguments({})
-    assert "input_value='1'" not in str(error.value)
-    assert calls == []
-
-
-@pytest.mark.core
-@pytest.mark.registry
-def test_sdk_adapter_preserves_async_handler_execution_after_validation() -> None:
-    from mcp.server.mcpserver import MCPServer
-    from pydantic import ValidationError
-
-    calls: list[str] = []
-
-    async def handler(*, value: str) -> dict[str, str]:
-        calls.append(value)
-        return {"value": value}
-
-    app = MCPServer(name="hf-mcp-async-adapter-probe")
-    adapter = _MCPServerToolAdapter(app)
-    adapter.register_tool(
-        name="async_probe",
-        description="Async adapter probe",
-        input_schema={
-            "type": "object",
-            "properties": {"value": {"type": "string", "minLength": 1}},
-            "required": ["value"],
-            "additionalProperties": False,
-        },
-        annotations={},
-        handler=handler,
-    )
-    tool = app._tool_manager.get_tool("async_probe")
-    assert tool is not None and tool.is_async is True
-
-    with pytest.raises(ValidationError):
-        tool.fn_metadata.validate_arguments({"value": ""})
-    assert calls == []
-
-    async def invoke() -> Any:
-        validated = tool.fn_metadata.validate_arguments({"value": "accepted"})
-        return await tool.fn_metadata.call_fn(tool.fn, tool.is_async, validated)
-
-    result = anyio.run(invoke)
-    assert result == {"value": "accepted"}
-    assert calls == ["accepted"]
-
-
-def test_nested_envelope_json_in_text_content_is_rejected_by_validator() -> None:
-    import mcp.types as mcp_types
-
-    nested_json = json.dumps(
-        {
-            "content": [{"type": "text", "text": "legacy"}],
-            "structuredContent": {"me": []},
-        }
-    )
-    result = mcp_types.CallToolResult(
-        content=[mcp_types.TextContent(type="text", text=nested_json)],
-        structuredContent={"me": []},
-    )
-
-    with pytest.raises(AssertionError, match="Nested envelope JSON detected"):
-        _assert_rejects_nested_envelope_json_text(result)
-
-
-def test_fastmcp_adapter_converts_hf_envelope_dict_to_protocol_call_tool_result() -> (
-    None
-):
-    import mcp.types as mcp_types
-    from mcp.server.mcpserver import MCPServer
-
-    envelope = {
-        "content": [
-            {"type": "text", "text": "me.read returned 1 row(s)."},
-            {
-                "type": "resource",
-                "resource": {
-                    "uri": "hf-mcp://raw/me.read",
-                    "mimeType": "application/json",
-                    "text": '{"me":[{"uid":"5"}]}',
-                },
-            },
-        ],
-        "structuredContent": {
-            "me": [{"uid": "5"}],
-            "_hf_flow": {
-                "version": 1,
-                "server": {"name": "hf-mcp", "version": hf_mcp.__version__},
-                "entry_tool": "me.read",
-                "breadcrumbs": ["me"],
-                "entities": {
-                    "forum_ids": [],
-                    "thread_ids": [],
-                    "post_ids": [],
-                    "user_ids": [5],
-                },
-                "next_actions": [],
-            },
-        },
-    }
-
-    app = MCPServer(name="hf-mcp-envelope-probe")
-    adapter = _MCPServerToolAdapter(app)
-    adapter.register_tool(
-        name="me.read",
-        description="Read me",
-        input_schema={"type": "object", "properties": {}},
-        annotations={
-            "title": "me.read",
-            "readOnlyHint": True,
-            "destructiveHint": False,
-            "idempotentHint": True,
-            "openWorldHint": True,
-        },
-        handler=lambda **_: envelope,
-        output_schema={"type": "object"},
-    )
-
-    tool = app._tool_manager.get_tool("me.read")
-    assert tool is not None
-    normalized = tool.fn()
-    assert isinstance(normalized, mcp_types.CallToolResult)
-    assert normalized.structured_content["me"] == [{"uid": "5"}]
-    assert normalized.structured_content["_hf_flow"]["version"] == 1
-    assert isinstance(normalized.structured_content["_hf_flow"]["next_actions"], list)
-    assert len(normalized.content) == 2
-    assert isinstance(normalized.content[0], mcp_types.TextContent)
-    assert normalized.content[0].text == "me.read returned 1 row(s)."
-    assert isinstance(normalized.content[1], mcp_types.EmbeddedResource)
-    raw_resource = normalized.content[1].resource.model_dump(
-        by_alias=True, exclude_none=True
-    )
-    assert raw_resource == {
-        "uri": "hf-mcp://raw/me.read",
-        "mimeType": "application/json",
-        "text": '{"me":[{"uid":"5"}]}',
-    }
-
-
-def test_runtime_stdio_client_session_returns_protocol_structured_content_and_raw_resource() -> (
-    None
-):
-    from mcp import ClientSession
-    from mcp.client.stdio import StdioServerParameters, stdio_client
-
-    server_probe = """
-import sys
-from hf_mcp.capabilities import CapabilityPolicy
-from hf_mcp.config import HFMCPSettings
-from hf_mcp.dispatcher import RuntimeBundle, register_tools
-from hf_mcp.server import _MCPServerToolAdapter
-from hf_mcp.token_store import TokenBundle
-from hf_mcp.transport import HFTransport
-from mcp.server.mcpserver import MCPServer
-
-class _ProbeTokenStore:
-    def require_bundle(self):
-        return TokenBundle(access_token="token", token_type="Bearer", scope=frozenset({"read"}))
-
-def _stub_read(*, asks, helper):
-    if helper is not None or "me" not in asks:
-        raise RuntimeError(f"unexpected helper: {helper}")
-    return {"me": [{"uid": "5", "username": "forge"}]}
-
-def _stub_read_raw(*, asks, helper):
-    if helper is not None or "me" not in asks:
-        raise RuntimeError(f"unexpected helper: {helper}")
-    return {"me": [{"uid": "5", "username": "forge", "raw": True}]}
-
-transport = HFTransport(token_store=_ProbeTokenStore(), base_url="https://example.test")
-transport.read = _stub_read
-transport.read_raw = _stub_read_raw
-
-settings = HFMCPSettings(
-    profile="test",
-    enabled_capabilities=frozenset({"me.read"}),
-    enabled_parameter_families=frozenset({"fields.me.basic", "selectors.user", "output.options"}),
-)
-policy = CapabilityPolicy(settings)
-app = MCPServer(name="hf-mcp-probe")
-adapter = _MCPServerToolAdapter(app)
-register_tools(adapter, policy, RuntimeBundle(transport=transport))
-app.run(transport="stdio")
-"""
-
-    async def _run_probe() -> None:
-        env = dict(os.environ)
-        pythonpath = env.get("PYTHONPATH")
-        src_path = str(SRC_PATH)
-        env["PYTHONPATH"] = f"{src_path}:{pythonpath}" if pythonpath else src_path
-        params = StdioServerParameters(
-            command=sys.executable,
-            args=["-c", server_probe],
-            env=env,
-            cwd=str(PRODUCT_ROOT),
-        )
-        async with stdio_client(params) as (read_stream, write_stream):
-            async with ClientSession(read_stream, write_stream) as session:
-                await session.initialize()
-                result = await session.call_tool(
-                    "me_read",
-                    {"output_mode": "raw", "include_raw_payload": True},
-                )
-        assert result.structured_content is not None
-        assert result.structured_content["me"][0]["uid"] == "5"
-        assert any(getattr(item, "type", None) == "resource" for item in result.content)
-        _assert_rejects_nested_envelope_json_text(result)
-
-    anyio.run(_run_probe)
-
-
-def test_runtime_stdio_tool_list_has_unique_input_schema_titles_for_extended_reads() -> (
-    None
-):
-    from mcp import ClientSession
-    from mcp.client.stdio import StdioServerParameters, stdio_client
-
-    server_probe = """
-from hf_mcp.capabilities import CapabilityPolicy
-from hf_mcp.config import HFMCPSettings, PRESET_PARAMETER_FAMILIES
-from hf_mcp.dispatcher import RuntimeBundle, register_tools
-from hf_mcp.server import _MCPServerToolAdapter
-from hf_mcp.token_store import TokenBundle
-from hf_mcp.transport import HFTransport
-from mcp.server.mcpserver import MCPServer
-
-class _ProbeTokenStore:
-    def require_bundle(self):
-        return TokenBundle(access_token="token", token_type="Bearer", scope=frozenset({"read"}))
-
-transport = HFTransport(token_store=_ProbeTokenStore(), base_url="https://example.test")
-settings = HFMCPSettings(
-    profile="test",
-    enabled_capabilities=frozenset({
-        "bytes.read",
-        "contracts.read",
-        "disputes.read",
-        "bratings.read",
-        "sigmarket.market.read",
-        "sigmarket.order.read",
-        "admin.high_risk.read",
-    }),
-    enabled_parameter_families=PRESET_PARAMETER_FAMILIES["full_api"],
-)
-policy = CapabilityPolicy(settings)
-app = MCPServer(name="hf-mcp-probe")
-adapter = _MCPServerToolAdapter(app)
-register_tools(adapter, policy, RuntimeBundle(transport=transport))
-app.run(transport="stdio")
-"""
-
-    async def _run_probe() -> None:
-        env = dict(os.environ)
-        pythonpath = env.get("PYTHONPATH")
-        src_path = str(SRC_PATH)
-        env["PYTHONPATH"] = f"{src_path}:{pythonpath}" if pythonpath else src_path
-        params = StdioServerParameters(
-            command=sys.executable,
-            args=["-c", server_probe],
-            env=env,
-            cwd=str(PRODUCT_ROOT),
-        )
-        async with stdio_client(params) as (read_stream, write_stream):
-            async with ClientSession(read_stream, write_stream) as session:
-                await session.initialize()
-                result = await session.list_tools()
-
-        titles = {
-            tool.name: (tool.input_schema or {}).get("title") for tool in result.tools
-        }
-        assert titles["bytes_read"] == "bytes_read_handlerArguments"
-        assert titles["contracts_read"] == "contracts_read_handlerArguments"
-        assert titles["disputes_read"] == "disputes_read_handlerArguments"
-        assert titles["bratings_read"] == "bratings_read_handlerArguments"
-        assert (
-            titles["sigmarket_market_read"] == "sigmarket_market_read_handlerArguments"
-        )
-        assert titles["sigmarket_order_read"] == "sigmarket_order_read_handlerArguments"
-        assert titles["admin_high_risk_read"] == "admin_high_risk_read_handlerArguments"
-        assert len(set(titles.values())) == len(titles)
-
-    anyio.run(_run_probe)
-
-
-def test_core_read_handler_contract_stays_internal_envelope_dict() -> None:
-    policy = _policy(
-        enabled_capabilities={"me.read"},
-        enabled_parameter_families={"fields.me.basic", "selectors.user"},
-    )
-    handler = build_core_read_handlers(policy, _StubReadTransport())["me.read"]
-
-    result = handler(output_mode="structured", include_raw_payload=False)
-
-    assert isinstance(result, dict)
-    assert isinstance(result.get("content"), list)
-    assert isinstance(result.get("structuredContent"), dict)
-    assert "me" in result["structuredContent"]
-
-
-def test_extended_read_handler_contract_stays_internal_envelope_dict() -> None:
-    policy = _policy(
-        enabled_capabilities={"sigmarket.order.read"},
-        enabled_parameter_families={"selectors.sigmarket", "filters.pagination"},
-    )
-    handler = build_extended_read_handlers(policy, _StubReadTransport())[
-        "sigmarket.order.read"
-    ]
-
-    result = handler(oid=17, output_mode="raw", include_raw_payload=True)
-
-    assert isinstance(result, dict)
-    assert isinstance(result.get("content"), list)
-    assert isinstance(result.get("structuredContent"), dict)
-    assert "sigmarket/order" in result["structuredContent"]
-
-
 def test_dispatcher_registers_only_policy_allowed_registry_rows() -> None:
-    policy = _policy(
-        enabled_capabilities={"threads.read", "posts.reply"},
-        enabled_parameter_families={
-            "selectors.thread",
-            "writes.content",
-            "confirm.live",
-        },
+    settings = _settings(
+        {"threads.read", "posts.reply"},
+        {"selectors.thread", "writes.content", "confirm.live"},
     )
 
-    server = _CaptureServer()
-    transport = HFTransport(
-        token_store=_StubTokenStore(), base_url="https://example.test"
-    )
-    register_tools(server, policy, RuntimeBundle(transport=transport))
+    handlers = _handlers(settings, _transport())
 
-    assert set(server.tools) == {
+    assert list(handlers) == ["threads.read", "posts.reply"]
+    assert list(_listed(settings, _transport())) == [
         mcp_tool_name("threads.read"),
         mcp_tool_name("posts.reply"),
-    }
+    ]
 
 
+@pytest.mark.core
+@pytest.mark.registry
 def test_dispatcher_excludes_disabled_capabilities_even_when_registry_contains_rows() -> (
     None
 ):
-    policy = _policy(
-        enabled_capabilities={"threads.read"},
-        enabled_parameter_families={"selectors.thread"},
+    handlers = _handlers(
+        _settings({"threads.read"}, {"selectors.thread"}), _transport()
     )
 
-    server = _CaptureServer()
-    transport = HFTransport(
-        token_store=_StubTokenStore(), base_url="https://example.test"
-    )
-    register_tools(server, policy, RuntimeBundle(transport=transport))
-
-    assert mcp_tool_name("threads.read") in server.tools
-    assert mcp_tool_name("posts.reply") not in server.tools
-    assert mcp_tool_name("admin.high_risk.write") not in server.tools
+    assert "threads.read" in handlers
+    assert "posts.reply" not in handlers
+    assert "admin.high_risk.write" not in handlers
 
 
+@pytest.mark.core
+@pytest.mark.registry
 def test_annotations_are_remote_and_operation_honest() -> None:
-    policy = _policy(
-        enabled_capabilities={"threads.read", "posts.reply"},
-        enabled_parameter_families={
-            "selectors.thread",
-            "writes.content",
-            "confirm.live",
-        },
+    tools = _listed(
+        _settings(
+            {"threads.read", "posts.reply"},
+            {"selectors.thread", "writes.content", "confirm.live"},
+        ),
+        _transport(),
     )
 
-    server = _CaptureServer()
-    transport = HFTransport(
-        token_store=_StubTokenStore(), base_url="https://example.test"
-    )
-    register_tools(server, policy, RuntimeBundle(transport=transport))
-    assert list(server.tools) == [
-        mcp_tool_name("threads.read"),
-        mcp_tool_name("posts.reply"),
-    ]
-
-    read_tool = server.tools[mcp_tool_name("threads.read")]
-    assert read_tool["annotations"] == {
+    read_tool = tools[mcp_tool_name("threads.read")]
+    assert _annotation_flags(read_tool) == {
         "readOnlyHint": True,
         "destructiveHint": False,
         "idempotentHint": True,
         "openWorldHint": True,
     }
-    assert read_tool["output_schema"] == {
-        "type": "object",
-        "additionalProperties": True,
-    }
+    assert read_tool.output_schema == {"type": "object", "additionalProperties": True}
 
-    write_tool = server.tools[mcp_tool_name("posts.reply")]
-    assert write_tool["annotations"] == {
+    write_tool = tools[mcp_tool_name("posts.reply")]
+    assert _annotation_flags(write_tool) == {
         "readOnlyHint": False,
         "destructiveHint": True,
         "idempotentHint": False,
         "openWorldHint": True,
     }
-    assert write_tool["output_schema"] is None
+    assert write_tool.output_schema is None
 
 
+@pytest.mark.core
+@pytest.mark.registry
 def test_annotations_mark_local_draft_tools_truthfully() -> None:
-    policy = _policy(
-        enabled_capabilities={"formatting.preflight", "drafts.read", "drafts.write"},
-        enabled_parameter_families={
-            "formatting.content",
-            "drafts.selector",
-            "drafts.filters",
-            "drafts.metadata",
-            "drafts.confirm_delete",
-        },
+    tools = _listed(
+        _settings(
+            {"formatting.preflight", "drafts.read", "drafts.write"},
+            {
+                "formatting.content",
+                "drafts.selector",
+                "drafts.filters",
+                "drafts.metadata",
+                "drafts.confirm_delete",
+            },
+        )
     )
 
-    server = _CaptureServer()
-    register_tools(server, policy, RuntimeBundle())
-
     def flags(name: str) -> tuple[bool, bool, bool, bool]:
-        annotations = server.tools[mcp_tool_name(name)]["annotations"]
-        assert "_meta" not in annotations
+        annotations = _annotation_flags(tools[mcp_tool_name(name)])
         return (
             annotations["readOnlyHint"],
             annotations["destructiveHint"],
@@ -1017,42 +322,32 @@ def test_annotations_mark_local_draft_tools_truthfully() -> None:
     assert flags("drafts.delete") == (False, True, False, False)
 
 
+@pytest.mark.core
+@pytest.mark.registry
 def test_create_server_uses_dispatcher_as_single_registration_authority(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    settings = HFMCPSettings(
-        profile="test",
-        enabled_capabilities=frozenset({"threads.read"}),
-        enabled_parameter_families=frozenset({"selectors.thread"}),
-    )
+    settings = _settings({"threads.read"}, {"selectors.thread"})
+    monkeypatch.setattr("hf_mcp.server.resolve_transport", lambda _: _transport())
 
-    monkeypatch.setattr(
-        "hf_mcp.server.resolve_runtime_bundle", lambda _: _runtime_bundle()
-    )
     server = create_server(settings)
 
-    assert hasattr(server, "tools")
-    assert set(server.tools) == {mcp_tool_name("threads.read")}
+    async def scenario(client: Client) -> list[str]:
+        return [tool.name for tool in (await client.list_tools()).tools]
+
+    assert _session(server, scenario) == [mcp_tool_name("threads.read")]
 
 
-def test_create_server_full_api_registers_extended_reads_concretely_and_omits_placeholder_writes(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    settings = HFMCPSettings(
-        profile="full_api",
-        enabled_capabilities=PRESET_CAPABILITIES["full_api"],
-        enabled_parameter_families=PRESET_PARAMETER_FAMILIES["full_api"],
-    )
+@pytest.mark.core
+@pytest.mark.registry
+def test_full_api_registers_extended_reads_concretely_and_omits_placeholder_writes() -> (
+    None
+):
+    settings = _preset_settings("full_api")
+    handlers = _handlers(settings, _transport())
+    tools = _listed(settings, _transport())
 
-    monkeypatch.setattr(
-        "hf_mcp.server.resolve_runtime_bundle", lambda _: _runtime_bundle()
-    )
-    server = create_server(settings)
-
-    assert "transport.read" not in server.tools
-    assert "transport.write" not in server.tools
-
-    concrete_read_rows = (
+    for name in (
         "bytes.read",
         "contracts.read",
         "disputes.read",
@@ -1060,55 +355,39 @@ def test_create_server_full_api_registers_extended_reads_concretely_and_omits_pl
         "sigmarket.market.read",
         "sigmarket.order.read",
         "admin.high_risk.read",
-    )
-    for name in concrete_read_rows:
-        public_name = mcp_tool_name(name)
-        assert public_name in server.tools
-        _assert_not_placeholder_handler(server.tools[public_name].handler)
-
-    omitted_write_rows = (
-        "contracts.write",
-        "sigmarket.write",
-        "admin.high_risk.write",
-    )
-    for name in omitted_write_rows:
-        public_name = mcp_tool_name(name)
-        assert public_name not in server.tools
-
-    contracts_schema = server.tools[mcp_tool_name("contracts.read")].input_schema
-    disputes_schema = server.tools[mcp_tool_name("disputes.read")].input_schema
-    bratings_schema = server.tools[mcp_tool_name("bratings.read")].input_schema
-    market_schema = server.tools[mcp_tool_name("sigmarket.market.read")].input_schema
-    orders_schema = server.tools[mcp_tool_name("sigmarket.order.read")].input_schema
-
-    for schema in (
-        contracts_schema,
-        disputes_schema,
-        bratings_schema,
-        market_schema,
-        orders_schema,
     ):
+        assert mcp_tool_name(name) in tools
+        _assert_not_placeholder_handler(handlers[name])
+    for name in ("contracts.write", "sigmarket.write", "admin.high_risk.write"):
+        assert name not in handlers
+        assert mcp_tool_name(name) not in tools
+
+    for name in (
+        "contracts.read",
+        "disputes.read",
+        "bratings.read",
+        "sigmarket.market.read",
+        "sigmarket.order.read",
+    ):
+        schema = tools[mcp_tool_name(name)].input_schema
         assert schema["properties"]["page"]["default"] == 1
         assert schema["properties"]["per_page"]["default"] == 30
         assert "required" not in schema
 
-    assert "cid" in contracts_schema["properties"]
-    assert "uid" in contracts_schema["properties"]
-    assert "contract_id" not in contracts_schema["properties"]
-
-    assert "cdid" in disputes_schema["properties"]
-    assert "uid" in disputes_schema["properties"]
-    assert "did" not in disputes_schema["properties"]
-    assert "dispute_id" not in disputes_schema["properties"]
-
-    assert "uid" in market_schema["properties"]
-    assert "listing_id" not in market_schema["properties"]
-
-    assert "oid" in orders_schema["properties"]
-    assert "uid" in orders_schema["properties"]
-    assert "listing_id" not in orders_schema["properties"]
+    contracts = tools[mcp_tool_name("contracts.read")].input_schema["properties"]
+    disputes = tools[mcp_tool_name("disputes.read")].input_schema["properties"]
+    market = tools[mcp_tool_name("sigmarket.market.read")].input_schema["properties"]
+    orders = tools[mcp_tool_name("sigmarket.order.read")].input_schema["properties"]
+    assert "cid" in contracts and "uid" in contracts
+    assert "contract_id" not in contracts
+    assert "cdid" in disputes and "uid" in disputes
+    assert "did" not in disputes and "dispute_id" not in disputes
+    assert "uid" in market and "listing_id" not in market
+    assert "oid" in orders and "uid" in orders and "listing_id" not in orders
 
 
+@pytest.mark.core
+@pytest.mark.registry
 def test_documented_write_specs_omit_unproven_later_lane_writes() -> None:
     specs = get_specs("write")
     assert {spec.name for spec in specs} == {
@@ -1121,38 +400,12 @@ def test_documented_write_specs_omit_unproven_later_lane_writes() -> None:
     }
 
 
-def test_core_and_extended_read_rows_register_concrete_handlers_when_transport_is_available() -> (
-    None
-):
-    policy = _policy(
-        enabled_capabilities={"me.read", "bytes.read"},
-        enabled_parameter_families={
-            "selectors.user",
-            "fields.me.basic",
-            "selectors.bytes",
-            "fields.bytes.amount",
-        },
-    )
-    server = _CaptureServer()
-    transport = HFTransport(
-        token_store=_StubTokenStore(), base_url="https://example.test"
-    )
-
-    register_tools(server, policy, RuntimeBundle(transport=transport))
-
-    me_handler = server.tools[mcp_tool_name("me.read")]["handler"]
-    bytes_handler = server.tools[mcp_tool_name("bytes.read")]["handler"]
-    _assert_not_placeholder_handler(me_handler)
-    _assert_not_placeholder_handler(bytes_handler)
-
-
-def test_create_server_publishes_truthful_core_read_input_schemas(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    settings = HFMCPSettings(
-        profile="test",
-        enabled_capabilities=frozenset({"me.read", "threads.read", "posts.read"}),
-        enabled_parameter_families=frozenset(
+@pytest.mark.core
+@pytest.mark.registry
+def test_core_read_input_schemas_are_published_truthfully() -> None:
+    tools = _listed(
+        _settings(
+            {"me.read", "threads.read", "posts.read"},
             {
                 "selectors.user",
                 "selectors.forum",
@@ -1163,83 +416,52 @@ def test_create_server_publishes_truthful_core_read_input_schemas(
                 "fields.me.advanced",
                 "fields.posts.body",
                 "output.options",
-            }
+            },
         ),
+        _transport(),
     )
+    me = tools[mcp_tool_name("me.read")].input_schema
+    threads = tools[mcp_tool_name("threads.read")].input_schema
+    posts = tools[mcp_tool_name("posts.read")].input_schema
 
-    monkeypatch.setattr(
-        "hf_mcp.server.resolve_runtime_bundle", lambda _: _runtime_bundle()
-    )
-    server = create_server(settings)
-
-    me_schema = server.tools[mcp_tool_name("me.read")].input_schema
-    threads_schema = server.tools[mcp_tool_name("threads.read")].input_schema
-    posts_schema = server.tools[mcp_tool_name("posts.read")].input_schema
-
-    assert "uid" not in me_schema["properties"]
-    assert "uid" not in me_schema.get("required", [])
-    assert me_schema["properties"]["include_basic_fields"]["default"] is True
-    assert me_schema["properties"]["include_advanced_fields"]["default"] is False
-    assert set(me_schema["properties"]["output_mode"]["enum"]) == {
+    assert "uid" not in me["properties"]
+    assert me["properties"]["include_basic_fields"]["default"] is True
+    assert me["properties"]["include_advanced_fields"]["default"] is False
+    assert set(me["properties"]["output_mode"]["enum"]) == {
         "readable",
         "structured",
         "raw",
     }
-    assert me_schema["properties"]["output_mode"]["default"] == "readable"
-    assert me_schema["properties"]["include_raw_payload"]["default"] is False
-    assert me_schema["properties"]["body_format"]["default"] == "markdown"
-    assert set(me_schema["properties"]["body_format"]["enum"]) == {
-        "raw",
-        "clean",
-        "markdown",
-    }
+    assert me["properties"]["output_mode"]["default"] == "readable"
+    assert me["properties"]["include_raw_payload"]["default"] is False
+    assert me["properties"]["body_format"]["default"] == "markdown"
+    assert set(me["properties"]["body_format"]["enum"]) == {"raw", "clean", "markdown"}
 
-    assert threads_schema["properties"]["page"]["default"] == 1
-    assert threads_schema["properties"]["per_page"]["default"] == 30
-    assert set(threads_schema["properties"]["output_mode"]["enum"]) == {
-        "readable",
-        "structured",
-        "raw",
-    }
-    assert threads_schema["properties"]["output_mode"]["default"] == "readable"
-    assert threads_schema["properties"]["include_raw_payload"]["default"] is False
-    assert threads_schema["properties"]["body_format"]["default"] == "markdown"
-    assert threads_schema.get("required", []) == []
-    assert {tuple(item["required"]) for item in threads_schema.get("anyOf", [])} == {
+    assert threads["properties"]["page"]["default"] == 1
+    assert threads["properties"]["per_page"]["default"] == 30
+    assert threads.get("required", []) == []
+    assert {tuple(item["required"]) for item in threads["anyOf"]} == {
         ("fid",),
         ("tid",),
         ("uid",),
     }
-
-    assert posts_schema["properties"]["page"]["default"] == 1
-    assert posts_schema["properties"]["per_page"]["default"] == 30
-    assert posts_schema["properties"]["include_post_body"]["default"] is True
-    assert set(posts_schema["properties"]["output_mode"]["enum"]) == {
-        "readable",
-        "structured",
-        "raw",
-    }
-    assert posts_schema["properties"]["include_raw_payload"]["type"] == "boolean"
-    assert set(posts_schema["properties"]["body_format"]["enum"]) == {
-        "raw",
-        "clean",
-        "markdown",
-    }
-    assert posts_schema.get("required", []) == []
-    assert {tuple(item["required"]) for item in posts_schema.get("anyOf", [])} == {
+    assert posts["properties"]["include_post_body"]["default"] is True
+    assert posts["properties"]["include_raw_payload"]["type"] == "boolean"
+    assert posts.get("required", []) == []
+    assert {tuple(item["required"]) for item in posts["anyOf"]} == {
         ("pid",),
         ("tid",),
         ("uid",),
     }
-
-    assert server.tools[mcp_tool_name("me.read")].output_schema is not None
-    assert server.tools[mcp_tool_name("threads.read")].output_schema is not None
-    assert server.tools[mcp_tool_name("posts.read")].output_schema is not None
+    for name in ("me.read", "threads.read", "posts.read"):
+        assert tools[mcp_tool_name(name)].output_schema is not None
 
 
+@pytest.mark.core
+@pytest.mark.registry
 def test_core_write_rows_register_concrete_handlers_and_omit_placeholder_rows() -> None:
-    policy = _policy(
-        enabled_capabilities={
+    settings = _settings(
+        {
             "threads.create",
             "posts.reply",
             "bytes.transfer",
@@ -1250,7 +472,7 @@ def test_core_write_rows_register_concrete_handlers_and_omit_placeholder_rows() 
             "sigmarket.write",
             "admin.high_risk.write",
         },
-        enabled_parameter_families={
+        {
             "selectors.forum",
             "selectors.thread",
             "selectors.bytes",
@@ -1261,280 +483,46 @@ def test_core_write_rows_register_concrete_handlers_and_omit_placeholder_rows() 
             "confirm.live",
         },
     )
-    server = _CaptureServer()
-    transport = HFTransport(
-        token_store=_StubTokenStore(), base_url="https://example.test"
-    )
+    handlers = _handlers(settings, _transport())
 
-    register_tools(server, policy, RuntimeBundle(transport=transport))
-
-    for name in [
+    for name in (
         "threads.create",
         "posts.reply",
         "bytes.transfer",
         "bytes.deposit",
         "bytes.withdraw",
         "bytes.bump",
-    ]:
-        _assert_not_placeholder_handler(server.tools[mcp_tool_name(name)]["handler"])
-    assert mcp_tool_name("contracts.write") not in server.tools
-    assert mcp_tool_name("sigmarket.write") not in server.tools
-    assert mcp_tool_name("admin.high_risk.write") not in server.tools
+    ):
+        _assert_not_placeholder_handler(handlers[name])
+    for name in ("contracts.write", "sigmarket.write", "admin.high_risk.write"):
+        assert name not in handlers
 
 
-def test_register_tools_passes_runtime_draft_dir_into_write_handlers(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    policy = _policy(
-        enabled_capabilities={"threads.read"},
-        enabled_parameter_families={"selectors.thread"},
-    )
-    server = _CaptureServer()
-    transport = HFTransport(
-        token_store=_StubTokenStore(), base_url="https://example.test"
-    )
-    runtime = RuntimeBundle(
-        transport=transport,
-        settings=HFMCPSettings(
-            profile="test",
-            enabled_capabilities=frozenset({"threads.read"}),
-            enabled_parameter_families=frozenset({"selectors.thread"}),
-            draft_dir=tmp_path,
+@pytest.mark.core
+@pytest.mark.registry
+def test_core_write_input_schemas_publish_exactly_the_documented_parameters() -> None:
+    tools = _listed(
+        _settings(
+            {
+                "threads.create",
+                "posts.reply",
+                "bytes.transfer",
+                "bytes.deposit",
+                "bytes.withdraw",
+                "bytes.bump",
+            },
+            {
+                "selectors.forum",
+                "selectors.thread",
+                "selectors.bytes",
+                "writes.content",
+                "writes.bytes",
+                "confirm.live",
+            },
         ),
+        _transport(),
     )
-    captured: dict[str, object] = {}
-
-    def _fake_build_write_handlers(
-        policy_arg: CapabilityPolicy,
-        transport_arg: HFTransport,
-        *,
-        draft_dir: Path | str | None = None,
-    ) -> dict[str, Any]:
-        captured["policy"] = policy_arg
-        captured["transport"] = transport_arg
-        captured["draft_dir"] = draft_dir
-        return {}
-
-    monkeypatch.setattr(
-        "hf_mcp.dispatcher.build_write_handlers", _fake_build_write_handlers
-    )
-    register_tools(server, policy, runtime)
-
-    assert captured["policy"] is policy
-    assert captured["transport"] is transport
-    assert captured["draft_dir"] == tmp_path
-
-
-def test_register_tools_omits_remote_rows_when_runtime_bundle_has_no_transport() -> (
-    None
-):
-    policy = _policy(
-        enabled_capabilities={"threads.read", "posts.reply"},
-        enabled_parameter_families={
-            "selectors.thread",
-            "writes.content",
-            "confirm.live",
-        },
-    )
-    server = _CaptureServer()
-    register_tools(server, policy, RuntimeBundle())
-
-    assert mcp_tool_name("threads.read") not in server.tools
-    assert mcp_tool_name("posts.reply") not in server.tools
-
-
-def test_formatting_preflight_registers_local_handler_without_transport(
-    tmp_path: Path,
-) -> None:
-    policy = _policy(
-        enabled_capabilities={"formatting.preflight"},
-        enabled_parameter_families={"formatting.content"},
-    )
-    server = _CaptureServer()
-    runtime = RuntimeBundle(
-        settings=HFMCPSettings(
-            profile="test",
-            enabled_capabilities=frozenset({"formatting.preflight"}),
-            enabled_parameter_families=frozenset({"formatting.content"}),
-            draft_dir=tmp_path,
-        )
-    )
-
-    register_tools(server, policy, runtime)
-
-    tool = server.tools[mcp_tool_name("formatting.preflight")]
-    assert tool["handler"].__name__ == "_preflight_handler"
-    assert tool["annotations"]["readOnlyHint"] is False
-    assert tool["annotations"]["destructiveHint"] is False
-    assert set(tool["input_schema"]["properties"]) == {
-        "message",
-        "source_path",
-        "message_format",
-    }
-    assert tool["input_schema"]["anyOf"] == [
-        {"required": ["message"]},
-        {"required": ["source_path"]},
-    ]
-    result = tool["handler"](
-        message='```json\n{"tool":"posts.reply"}\n```', message_format="markdown"
-    )
-    assert result["structuredContent"]["draft_id"]
-    assert result["structuredContent"]["path"].endswith(".json")
-    assert result["structuredContent"]["integrity"] < 1.0
-    assert any(
-        issue["code"] == "json_code_block_lossy_medium"
-        for issue in result["structuredContent"]["issues"]
-    )
-
-
-def test_dispatcher_registers_concrete_local_draft_handlers_without_transport(
-    tmp_path: Path,
-) -> None:
-    capabilities = {"formatting.preflight", "drafts.read", "drafts.write"}
-    families = {
-        "formatting.content",
-        "drafts.selector",
-        "drafts.filters",
-        "drafts.metadata",
-        "drafts.confirm_delete",
-    }
-    policy = _policy(
-        enabled_capabilities=capabilities,
-        enabled_parameter_families=families,
-    )
-    runtime = RuntimeBundle(
-        settings=HFMCPSettings(
-            profile="test",
-            enabled_capabilities=frozenset(capabilities),
-            enabled_parameter_families=frozenset(families),
-            draft_dir=tmp_path,
-        )
-    )
-    server = _CaptureServer()
-
-    register_tools(server, policy, runtime)
-
-    for tool_name in ("drafts.list", "drafts.read", "drafts.update", "drafts.delete"):
-        _assert_not_placeholder_handler(
-            server.tools[mcp_tool_name(tool_name)]["handler"]
-        )
-
-    preflight = server.tools[mcp_tool_name("formatting.preflight")]["handler"]
-    created = preflight(message="Local draft body", message_format="markdown")
-    draft_id = created["structuredContent"]["draft_id"]
-
-    list_tool = server.tools[mcp_tool_name("drafts.list")]["handler"]
-    listed = list_tool(limit=10, offset=0)
-    assert listed["count"] >= 1
-    assert any(
-        item["draft_id"] == draft_id for item in listed["structuredContent"]["drafts"]
-    )
-
-    read_tool = server.tools[mcp_tool_name("drafts.read")]["handler"]
-    read_result = read_tool(draft_id=draft_id)
-    assert read_result["structuredContent"]["draft_id"] == draft_id
-
-    update_tool = server.tools[mcp_tool_name("drafts.update")]["handler"]
-    updated = update_tool(draft_id=draft_id, title="Updated title", status="ready")
-    assert updated["structuredContent"]["metadata"]["title"] == "Updated title"
-    assert updated["structuredContent"]["metadata"]["status"] == "ready"
-    assert updated["structuredContent"]["draft_id"] == draft_id
-
-    delete_tool = server.tools[mcp_tool_name("drafts.delete")]["handler"]
-    with pytest.raises(ValueError, match="confirm_delete=True"):
-        delete_tool(draft_id=draft_id)
-
-    deleted = delete_tool(draft_id=draft_id, confirm_delete=True)
-    assert deleted["structuredContent"]["deleted"] is True
-    assert deleted["structuredContent"]["draft_id"] == draft_id
-
-
-def test_forums_index_registers_local_handler_without_transport_and_keeps_structured_content_contract() -> (
-    None
-):
-    policy = _policy(
-        enabled_capabilities={"forums.read"},
-        enabled_parameter_families={"selectors.forum", "filters.pagination"},
-    )
-    server = _CaptureServer()
-
-    register_tools(server, policy, RuntimeBundle())
-
-    assert mcp_tool_name("forums.index") in server.tools
-    assert mcp_tool_name("forums.read") not in server.tools
-    tool = server.tools[mcp_tool_name("forums.index")]
-    assert tool["annotations"]["readOnlyHint"] is True
-    assert "_meta" not in tool["annotations"]
-    assert tool["annotations"]["openWorldHint"] is False
-
-    result = tool["handler"]()
-    assert isinstance(result, dict)
-    assert isinstance(result.get("content"), list)
-    assert isinstance(result.get("structuredContent"), dict)
-    assert "_hf_flow" in result["structuredContent"]
-    assert isinstance(result["structuredContent"]["_hf_flow"].get("next_actions"), list)
-
-
-def test_dispatcher_extended_read_handler_includes_hf_flow_structured_content(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    def _fake_read(
-        self: HFTransport, *, asks: dict[str, Any], helper: str
-    ) -> dict[str, Any]:
-        del asks
-        assert helper == "sigmarket/order"
-        return {"sigmarket/order": [{"smid": "17", "buyer": "2047020", "seller": "1"}]}
-
-    monkeypatch.setattr(HFTransport, "read", _fake_read)
-
-    policy = _policy(
-        enabled_capabilities={"sigmarket.order.read"},
-        enabled_parameter_families={"selectors.sigmarket", "filters.pagination"},
-    )
-    server = _CaptureServer()
-    transport = HFTransport(
-        token_store=_StubTokenStore(), base_url="https://example.test"
-    )
-    register_tools(server, policy, RuntimeBundle(transport=transport))
-
-    tool = server.tools[mcp_tool_name("sigmarket.order.read")]
-    assert tool["output_schema"] == {"type": "object", "additionalProperties": True}
-    result = tool["handler"](oid=17)
-    assert "_hf_flow" in result["structuredContent"]
-    assert (
-        result["structuredContent"]["_hf_flow"]["entry_tool"] == "sigmarket.order.read"
-    )
-    assert isinstance(result["structuredContent"]["_hf_flow"]["next_actions"], list)
-
-
-def test_dispatcher_publishes_truthful_core_write_input_schemas() -> None:
-    policy = _policy(
-        enabled_capabilities={
-            "threads.create",
-            "posts.reply",
-            "bytes.transfer",
-            "bytes.deposit",
-            "bytes.withdraw",
-            "bytes.bump",
-        },
-        enabled_parameter_families={
-            "selectors.forum",
-            "selectors.thread",
-            "selectors.bytes",
-            "writes.content",
-            "writes.bytes",
-            "confirm.live",
-        },
-    )
-    server = _CaptureServer()
-    transport = HFTransport(
-        token_store=_StubTokenStore(), base_url="https://example.test"
-    )
-
-    register_tools(server, policy, RuntimeBundle(transport=transport))
-
-    expected_parameter_names: dict[str, set[str]] = {
+    expected: dict[str, set[str]] = {
         "threads.create": {
             "fid",
             "subject",
@@ -1557,36 +545,263 @@ def test_dispatcher_publishes_truthful_core_write_input_schemas() -> None:
         "bytes.withdraw": {"amount", "confirm_live"},
         "bytes.bump": {"tid", "confirm_live"},
     }
-
-    for tool_name, expected_names in expected_parameter_names.items():
-        schema = server.tools[mcp_tool_name(tool_name)]["input_schema"]
-        assert set(schema["properties"].keys()) == expected_names
+    for name, names in expected.items():
+        assert set(tools[mcp_tool_name(name)].input_schema["properties"]) == names
 
 
-def test_register_tools_does_not_perform_implicit_bootstrap(
+@pytest.mark.core
+def test_build_handlers_passes_settings_draft_dir_into_write_handlers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    settings = _settings({"threads.read"}, {"selectors.thread"}, draft_dir=tmp_path)
+    policy = CapabilityPolicy(settings)
+    transport = _transport()
+    captured: dict[str, object] = {}
+
+    def _fake_build_write_handlers(
+        policy_arg: CapabilityPolicy,
+        transport_arg: HFTransport,
+        *,
+        draft_dir: Path | str | None = None,
+    ) -> dict[str, Any]:
+        captured.update(policy=policy_arg, transport=transport_arg, draft_dir=draft_dir)
+        return {}
+
+    monkeypatch.setattr(
+        "hf_mcp.dispatcher.build_write_handlers", _fake_build_write_handlers
+    )
+    build_handlers(policy, settings, transport)
+
+    assert captured == {"policy": policy, "transport": transport, "draft_dir": tmp_path}
+
+
+@pytest.mark.core
+def test_build_handlers_omits_remote_rows_when_there_is_no_transport() -> None:
+    handlers = _handlers(
+        _settings(
+            {"threads.read", "posts.reply"},
+            {"selectors.thread", "writes.content", "confirm.live"},
+        )
+    )
+
+    assert handlers == {}
+
+
+@pytest.mark.core
+def test_build_handlers_does_not_perform_implicit_bootstrap(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    policy = _policy(
-        enabled_capabilities={"threads.read"},
-        enabled_parameter_families={"selectors.thread"},
-    )
-    server = _CaptureServer()
-
     def _fail_load_token_store(*_: object, **__: object) -> object:
-        raise AssertionError("register_tools must not call load_token_store implicitly")
+        raise AssertionError("build_handlers must not call load_token_store")
 
     monkeypatch.setattr("hf_mcp.dispatcher.load_token_store", _fail_load_token_store)
-    register_tools(server, policy, RuntimeBundle())
 
-    assert server.tools == {}
+    assert _handlers(_settings({"threads.read"}, {"selectors.thread"})) == {}
 
 
-def test_create_server_fails_closed_when_runtime_secrets_are_missing() -> None:
-    settings = HFMCPSettings(
-        profile="test",
-        enabled_capabilities=frozenset({"threads.read"}),
-        enabled_parameter_families=frozenset({"selectors.thread"}),
+@pytest.mark.core
+def test_core_and_extended_read_rows_register_concrete_handlers_when_transport_is_available() -> (
+    None
+):
+    handlers = _handlers(
+        _settings(
+            {"me.read", "bytes.read"},
+            {
+                "selectors.user",
+                "fields.me.basic",
+                "selectors.bytes",
+                "fields.bytes.amount",
+            },
+        ),
+        _transport(),
     )
+
+    _assert_not_placeholder_handler(handlers["me.read"])
+    _assert_not_placeholder_handler(handlers["bytes.read"])
+
+
+@pytest.mark.core
+@pytest.mark.formatting
+def test_formatting_preflight_registers_local_handler_without_transport(
+    tmp_path: Path,
+) -> None:
+    settings = _settings(
+        {"formatting.preflight"}, {"formatting.content"}, draft_dir=tmp_path
+    )
+    handler = _handlers(settings)["formatting.preflight"]
+    tool = _listed(settings)[mcp_tool_name("formatting.preflight")]
+
+    assert handler.__name__ == "_preflight_handler"
+    flags = _annotation_flags(tool)
+    assert flags["readOnlyHint"] is False
+    assert flags["destructiveHint"] is False
+    assert set(tool.input_schema["properties"]) == {
+        "message",
+        "source_path",
+        "message_format",
+    }
+    assert tool.input_schema["anyOf"] == [
+        {"required": ["message"]},
+        {"required": ["source_path"]},
+    ]
+    result = handler(
+        message='```json\n{"tool":"posts.reply"}\n```', message_format="markdown"
+    )
+    assert result["structuredContent"]["draft_id"]
+    assert result["structuredContent"]["path"].endswith(".json")
+    assert result["structuredContent"]["integrity"] < 1.0
+    assert any(
+        issue["code"] == "json_code_block_lossy_medium"
+        for issue in result["structuredContent"]["issues"]
+    )
+
+
+@pytest.mark.core
+@pytest.mark.formatting
+def test_dispatcher_registers_concrete_local_draft_handlers_without_transport(
+    tmp_path: Path,
+) -> None:
+    handlers = _handlers(
+        _settings(
+            {"formatting.preflight", "drafts.read", "drafts.write"},
+            {
+                "formatting.content",
+                "drafts.selector",
+                "drafts.filters",
+                "drafts.metadata",
+                "drafts.confirm_delete",
+            },
+            draft_dir=tmp_path,
+        )
+    )
+    for name in ("drafts.list", "drafts.read", "drafts.update", "drafts.delete"):
+        _assert_not_placeholder_handler(handlers[name])
+
+    created = handlers["formatting.preflight"](
+        message="Local draft body", message_format="markdown"
+    )
+    draft_id = created["structuredContent"]["draft_id"]
+
+    listed = handlers["drafts.list"](limit=10, offset=0)
+    assert listed["count"] >= 1
+    assert any(
+        item["draft_id"] == draft_id for item in listed["structuredContent"]["drafts"]
+    )
+    read_result = handlers["drafts.read"](draft_id=draft_id)
+    assert read_result["structuredContent"]["draft_id"] == draft_id
+    updated = handlers["drafts.update"](
+        draft_id=draft_id, title="Updated title", status="ready"
+    )
+    assert updated["structuredContent"]["metadata"]["title"] == "Updated title"
+    assert updated["structuredContent"]["metadata"]["status"] == "ready"
+    with pytest.raises(ValueError, match="confirm_delete=True"):
+        handlers["drafts.delete"](draft_id=draft_id)
+    deleted = handlers["drafts.delete"](draft_id=draft_id, confirm_delete=True)
+    assert deleted["structuredContent"]["deleted"] is True
+    assert deleted["structuredContent"]["draft_id"] == draft_id
+
+
+@pytest.mark.core
+def test_forums_index_registers_local_handler_without_transport_and_keeps_structured_content_contract() -> (
+    None
+):
+    settings = _settings({"forums.read"}, {"selectors.forum", "filters.pagination"})
+    handlers = _handlers(settings)
+    tools = _listed(settings)
+
+    assert list(handlers) == ["forums.index"]
+    assert mcp_tool_name("forums.read") not in tools
+    flags = _annotation_flags(tools[mcp_tool_name("forums.index")])
+    assert flags["readOnlyHint"] is True
+    assert flags["openWorldHint"] is False
+
+    result = handlers["forums.index"]()
+    assert isinstance(result.get("content"), list)
+    assert isinstance(result["structuredContent"]["_hf_flow"]["next_actions"], list)
+
+
+@pytest.mark.core
+def test_extended_read_handler_includes_hf_flow_structured_content(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def _fake_read(
+        self: HFTransport, *, asks: dict[str, Any], helper: str
+    ) -> dict[str, Any]:
+        del asks
+        assert helper == "sigmarket/order"
+        return {"sigmarket/order": [{"smid": "17", "buyer": "2047020", "seller": "1"}]}
+
+    monkeypatch.setattr(HFTransport, "read", _fake_read)
+    settings = _settings(
+        {"sigmarket.order.read"}, {"selectors.sigmarket", "filters.pagination"}
+    )
+
+    tool = _listed(settings, _transport())[mcp_tool_name("sigmarket.order.read")]
+    result = _handlers(settings, _transport())["sigmarket.order.read"](oid=17)
+
+    assert tool.output_schema == {"type": "object", "additionalProperties": True}
+    flow = result["structuredContent"]["_hf_flow"]
+    assert flow["entry_tool"] == "sigmarket.order.read"
+    assert isinstance(flow["next_actions"], list)
+
+
+@pytest.mark.core
+def test_core_read_handler_contract_stays_internal_envelope_dict() -> None:
+    policy = _policy(
+        enabled_capabilities={"me.read"},
+        enabled_parameter_families={"fields.me.basic", "selectors.user"},
+    )
+    handler = build_core_read_handlers(policy, _StubReadTransport())["me.read"]
+
+    result = handler(output_mode="structured", include_raw_payload=False)
+
+    assert isinstance(result, dict)
+    assert isinstance(result.get("content"), list)
+    assert isinstance(result.get("structuredContent"), dict)
+    assert "me" in result["structuredContent"]
+
+
+@pytest.mark.core
+def test_extended_read_handler_contract_stays_internal_envelope_dict() -> None:
+    policy = _policy(
+        enabled_capabilities={"sigmarket.order.read"},
+        enabled_parameter_families={"selectors.sigmarket", "filters.pagination"},
+    )
+    handler = build_extended_read_handlers(policy, _StubReadTransport())[
+        "sigmarket.order.read"
+    ]
+
+    result = handler(oid=17, output_mode="raw", include_raw_payload=True)
+
+    assert isinstance(result, dict)
+    assert isinstance(result.get("content"), list)
+    assert isinstance(result.get("structuredContent"), dict)
+    assert "sigmarket/order" in result["structuredContent"]
+
+
+@pytest.mark.core
+def test_nested_envelope_json_in_text_content_is_rejected_by_validator() -> None:
+    nested_json = json.dumps(
+        {
+            "content": [{"type": "text", "text": "legacy"}],
+            "structuredContent": {"me": []},
+        }
+    )
+    result = types.CallToolResult(
+        content=[types.TextContent(type="text", text=nested_json)],
+        structured_content={"me": []},
+    )
+
+    with pytest.raises(AssertionError, match="Nested envelope JSON detected"):
+        _assert_rejects_nested_envelope_json_text(result)
+
+
+# --------------------------------------------------------------- fail closed
+
+
+@pytest.mark.core
+def test_create_server_fails_closed_when_runtime_secrets_are_missing() -> None:
+    settings = _settings({"threads.read"}, {"selectors.thread"})
 
     with pytest.raises(
         ValueError, match="Missing required environment variable: HF_MCP_CLIENT_ID"
@@ -1594,561 +809,566 @@ def test_create_server_fails_closed_when_runtime_secrets_are_missing() -> None:
         create_server(settings)
 
 
+def _settings_without_token(tmp_path: Path) -> HFMCPSettings:
+    return _settings(
+        {"threads.read"},
+        {"selectors.thread"},
+        token_path=tmp_path / "token.json",
+        runtime_env={
+            "HF_MCP_CLIENT_ID": "client",
+            "HF_MCP_CLIENT_SECRET": "secret",
+            "HF_MCP_TOKEN_PATH": str((tmp_path / "token.json").resolve()),
+        },
+    )
+
+
+@pytest.mark.core
 def test_create_server_fails_closed_when_token_bundle_is_missing(
     tmp_path: Path,
 ) -> None:
-    settings = HFMCPSettings(
-        profile="test",
-        enabled_capabilities=frozenset({"threads.read"}),
-        enabled_parameter_families=frozenset({"selectors.thread"}),
-        token_path=tmp_path / "token.json",
-        runtime_env={
-            "HF_MCP_CLIENT_ID": "client",
-            "HF_MCP_CLIENT_SECRET": "secret",
-            "HF_MCP_TOKEN_PATH": str((tmp_path / "token.json").resolve()),
-        },
-    )
-
     with pytest.raises(RuntimeError, match="No usable Hack Forums access token"):
-        create_server(settings)
+        create_server(_settings_without_token(tmp_path))
 
 
+@pytest.mark.core
 def test_serve_stdio_fails_closed_when_token_bundle_is_missing(tmp_path: Path) -> None:
-    settings = HFMCPSettings(
-        profile="test",
-        enabled_capabilities=frozenset({"threads.read"}),
-        enabled_parameter_families=frozenset({"selectors.thread"}),
-        token_path=tmp_path / "token.json",
-        runtime_env={
-            "HF_MCP_CLIENT_ID": "client",
-            "HF_MCP_CLIENT_SECRET": "secret",
-            "HF_MCP_TOKEN_PATH": str((tmp_path / "token.json").resolve()),
-        },
-    )
-
     with pytest.raises(RuntimeError, match="No usable Hack Forums access token"):
-        serve_stdio(settings)
+        serve_stdio(_settings_without_token(tmp_path))
 
 
-def test_serve_stdio_publishes_dispatcher_contract_for_live_runtime(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from mcp.server.mcpserver import MCPServer
+# ------------------------------------------------------------ session surface
 
-    settings = HFMCPSettings(
-        profile="test",
-        enabled_capabilities=frozenset(
+
+@pytest.mark.core
+@pytest.mark.registry
+@pytest.mark.parametrize(
+    "profile", sorted(name for name, caps in PRESET_CAPABILITIES.items() if caps)
+)
+def test_tools_list_for_each_preset_equals_the_registry_contract(profile: str) -> None:
+    settings = _preset_settings(profile)
+    policy = CapabilityPolicy(settings)
+    tools = _listed(settings, _transport())
+
+    expected = [spec for spec in TOOLS if policy.can_register(spec.name)]
+    assert expected, profile
+    assert list(tools) == [spec.mcp_name for spec in expected]
+    for spec in expected:
+        tool = tools[spec.mcp_name]
+        assert tool.description == spec.description
+        assert tool.input_schema == policy.input_schema(spec)
+        assert tool.output_schema == spec.output_schema
+        assert _annotation_flags(tool) == spec.annotations
+        # The published schema is itself a valid Draft 2020-12 schema.
+        Draft202012Validator.check_schema(tool.input_schema)
+
+
+@pytest.mark.core
+@pytest.mark.registry
+def test_every_published_tool_is_client_safe_and_carries_no_internal_metadata() -> None:
+    tools = _listed(_preset_settings("full_api"), _transport())
+
+    assert tools
+    for name, tool in tools.items():
+        assert name == tool.name
+        assert re.fullmatch(r"[a-zA-Z0-9_-]{1,64}", name), name
+        assert tool.meta is None, name
+        dumped = json.dumps(
+            tool.model_dump(by_alias=True, mode="json", exclude_none=True)
+        )
+        assert "x-hf-" not in dumped, name
+        assert "_meta" not in dumped, name
+
+
+@pytest.mark.core
+@pytest.mark.registry
+def test_output_options_gate_the_published_output_parameters() -> None:
+    base = {"posts.read"}
+    families = {"selectors.thread"}
+    output_names = {"output_mode", "include_raw_payload", "body_format"}
+
+    without = _listed(_settings(base, families), _transport())
+    with_options = _listed(_settings(base, families | {"output.options"}), _transport())
+
+    plain = set(without["posts_read"].input_schema["properties"])
+    gated = set(with_options["posts_read"].input_schema["properties"])
+    assert not plain & output_names
+    assert output_names <= gated
+    assert plain <= gated
+
+
+@pytest.mark.core
+def test_initialize_reports_server_name_and_package_version() -> None:
+    settings = _settings({"threads.read"}, {"selectors.thread"})
+
+    async def scenario(client: Client) -> Any:
+        return client.server_info
+
+    info = _session(_server(settings, _transport()), scenario)
+
+    assert info.name == "hf-mcp"
+    assert info.version == hf_mcp.__version__
+
+
+@pytest.mark.core
+def test_hf_envelope_is_converted_to_protocol_call_tool_result() -> None:
+    envelope = {
+        "content": [
+            {"type": "text", "text": "me.read returned 1 row(s)."},
             {
-                "me.read",
-                "threads.read",
-                "posts.read",
-                "posts.reply",
-                "bytes.transfer",
-                "bytes.deposit",
-                "bytes.withdraw",
-                "bytes.bump",
-                "contracts.read",
-                "disputes.read",
-                "bratings.read",
-                "sigmarket.market.read",
-                "sigmarket.order.read",
-            }
-        ),
-        enabled_parameter_families=frozenset(
-            {
-                "selectors.user",
-                "selectors.forum",
-                "selectors.thread",
-                "selectors.post",
-                "filters.pagination",
-                "fields.me.basic",
-                "fields.me.advanced",
-                "fields.posts.body",
-                "selectors.bytes",
-                "selectors.contract",
-                "selectors.dispute",
-                "selectors.sigmarket",
-                "writes.bytes",
-                "writes.content",
-                "confirm.live",
-                "output.options",
-            }
-        ),
-    )
-
-    class _FakeFastMCP:
-        instances: list["_FakeFastMCP"] = []
-
-        def __init__(self, name: str, version: str = "") -> None:
-            self.name = name
-            self.version = version
-            self._tool_manager = MCPServer(name=name)._tool_manager
-            self.registered_tools: dict[str, dict[str, Any]] = {}
-            self.run_calls: list[str] = []
-            _FakeFastMCP.instances.append(self)
-
-        def add_tool(
-            self,
-            handler: Any,
-            *,
-            name: str,
-            description: str,
-            annotations: object | None = None,
-            meta: dict[str, object] | None = None,
-            output_schema: dict[str, object] | None = None,
-            **_: object,
-        ) -> None:
-            self._tool_manager.add_tool(
-                handler,
-                name=name,
-                description=description,
-                annotations=annotations,
-                meta=meta,
-            )
-            self.registered_tools[name] = {
-                "handler": handler,
-                "description": description,
-                "annotations": annotations,
-                "meta": meta,
-                "output_schema": output_schema,
-            }
-
-        def run(self, *, transport: str) -> None:
-            self.run_calls.append(transport)
-
-    monkeypatch.setattr(
-        "hf_mcp.server.resolve_runtime_bundle", lambda _: _runtime_bundle()
-    )
-    monkeypatch.setattr("hf_mcp.server._load_mcpserver_class", lambda: _FakeFastMCP)
-
-    expected_server = create_server(settings)
-    serve_stdio(settings)
-
-    assert len(_FakeFastMCP.instances) == 1
-    app = _FakeFastMCP.instances[0]
-    assert app.run_calls == ["stdio"]
-    assert app.version == hf_mcp.__version__
-
-    for tool_name in (
-        "me.read",
-        "threads.read",
-        "posts.read",
-        "posts.reply",
-        "bytes.transfer",
-        "bytes.deposit",
-        "bytes.withdraw",
-        "bytes.bump",
-        "contracts.read",
-    ):
-        public_tool_name = mcp_tool_name(tool_name)
-        expected_tool = expected_server.tools[public_tool_name]
-        published = app.registered_tools[public_tool_name]
-        _assert_not_placeholder_handler(published["handler"])
-        assert published["handler"].__name__ == f"{public_tool_name}_handler"
-        published_signature = inspect.signature(published["handler"])
-        published_parameters = tuple(published_signature.parameters.values())
-        expected_parameter_names = tuple(
-            expected_tool.input_schema.get("properties", {}).keys()
-        )
-
-        assert (
-            tuple(parameter.name for parameter in published_parameters)
-            == expected_parameter_names
-        )
-        assert all(
-            parameter.kind is inspect.Parameter.KEYWORD_ONLY
-            for parameter in published_parameters
-        )
-        assert "kwargs" not in published_signature.parameters
-
-        published_annotations = published["annotations"]
-        if hasattr(published_annotations, "model_dump"):
-            published_annotations = published_annotations.model_dump(
-                by_alias=True, exclude_none=True
-            )
-        assert published_annotations == expected_tool.annotations
-        assert published["meta"] is None
-        assert published["output_schema"] == expected_tool.output_schema
-
-    assert mcp_tool_name("contracts.write") not in app.registered_tools
-    assert mcp_tool_name("sigmarket.write") not in app.registered_tools
-    assert mcp_tool_name("admin.high_risk.write") not in app.registered_tools
-    assert len(
-        {tool["handler"].__name__ for tool in app.registered_tools.values()}
-    ) == len(app.registered_tools)
-
-    me_signature = inspect.signature(
-        app.registered_tools[mcp_tool_name("me.read")]["handler"]
-    )
-    assert "uid" not in me_signature.parameters
-    assert me_signature.parameters["include_basic_fields"].default is True
-    assert me_signature.parameters["include_advanced_fields"].default is False
-    assert me_signature.parameters["output_mode"].default is None
-    assert me_signature.parameters["include_raw_payload"].default is None
-    assert me_signature.parameters["body_format"].default is None
-
-    threads_signature = inspect.signature(
-        app.registered_tools[mcp_tool_name("threads.read")]["handler"]
-    )
-    assert threads_signature.parameters["fid"].default is None
-    assert threads_signature.parameters["tid"].default is None
-    assert threads_signature.parameters["uid"].default is None
-    assert threads_signature.parameters["page"].default == 1
-    assert threads_signature.parameters["per_page"].default == 30
-    assert threads_signature.parameters["output_mode"].default is None
-    assert threads_signature.parameters["include_raw_payload"].default is None
-    assert threads_signature.parameters["body_format"].default is None
-
-    posts_signature = inspect.signature(
-        app.registered_tools[mcp_tool_name("posts.read")]["handler"]
-    )
-    assert posts_signature.parameters["tid"].default is None
-    assert posts_signature.parameters["pid"].default is None
-    assert posts_signature.parameters["uid"].default is None
-    assert posts_signature.parameters["page"].default == 1
-    assert posts_signature.parameters["per_page"].default == 30
-    assert posts_signature.parameters["include_post_body"].default is True
-    assert posts_signature.parameters["output_mode"].default is None
-    assert posts_signature.parameters["include_raw_payload"].default is None
-    assert posts_signature.parameters["body_format"].default is None
-
-    reply_signature = inspect.signature(
-        app.registered_tools[mcp_tool_name("posts.reply")]["handler"]
-    )
-    assert set(reply_signature.parameters.keys()) == {
-        "tid",
-        "message",
-        "message_format",
-        "draft_id",
-        "draft_path",
-        "confirm_live",
+                "type": "resource",
+                "resource": {
+                    "uri": "hf-mcp://raw/me.read",
+                    "mimeType": "application/json",
+                    "text": '{"me":[{"uid":"5"}]}',
+                },
+            },
+        ],
+        "structuredContent": {
+            "me": [{"uid": "5"}],
+            "_hf_flow": {"version": 1, "next_actions": []},
+        },
     }
-    assert reply_signature.parameters["message_format"].default == "mycode"
-    assert "subject" not in reply_signature.parameters
+    settings = _settings({"me.read"}, {"fields.me.basic", "selectors.user"})
 
-    transfer_signature = inspect.signature(
-        app.registered_tools[mcp_tool_name("bytes.transfer")]["handler"]
+    result = _call(
+        _server(settings, handlers={"me.read": lambda **_: envelope}), "me_read", {}
     )
-    assert set(transfer_signature.parameters.keys()) == {
-        "target_uid",
-        "amount",
-        "confirm_live",
+
+    assert result.is_error is False
+    assert result.structured_content == envelope["structuredContent"]
+    assert [part.type for part in result.content] == ["text", "resource"]
+    assert result.content[0].text == "me.read returned 1 row(s)."
+    raw = result.content[1].resource.model_dump(by_alias=True, exclude_none=True)
+    assert raw == {
+        "uri": "hf-mcp://raw/me.read",
+        "mimeType": "application/json",
+        "text": '{"me":[{"uid":"5"}]}',
     }
-    assert "note" not in transfer_signature.parameters
-
-    deposit_signature = inspect.signature(
-        app.registered_tools[mcp_tool_name("bytes.deposit")]["handler"]
-    )
-    assert set(deposit_signature.parameters.keys()) == {"amount", "confirm_live"}
-    assert "target_uid" not in deposit_signature.parameters
-    assert "note" not in deposit_signature.parameters
-
-    withdraw_signature = inspect.signature(
-        app.registered_tools[mcp_tool_name("bytes.withdraw")]["handler"]
-    )
-    assert set(withdraw_signature.parameters.keys()) == {"amount", "confirm_live"}
-    assert "target_uid" not in withdraw_signature.parameters
-    assert "note" not in withdraw_signature.parameters
-
-    bump_signature = inspect.signature(
-        app.registered_tools[mcp_tool_name("bytes.bump")]["handler"]
-    )
-    assert set(bump_signature.parameters.keys()) == {"confirm_live", "tid"}
-    assert "target_uid" not in bump_signature.parameters
-    assert "amount" not in bump_signature.parameters
-    assert "note" not in bump_signature.parameters
-
-    contracts_signature = inspect.signature(
-        app.registered_tools[mcp_tool_name("contracts.read")]["handler"]
-    )
-    assert contracts_signature.parameters["cid"].default is None
-    assert contracts_signature.parameters["uid"].default is None
-    assert contracts_signature.parameters["page"].default == 1
-    assert contracts_signature.parameters["per_page"].default == 30
-    assert "contract_id" not in contracts_signature.parameters
-
-    disputes_signature = inspect.signature(
-        app.registered_tools[mcp_tool_name("disputes.read")]["handler"]
-    )
-    assert disputes_signature.parameters["cdid"].default is None
-    assert disputes_signature.parameters["uid"].default is None
-    assert disputes_signature.parameters["page"].default == 1
-    assert disputes_signature.parameters["per_page"].default == 30
-    assert "did" not in disputes_signature.parameters
-    assert "dispute_id" not in disputes_signature.parameters
-
-    bratings_signature = inspect.signature(
-        app.registered_tools[mcp_tool_name("bratings.read")]["handler"]
-    )
-    assert bratings_signature.parameters["uid"].default is None
-    assert bratings_signature.parameters["page"].default == 1
-    assert bratings_signature.parameters["per_page"].default == 30
-
-    market_signature = inspect.signature(
-        app.registered_tools[mcp_tool_name("sigmarket.market.read")]["handler"]
-    )
-    assert market_signature.parameters["uid"].default is None
-    assert market_signature.parameters["page"].default == 1
-    assert market_signature.parameters["per_page"].default == 30
-    assert "listing_id" not in market_signature.parameters
-
-    order_signature = inspect.signature(
-        app.registered_tools[mcp_tool_name("sigmarket.order.read")]["handler"]
-    )
-    assert order_signature.parameters["oid"].default is None
-    assert order_signature.parameters["uid"].default is None
-    assert order_signature.parameters["page"].default == 1
-    assert order_signature.parameters["per_page"].default == 30
-    assert "listing_id" not in order_signature.parameters
+    _assert_rejects_nested_envelope_json_text(result)
 
 
-def test_serve_stdio_runs_stdio_runtime_once_without_restart_loop(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from mcp.server.mcpserver import MCPServer
-
-    settings = HFMCPSettings(
-        profile="test",
-        enabled_capabilities=frozenset({"threads.read"}),
-        enabled_parameter_families=frozenset({"selectors.thread"}),
-    )
-
-    run_calls: list[str] = []
-    registered_names: list[str] = []
-
-    class _FakeFastMCP:
-        def __init__(self, name: str, version: str = "") -> None:
-            self.name = name
-            self._tool_manager = MCPServer(name=name)._tool_manager
-
-        def add_tool(
-            self,
-            handler: Any,
-            *,
-            name: str,
-            description: str,
-            annotations: object | None = None,
-            meta: dict[str, object] | None = None,
-        ) -> None:
-            self._tool_manager.add_tool(
-                handler,
-                name=name,
-                description=description,
-                annotations=annotations,
-                meta=meta,
-            )
-            del handler
-            registered_names.append(name)
-            del description
-            del annotations
-            del meta
-
-        def run(self, *, transport: str) -> None:
-            run_calls.append(transport)
-
-    monkeypatch.setattr(
-        "hf_mcp.server.resolve_runtime_bundle", lambda _: _runtime_bundle()
-    )
-    monkeypatch.setattr("hf_mcp.server._load_mcpserver_class", lambda: _FakeFastMCP)
-
-    serve_stdio(settings)
-
-    assert run_calls == ["stdio"]
-    assert registered_names == [mcp_tool_name("threads.read")]
-
-
-def test_serve_stdio_does_not_retry_when_stdio_is_closed(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from mcp.server.mcpserver import MCPServer
-
-    settings = HFMCPSettings(
-        profile="test",
-        enabled_capabilities=frozenset({"threads.read"}),
-        enabled_parameter_families=frozenset({"selectors.thread"}),
-    )
-
-    run_calls: list[str] = []
-
-    class _FakeFastMCP:
-        def __init__(self, name: str, version: str = "") -> None:
-            self.name = name
-            self._tool_manager = MCPServer(name=name)._tool_manager
-
-        def add_tool(
-            self,
-            handler: Any,
-            *,
-            name: str,
-            description: str,
-            annotations: object | None = None,
-            meta: dict[str, object] | None = None,
-        ) -> None:
-            self._tool_manager.add_tool(
-                handler,
-                name=name,
-                description=description,
-                annotations=annotations,
-                meta=meta,
-            )
-            del handler
-            del name
-            del description
-            del annotations
-            del meta
-
-        def run(self, *, transport: str) -> None:
-            run_calls.append(transport)
-            raise ValueError("I/O operation on closed file")
-
-    monkeypatch.setattr(
-        "hf_mcp.server.resolve_runtime_bundle", lambda _: _runtime_bundle()
-    )
-    monkeypatch.setattr("hf_mcp.server._load_mcpserver_class", lambda: _FakeFastMCP)
-
-    with pytest.raises(ValueError, match="closed file"):
-        serve_stdio(settings)
-    assert run_calls == ["stdio"]
-
-
-def test_runtime_stdio_client_session_returns_error_v1_for_failed_read_and_write() -> (
+@pytest.mark.core
+def test_session_call_returns_structured_content_and_raw_resource_from_a_real_handler() -> (
     None
 ):
-    from mcp import ClientSession
-    from mcp.client.stdio import StdioServerParameters, stdio_client
-
-    server_probe = """
-import email.message
-import io
-import urllib.error
-import hf_mcp.transport as hf_transport
-from hf_mcp.capabilities import CapabilityPolicy
-from hf_mcp.config import HFMCPSettings, PRESET_PARAMETER_FAMILIES
-from hf_mcp.dispatcher import RuntimeBundle, register_tools
-from hf_mcp.server import _MCPServerToolAdapter
-from hf_mcp.token_store import TokenBundle
-from hf_mcp.transport import HFTransport
-from mcp.server.mcpserver import MCPServer
-
-class _ProbeTokenStore:
-    def require_bundle(self):
-        return TokenBundle(access_token="TOKENSEED", token_type="Bearer", scope=frozenset({"read"}))
-
-class _FailingOpener:
-    def open(self, request, timeout=None):
-        if request.full_url.endswith("/write"):
-            raise TimeoutError("WRITESEED upstream text")
-        headers = email.message.Message()
-        headers["Retry-After"] = "7"
-        raise urllib.error.HTTPError(
-            request.full_url, 503, "unavailable", headers, io.BytesIO(b"BODYSEED upstream text")
-        )
-
-hf_transport._OPENER = _FailingOpener()
-transport = HFTransport(token_store=_ProbeTokenStore(), base_url="https://example.test")
-settings = HFMCPSettings(
-    profile="test",
-    enabled_capabilities=frozenset({"me.read", "posts.reply"}),
-    enabled_parameter_families=PRESET_PARAMETER_FAMILIES["full_api"],
-)
-policy = CapabilityPolicy(settings)
-app = MCPServer(name="hf-mcp-probe")
-adapter = _MCPServerToolAdapter(app)
-register_tools(adapter, policy, RuntimeBundle(transport=transport))
-app.run(transport="stdio")
-"""
-
-    async def _run_probe() -> tuple[Any, Any]:
-        env = dict(os.environ)
-        pythonpath = env.get("PYTHONPATH")
-        src_path = str(SRC_PATH)
-        env["PYTHONPATH"] = f"{src_path}:{pythonpath}" if pythonpath else src_path
-        params = StdioServerParameters(
-            command=sys.executable,
-            args=["-c", server_probe],
-            env=env,
-            cwd=str(PRODUCT_ROOT),
-        )
-        async with stdio_client(params) as (read_stream, write_stream):
-            async with ClientSession(read_stream, write_stream) as session:
-                await session.initialize()
-                read_result = await session.call_tool(
-                    "me_read", {"output_mode": "raw", "include_raw_payload": True}
-                )
-                write_result = await session.call_tool(
-                    "posts_reply",
-                    {"tid": 123, "message": "Hello there", "confirm_live": True},
-                )
-                return read_result, write_result
-
-    read_result, write_result = anyio.run(_run_probe)
-
-    expected_fields = {
-        "code",
-        "operation",
-        "tool",
-        "message",
-        "http_status",
-        "retry_after",
-        "retryable",
-        "correlation_id",
-        "mutation_outcome",
-    }
-    cases = (
-        (
-            read_result,
-            "me_read",
-            {
-                "code": "UPSTREAM_UNAVAILABLE",
-                "operation": "read",
-                "http_status": 503,
-                "retry_after": 7,
-                "retryable": True,
-                "mutation_outcome": "not_attempted",
-            },
-        ),
-        (
-            write_result,
-            "posts_reply",
-            {
-                "code": "WRITE_OUTCOME_UNKNOWN",
-                "operation": "write",
-                "http_status": None,
-                "retry_after": None,
-                "retryable": False,
-                "mutation_outcome": "unknown",
-            },
-        ),
+    transport = _CountingTransport()
+    settings = _settings(
+        {"me.read"}, {"fields.me.basic", "selectors.user", "output.options"}
     )
-    for result, tool_name, expected in cases:
-        assert result.is_error is True
+
+    result = _call(
+        _server(settings, transport),
+        "me_read",
+        {"output_mode": "raw", "include_raw_payload": True},
+    )
+
+    assert result.is_error is False
+    assert result.structured_content is not None
+    assert result.structured_content["me"][0]["uid"] == "5"
+    assert any(part.type == "resource" for part in result.content)
+    _assert_rejects_nested_envelope_json_text(result)
+    assert transport.calls == 1
+
+
+@pytest.mark.core
+def test_next_actions_name_only_registered_tools_and_no_write_under_reader() -> None:
+    settings = _preset_settings("reader")
+    write_names = {spec.name for spec in TOOLS if spec.operation == "write"}
+    registered = set(_handlers(settings, _CountingTransport()))
+    assert registered and not registered & write_names
+
+    flows = 0
+    server = _server(settings, _CountingTransport())
+    for name, arguments in (
+        ("threads_read", {"tid": 1}),
+        ("posts_read", {"tid": 1}),
+        ("me_read", {}),
+        ("forums_index", {}),
+    ):
+        result = _call(server, name, arguments)
+        assert result.is_error is False, (name, result.structured_content)
         assert result.structured_content is not None
-        assert set(result.structured_content) == {"error"}
-        error = result.structured_content["error"]
-        assert set(error) == expected_fields
-        assert error["tool"] == tool_name
-        for key, value in expected.items():
-            assert error[key] == value
-        assert [part.type for part in result.content] == ["text"]
-        assert result.content[0].text == f"{error['code']}: {error['message']}"
-        dumped = result.model_dump_json(by_alias=True)
-        for seed in ("TOKENSEED", "BODYSEED", "WRITESEED", "example.test"):
-            assert seed not in dumped
+        actions = result.structured_content["_hf_flow"]["next_actions"]
+        flows += len(actions)
+        for action in actions:
+            assert action["tool"] in registered, (name, action)
+            assert action["tool"] not in write_names, (name, action)
+    assert flows > 0, "expected the reader reads to offer at least one next action"
 
 
-def _validation_error() -> Exception:
-    from pydantic import BaseModel, ValidationError
+@pytest.mark.core
+def test_next_actions_are_pruned_to_the_registered_tool_set() -> None:
+    settings = _settings({"threads.read"}, {"selectors.thread"})
+    envelope = {
+        "content": [{"type": "text", "text": "ok"}],
+        "structuredContent": {
+            "_hf_flow": {
+                "next_actions": [
+                    {"tool": "threads.read", "arguments": {"tid": 1}, "label": "a"},
+                    {"tool": "posts.reply", "arguments": {"tid": 1}, "label": "b"},
+                    {"tool": "nowhere.read", "arguments": {}, "label": "c"},
+                ]
+            }
+        },
+    }
 
-    class _Arguments(BaseModel):
-        count: int
+    result = _call(
+        _server(settings, handlers={"threads.read": lambda **_: envelope}),
+        "threads_read",
+        {"tid": 1},
+    )
 
-    try:
-        _Arguments(count="SECRETSEED")  # type: ignore[arg-type]
-    except ValidationError as error:
-        return error
-    raise AssertionError("expected a validation error")
+    actions = result.structured_content["_hf_flow"]["next_actions"]
+    assert [action["tool"] for action in actions] == ["threads.read"]
 
 
+# ------------------------------------------------- validation is authoritative
+
+
+def _write_settings() -> HFMCPSettings:
+    return _settings(
+        {"posts.reply", "bytes.transfer", "bytes.withdraw"},
+        {
+            "selectors.thread",
+            "selectors.bytes",
+            "writes.content",
+            "writes.bytes",
+            "confirm.live",
+        },
+    )
+
+
+def _validation_case(
+    settings: HFMCPSettings,
+    tool: str,
+    arguments: dict[str, Any],
+    *,
+    message_has: tuple[str, ...] = (),
+) -> str:
+    """Send ``arguments`` expecting INVALID_ARGUMENT with zero handler and transport calls.
+
+    Returns the error message.
+    """
+    transport = _CountingTransport()
+    counter: dict[str, int] = {}
+    handlers = _counting(_handlers(settings, transport), counter)
+
+    result = _call(_server(settings, handlers=handlers), tool, arguments)
+
+    error = _assert_error(result, "INVALID_ARGUMENT", tool)
+    for fragment in message_has:
+        assert fragment in error["message"], (fragment, error["message"])
+    assert counter == {}, f"handler ran for rejected call {arguments!r}"
+    assert transport.calls == 0, f"transport used for rejected call {arguments!r}"
+    return str(error["message"])
+
+
+@pytest.mark.core
+@pytest.mark.regression
+@pytest.mark.parametrize("value", [False, 1, "true", None, 0, "True", [], {}])
+def test_confirm_live_const_rejects_everything_except_exact_true(value: Any) -> None:
+    _validation_case(
+        _write_settings(),
+        "posts_reply",
+        {"tid": 1, "message": "hello", "confirm_live": value},
+        message_has=("confirm_live",),
+    )
+
+
+@pytest.mark.core
+@pytest.mark.regression
+def test_confirm_live_exact_true_reaches_the_handler() -> None:
+    settings = _write_settings()
+    counter: dict[str, int] = {}
+    handlers = _counting(_handlers(settings, _CountingTransport()), counter)
+    handlers["posts.reply"] = lambda **kwargs: {
+        "content": [{"type": "text", "text": "ok"}],
+        "structuredContent": {"seen": sorted(kwargs)},
+    }
+
+    result = _call(
+        _server(settings, handlers=handlers),
+        "posts_reply",
+        {"tid": 1, "message": "hello", "confirm_live": True},
+    )
+
+    assert result.is_error is False
+    assert result.structured_content == {"seen": ["confirm_live", "message", "tid"]}
+
+
+@pytest.mark.core
+@pytest.mark.regression
+def test_enum_has_positive_and_negative_controls() -> None:
+    settings = _settings({"threads.read"}, {"selectors.thread", "output.options"})
+    _validation_case(
+        settings,
+        "threads_read",
+        {"tid": 1, "output_mode": "verbose"},
+        message_has=("output_mode",),
+    )
+    transport = _CountingTransport()
+    result = _call(
+        _server(settings, transport),
+        "threads_read",
+        {"tid": 1, "output_mode": "structured"},
+    )
+    assert result.is_error is False
+    assert transport.calls == 1
+
+
+@pytest.mark.core
+@pytest.mark.regression
+@pytest.mark.parametrize("draft_id", ["not-a-draft", "A" * 32, "a" * 31, "a" * 33])
+def test_pattern_has_positive_and_negative_controls(
+    tmp_path: Path, draft_id: str
+) -> None:
+    settings = _settings({"drafts.read"}, {"drafts.selector"}, draft_dir=tmp_path)
+    _validation_case(
+        settings, "drafts_read", {"draft_id": draft_id}, message_has=("draft_id",)
+    )
+    # Positive: a well-formed id passes validation and reaches the handler.
+    counter: dict[str, int] = {}
+    handlers = _counting(_handlers(settings), counter)
+    result = _call(
+        _server(settings, handlers=handlers), "drafts_read", {"draft_id": "a" * 32}
+    )
+    assert counter == {"drafts.read": 1}
+    assert result.is_error is True
+    assert result.structured_content["error"]["code"] != "INVALID_ARGUMENT"
+
+
+@pytest.mark.core
+@pytest.mark.regression
+@pytest.mark.parametrize(
+    ("arguments", "name"),
+    [
+        ({"tid": 0}, "tid"),
+        ({"tid": 1, "per_page": 0}, "per_page"),
+        ({"tid": 1, "per_page": 31}, "per_page"),
+        ({"tid": 1, "page": 0}, "page"),
+        ({"tid": "7"}, "tid"),
+        ({"tid": True}, "tid"),
+        ({"tid": 1.5}, "tid"),
+    ],
+)
+def test_minimum_maximum_and_type_have_negative_controls(
+    arguments: dict[str, Any], name: str
+) -> None:
+    settings = _settings({"threads.read"}, {"selectors.thread", "filters.pagination"})
+    _validation_case(settings, "threads_read", arguments, message_has=(name,))
+
+
+@pytest.mark.core
+@pytest.mark.regression
+@pytest.mark.parametrize("per_page", [1, 30])
+def test_minimum_and_maximum_boundaries_pass(per_page: int) -> None:
+    settings = _settings({"threads.read"}, {"selectors.thread", "filters.pagination"})
+    transport = _CountingTransport()
+
+    result = _call(
+        _server(settings, transport), "threads_read", {"tid": 1, "per_page": per_page}
+    )
+
+    assert result.is_error is False
+    assert transport.calls == 1
+
+
+@pytest.mark.core
+@pytest.mark.regression
+def test_any_of_selector_alternatives_have_positive_and_negative_controls() -> None:
+    settings = _settings({"threads.read"}, {"selectors.thread", "selectors.forum"})
+    _validation_case(settings, "threads_read", {}, message_has=("fid", "tid", "uid"))
+    for selector in ({"fid": 2}, {"tid": 1}):
+        transport = _CountingTransport()
+        result = _call(_server(settings, transport), "threads_read", selector)
+        assert result.is_error is False, selector
+        assert transport.calls == 1
+
+
+@pytest.mark.core
+@pytest.mark.regression
+def test_additional_properties_false_rejects_unknown_parameters() -> None:
+    settings = _settings({"threads.read"}, {"selectors.thread"})
+    _validation_case(
+        settings,
+        "threads_read",
+        {"tid": 1, "include_everything": True},
+        message_has=("(unknown parameter)",),
+    )
+    transport = _CountingTransport()
+    result = _call(_server(settings, transport), "threads_read", {"tid": 1})
+    assert result.is_error is False
+    assert transport.calls == 1
+
+
+@pytest.mark.core
+@pytest.mark.regression
+def test_required_names_the_missing_property_never_the_root_path() -> None:
+    settings = _settings(
+        {"drafts.write"},
+        {"drafts.selector", "drafts.confirm_delete", "drafts.metadata"},
+    )
+
+    message = _validation_case(
+        settings,
+        "drafts_delete",
+        {"draft_id": "a" * 32},
+        message_has=("confirm_delete",),
+    )
+
+    assert "$" not in message
+    assert message != "Invalid arguments: (arguments)"
+    # Positive control: supplying the property reaches the handler.
+    counter: dict[str, int] = {}
+    handlers = _counting(_handlers(settings), counter)
+    _call(
+        _server(settings, handlers=handlers),
+        "drafts_delete",
+        {"draft_id": "a" * 32, "confirm_delete": True},
+    )
+    assert counter == {"drafts.delete": 1}
+
+
+@pytest.mark.core
+@pytest.mark.regression
+def test_error_messages_name_parameter_paths_but_never_values() -> None:
+    settings = _write_settings()
+    secret = "test-SECRETVALUE" * 3
+    for arguments in (
+        {"tid": secret, "message": "m", "confirm_live": True},
+        {"tid": 1, "message": "m", "confirm_live": secret},
+        {"tid": 1, "message": "m", "confirm_live": True, secret: 1},
+    ):
+        result = _call(
+            _server(settings, handlers=_handlers(settings, _CountingTransport())),
+            "posts_reply",
+            arguments,
+        )
+        error = _assert_error(result, "INVALID_ARGUMENT", "posts_reply")
+        assert secret not in json.dumps(result.model_dump(by_alias=True, mode="json"))
+        assert len(error["message"]) <= 200
+
+
+@pytest.mark.core
+@pytest.mark.regression
+def test_unknown_tool_is_an_invalid_argument_error_result() -> None:
+    settings = _settings({"threads.read"}, {"selectors.thread"})
+
+    result = _call(_server(settings, _CountingTransport()), "posts_reply", {})
+
+    _assert_error(result, "INVALID_ARGUMENT")
+
+
+@pytest.mark.core
+@pytest.mark.regression
+@pytest.mark.parametrize(
+    ("sent", "family"),
+    [
+        ({"tid": 1, "output_mode": "raw"}, "output.options"),
+        ({"tid": 1, "include_raw_payload": True}, "output.options"),
+        ({"tid": 1, "body_format": "raw"}, "output.options"),
+    ],
+)
+def test_parameters_pruned_by_the_profile_are_rejected_when_sent_anyway(
+    sent: dict[str, Any], family: str
+) -> None:
+    pruned = _settings({"posts.read"}, {"selectors.thread"})
+    parameter = next(name for name in sent if name != "tid")
+    _validation_case(pruned, "posts_read", sent, message_has=(parameter,))
+
+    enabled = _settings({"posts.read"}, {"selectors.thread", family})
+    transport = _CountingTransport()
+    result = _call(_server(enabled, transport), "posts_read", sent)
+    assert result.is_error is False, result.structured_content
+    assert transport.calls == 1
+
+
+@pytest.mark.core
+@pytest.mark.regression
+def test_selectors_from_a_disabled_family_are_rejected_until_it_is_enabled() -> None:
+    pruned = _settings({"threads.read"}, {"selectors.thread"})
+    _validation_case(pruned, "threads_read", {"tid": 1, "fid": 2}, message_has=("fid",))
+
+    enabled = _settings({"threads.read"}, {"selectors.thread", "selectors.forum"})
+    transport = _CountingTransport()
+    result = _call(_server(enabled, transport), "threads_read", {"tid": 1, "fid": 2})
+    assert result.is_error is False, result.structured_content
+    assert transport.calls == 1
+
+
+# ----------------------------------------------------------------- error maps
+
+
+class _TokenSeedStore:
+    def require_bundle(self) -> TokenBundle:
+        return TokenBundle(
+            access_token="test-TOKENSEED",
+            token_type="Bearer",
+            scope=frozenset({"read"}),
+        )
+
+
+@pytest.mark.core
+@pytest.mark.regression
+def test_hf_api_error_returns_error_v1_for_failed_read_and_write() -> None:
+    read_error = HFAPIError(
+        build_error(
+            "UPSTREAM_UNAVAILABLE",
+            operation="read",
+            http_status=503,
+            retry_after=7,
+            retryable=True,
+        )
+    )
+    write_error = HFAPIError(
+        build_error(
+            "WRITE_OUTCOME_UNKNOWN",
+            operation="write",
+            mutation_outcome="unknown",
+        )
+    )
+
+    def failing_read(**_: Any) -> dict[str, Any]:
+        raise read_error
+
+    def failing_write(**_: Any) -> dict[str, Any]:
+        raise write_error
+
+    settings = _settings(
+        {"me.read", "posts.reply"},
+        PRESET_PARAMETER_FAMILIES["full_api"],
+    )
+    server = _server(
+        settings, handlers={"me.read": failing_read, "posts.reply": failing_write}
+    )
+
+    read_result = _call(server, "me_read", {})
+    write_result = _call(
+        server, "posts_reply", {"tid": 123, "message": "Hello", "confirm_live": True}
+    )
+
+    read_data = _assert_error(read_result, "UPSTREAM_UNAVAILABLE", "me_read")
+    assert (
+        read_data["http_status"],
+        read_data["retry_after"],
+        read_data["retryable"],
+    ) == (
+        503,
+        7,
+        True,
+    )
+    write_data = _assert_error(write_result, "WRITE_OUTCOME_UNKNOWN", "posts_reply")
+    assert (write_data["mutation_outcome"], write_data["retryable"]) == (
+        "unknown",
+        False,
+    )
+    for result in (read_result, write_result):
+        assert "_hf_flow" not in (result.structured_content or {})
+        assert all(part.type == "text" for part in result.content)
+
+
+@pytest.mark.core
+@pytest.mark.regression
 @pytest.mark.parametrize("is_async", [False, True])
 @pytest.mark.parametrize(
     ("error", "code", "message"),
@@ -2174,67 +1394,264 @@ def _validation_error() -> Exception:
             "The request arguments are invalid.",
         ),
         (
-            _validation_error(),
-            "INVALID_ARGUMENT",
-            "Invalid arguments: count",
-        ),
-        (
             RuntimeError("SECRETSEED /path"),
             "INTERNAL_ERROR",
             "An internal error occurred.",
         ),
     ],
 )
-def test_wrapped_handler_maps_every_exception_to_error_v1(
+def test_handler_exceptions_map_to_error_v1_through_the_session(
     caplog: pytest.LogCaptureFixture,
     is_async: bool,
     error: Exception,
     code: str,
     message: str,
 ) -> None:
-    import logging
-
     if is_async:
 
-        async def handler() -> dict[str, Any]:
+        async def handler(**_: Any) -> dict[str, Any]:
             raise error
 
     else:
 
-        def handler() -> dict[str, Any]:  # type: ignore[misc]
+        def handler(**_: Any) -> dict[str, Any]:  # type: ignore[misc]
             raise error
 
-    wrapped = _with_schema_signature(
-        "posts_reply", handler, {"type": "object", "properties": {}}
-    )
+    settings = _settings({"threads.read"}, {"selectors.thread"})
     caplog.set_level(logging.DEBUG)
-    result = anyio.run(wrapped) if is_async else wrapped()
 
-    assert result.is_error is True
-    assert set(result.structured_content) == {"error"}
-    data = result.structured_content["error"]
-    assert set(data) == {
-        "code",
-        "operation",
-        "tool",
-        "message",
-        "http_status",
-        "retry_after",
-        "retryable",
-        "correlation_id",
-        "mutation_outcome",
-    }
-    assert (data["code"], data["tool"], data["message"]) == (
-        code,
-        "posts_reply",
-        message,
+    result = _call(
+        _server(settings, handlers={"threads.read": handler}),
+        "threads_read",
+        {"tid": 1},
     )
+
+    data = _assert_error(result, code, "threads_read")
+    assert data["message"] == message
     assert (data["operation"], data["retryable"], data["mutation_outcome"]) == (
         "local",
         False,
         "not_attempted",
     )
-    assert [part.type for part in result.content] == ["text"]
-    assert result.content[0].text == f"{code}: {message}"
     assert "SECRETSEED" not in result.model_dump_json(by_alias=True)
     assert "SECRETSEED" not in caplog.text
+
+
+@pytest.mark.core
+@pytest.mark.regression
+def test_a_malformed_handler_result_is_an_internal_error_without_detail() -> None:
+    settings = _settings({"threads.read"}, {"selectors.thread"})
+
+    result = _call(
+        _server(
+            settings, handlers={"threads.read": lambda **_: {"oops": "SECRETSEED"}}
+        ),
+        "threads_read",
+        {"tid": 1},
+    )
+
+    error = _assert_error(result, "INTERNAL_ERROR", "threads_read")
+    assert error["message"] == "An internal error occurred."
+    assert "SECRETSEED" not in result.model_dump_json(by_alias=True)
+
+
+# --------------------------------------------------------------- stdio process
+
+
+def _child_env() -> dict[str, str]:
+    env = dict(os.environ)
+    pythonpath = env.get("PYTHONPATH")
+    src_path = str(SRC_PATH)
+    env["PYTHONPATH"] = f"{src_path}:{pythonpath}" if pythonpath else src_path
+    return env
+
+
+def _run_stdio_probe(
+    probe: str, scenario: Callable[[ClientSession], Awaitable[Any]]
+) -> Any:
+    async def _run() -> Any:
+        params = StdioServerParameters(
+            command=sys.executable,
+            args=["-c", probe],
+            env=_child_env(),
+            cwd=str(PRODUCT_ROOT),
+        )
+        async with stdio_client(params) as (read_stream, write_stream):
+            async with ClientSession(read_stream, write_stream) as session:
+                await session.initialize()
+                return await scenario(session)
+
+    return anyio.run(_run)
+
+
+_PROBE_PRELUDE = """
+import hf_mcp.server as server
+from hf_mcp.config import HFMCPSettings, PRESET_PARAMETER_FAMILIES
+from hf_mcp.token_store import TokenBundle
+from hf_mcp.transport import HFTransport
+
+class _ProbeTokenStore:
+    def require_bundle(self):
+        return TokenBundle(access_token="test-TOKENSEED", token_type="Bearer", scope=frozenset({"read"}))
+"""
+
+
+@pytest.mark.core
+def test_runtime_stdio_client_session_returns_protocol_structured_content_and_raw_resource() -> (
+    None
+):
+    probe = (
+        _PROBE_PRELUDE
+        + """
+transport = HFTransport(token_store=_ProbeTokenStore(), base_url="https://example.test")
+transport.read = lambda *, asks, helper=None: {"me": [{"uid": "5", "username": "forge"}]}
+transport.read_raw = lambda *, asks, helper=None: {"me": [{"uid": "5", "username": "forge", "raw": True}]}
+settings = HFMCPSettings(
+    profile="test",
+    enabled_capabilities=frozenset({"me.read"}),
+    enabled_parameter_families=frozenset({"fields.me.basic", "selectors.user", "output.options"}),
+)
+server.resolve_transport = lambda _: transport
+server.serve_stdio(settings)
+"""
+    )
+
+    async def scenario(session: ClientSession) -> Any:
+        return await session.call_tool(
+            "me_read", {"output_mode": "raw", "include_raw_payload": True}
+        )
+
+    result = _run_stdio_probe(probe, scenario)
+
+    assert result.structured_content["me"][0]["uid"] == "5"
+    assert any(getattr(item, "type", None) == "resource" for item in result.content)
+    _assert_rejects_nested_envelope_json_text(result)
+
+
+@pytest.mark.core
+@pytest.mark.regression
+def test_runtime_stdio_client_session_returns_error_v1_for_failed_read_and_write() -> (
+    None
+):
+    probe = (
+        _PROBE_PRELUDE
+        + """
+import email.message
+import io
+import urllib.error
+import hf_mcp.transport as hf_transport
+
+class _FailingOpener:
+    def open(self, request, timeout=None):
+        if request.full_url.endswith("/write"):
+            raise TimeoutError("WRITESEED upstream text")
+        headers = email.message.Message()
+        headers["Retry-After"] = "7"
+        raise urllib.error.HTTPError(
+            request.full_url, 503, "unavailable", headers, io.BytesIO(b"BODYSEED upstream text")
+        )
+
+hf_transport._OPENER = _FailingOpener()
+transport = HFTransport(token_store=_ProbeTokenStore(), base_url="https://example.test")
+settings = HFMCPSettings(
+    profile="test",
+    enabled_capabilities=frozenset({"me.read", "posts.reply"}),
+    enabled_parameter_families=PRESET_PARAMETER_FAMILIES["full_api"],
+)
+server.resolve_transport = lambda _: transport
+server.serve_stdio(settings)
+"""
+    )
+
+    async def scenario(session: ClientSession) -> tuple[Any, Any]:
+        read_result = await session.call_tool(
+            "me_read", {"output_mode": "raw", "include_raw_payload": True}
+        )
+        write_result = await session.call_tool(
+            "posts_reply", {"tid": 123, "message": "Hello there", "confirm_live": True}
+        )
+        return read_result, write_result
+
+    read_result, write_result = _run_stdio_probe(probe, scenario)
+
+    read_data = _assert_error(read_result, "UPSTREAM_UNAVAILABLE", "me_read")
+    assert (
+        read_data["http_status"],
+        read_data["retry_after"],
+        read_data["retryable"],
+    ) == (
+        503,
+        7,
+        True,
+    )
+    write_data = _assert_error(write_result, "WRITE_OUTCOME_UNKNOWN", "posts_reply")
+    assert write_data["mutation_outcome"] == "unknown"
+    for result in (read_result, write_result):
+        dumped = result.model_dump_json(by_alias=True)
+        for seed in ("TOKENSEED", "BODYSEED", "WRITESEED", "example.test"):
+            assert seed not in dumped
+
+
+@pytest.mark.core
+def test_runtime_stdio_tool_list_matches_the_registry_for_full_api() -> None:
+    probe = (
+        _PROBE_PRELUDE
+        + """
+transport = HFTransport(token_store=_ProbeTokenStore(), base_url="https://example.test")
+from hf_mcp.config import PRESET_CAPABILITIES
+settings = HFMCPSettings(
+    profile="full_api",
+    enabled_capabilities=PRESET_CAPABILITIES["full_api"],
+    enabled_parameter_families=PRESET_PARAMETER_FAMILIES["full_api"],
+)
+server.resolve_transport = lambda _: transport
+server.serve_stdio(settings)
+"""
+    )
+
+    async def scenario(session: ClientSession) -> Any:
+        return await session.list_tools()
+
+    listed = _run_stdio_probe(probe, scenario)
+
+    settings = _preset_settings("full_api")
+    policy = CapabilityPolicy(settings)
+    expected = {
+        spec.mcp_name: policy.input_schema(spec)
+        for spec in TOOLS
+        if policy.can_register(spec.name)
+    }
+    assert {tool.name: tool.input_schema for tool in listed.tools} == expected
+
+
+@pytest.mark.core
+def test_serve_stdio_exits_cleanly_when_stdio_is_closed() -> None:
+    probe = (
+        _PROBE_PRELUDE
+        + """
+transport = HFTransport(token_store=_ProbeTokenStore(), base_url="https://example.test")
+settings = HFMCPSettings(
+    profile="test",
+    enabled_capabilities=frozenset({"threads.read"}),
+    enabled_parameter_families=frozenset({"selectors.thread"}),
+)
+server.resolve_transport = lambda _: transport
+server.serve_stdio(settings)
+print("SERVED-ONCE", file=__import__("sys").stderr)
+"""
+    )
+    import subprocess
+
+    completed = subprocess.run(
+        [sys.executable, "-c", probe],
+        input=b"",
+        capture_output=True,
+        env=_child_env(),
+        cwd=str(PRODUCT_ROOT),
+        timeout=30,
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stderr.decode()
+    assert completed.stdout == b""
+    assert b"SERVED-ONCE" in completed.stderr
