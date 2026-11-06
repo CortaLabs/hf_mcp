@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import html
 import re
 from typing import Literal
+from urllib.parse import urlsplit
 
 WriteSourceFormat = Literal["mycode", "markdown"]
 
@@ -13,6 +15,18 @@ _EMITTED_TAG_PATTERN = re.compile(
     re.IGNORECASE,
 )
 _STRICT_TAGS: frozenset[str] = frozenset({"b", "i", "s", "url", "img", "quote", "list"})
+_URL_ATTRIBUTE_PATTERN = re.compile(r"\[url\s*=(?P<dest>[^\]]*)\]", re.IGNORECASE)
+_URL_BODY_PATTERN = re.compile(
+    r"\[url\](?P<dest>.*?)\[/url\]", re.IGNORECASE | re.DOTALL
+)
+_IMAGE_BODY_PATTERN = re.compile(
+    r"\[(?P<tag>img|uimg)(?:[ =][^\]]*)?\](?P<dest>.*?)\[/(?P=tag)\]",
+    re.IGNORECASE | re.DOTALL,
+)
+_DEST_CONTROL_PATTERN = re.compile(r"[\x00-\x1f\x7f]")
+_DEST_SCHEME_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9+.\-]*:")
+_LINK_SCHEMES: frozenset[str] = frozenset({"http", "https"})
+_IMAGE_SCHEMES: frozenset[str] = frozenset({"https"})
 
 
 class WritePreflightError(ValueError):
@@ -24,6 +38,7 @@ def validate_write_body(value: str, *, source_format: WriteSourceFormat) -> None
     without_code_blocks = _remove_balanced_code_blocks(value)
     if source_format == "markdown":
         _validate_emitted_mycode_tags(without_code_blocks)
+    _validate_destinations(without_code_blocks)
 
 
 def _reject_control_or_placeholder_text(value: str) -> None:
@@ -73,6 +88,41 @@ def _remove_balanced_code_blocks(value: str) -> str:
         cursor = end
     pieces.append(value[cursor:])
     return "".join(pieces)
+
+
+def _validate_destinations(value: str) -> None:
+    for pattern, schemes, kind in (
+        (_URL_ATTRIBUTE_PATTERN, _LINK_SCHEMES, "link"),
+        (_URL_BODY_PATTERN, _LINK_SCHEMES, "link"),
+        (_IMAGE_BODY_PATTERN, _IMAGE_SCHEMES, "image"),
+    ):
+        for match in pattern.finditer(value):
+            _validate_destination(match.group("dest"), schemes=schemes, kind=kind)
+
+
+def _validate_destination(raw: str, *, schemes: frozenset[str], kind: str) -> None:
+    # Messages are static on purpose: they must never echo the destination.
+    unsafe = f"Write body contains an unsafe {kind} destination."
+    view = html.unescape(raw)
+    if _DEST_CONTROL_PATTERN.search(view):
+        raise WritePreflightError(unsafe)
+    view = view.strip(" ")
+    if not view or any(ch.isspace() for ch in view):
+        raise WritePreflightError(unsafe)
+    if "\\" in view or "[" in view or "]" in view:
+        raise WritePreflightError(unsafe)
+    scheme_match = _DEST_SCHEME_PATTERN.match(view)
+    if scheme_match is None or scheme_match.group(0)[:-1].casefold() not in schemes:
+        raise WritePreflightError(unsafe)
+    if not view[scheme_match.end() :].startswith("//"):
+        raise WritePreflightError(unsafe)
+    try:
+        parts = urlsplit(view)
+        host = parts.hostname
+    except ValueError:
+        raise WritePreflightError(unsafe) from None
+    if not parts.netloc or not host or "@" in parts.netloc:
+        raise WritePreflightError(unsafe)
 
 
 def _validate_emitted_mycode_tags(value: str) -> None:
