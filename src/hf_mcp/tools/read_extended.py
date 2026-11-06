@@ -9,7 +9,7 @@ from hf_mcp.config import HFMCPSettings
 from hf_mcp.flow import attach_hf_flow, build_hf_flow
 from hf_mcp.normalizers import format_body_fields, normalize_extended_payload
 from hf_mcp.output_modes import ReadOutputMode, resolve_read_output_defaults
-from hf_mcp.registry import get_extended_read_specs
+from hf_mcp.registry import get_specs
 from hf_mcp.transport import HFTransport
 
 ReadHandler = Callable[..., dict[str, Any]]
@@ -716,13 +716,13 @@ def build_extended_read_handlers(
         return _call
 
     handlers: dict[str, ReadHandler] = {}
-    for spec in get_extended_read_specs():
-        if not policy.can_register(spec.tool_name):
+    for spec in get_specs("extended_read"):
+        if not policy.can_register(spec.name):
             continue
-        builder = request_builders.get(spec.tool_name)
+        builder = request_builders.get(spec.name)
         if builder is None:
             continue
-        handlers[spec.tool_name] = _build_handler(spec.tool_name, builder)
+        handlers[spec.name] = _build_handler(spec.name, builder)
     return handlers
 
 

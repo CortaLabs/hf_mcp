@@ -7,13 +7,12 @@ from typing import Any
 import pytest
 
 
-from hf_mcp.capabilities import CAPABILITY_PARAMETER_FAMILIES, CapabilityPolicy
+from hf_mcp.capabilities import CapabilityPolicy
 from hf_mcp.config import HFMCPSettings
 from hf_mcp.dispatcher import RuntimeBundle, register_tools
 from hf_mcp.normalizers import normalize_response
 from hf_mcp.output_modes import ReadOutputDefaults
-from hf_mcp.registry import get_core_read_specs, get_tool_spec, mcp_tool_name
-from hf_mcp.schemas import build_tool_schema
+from hf_mcp.registry import get_specs, get_tool_spec, mcp_tool_name
 from hf_mcp.token_store import TokenBundle
 from hf_mcp.tools.read_core import (
     build_core_read_handlers,
@@ -73,7 +72,7 @@ def test_account_reads_use_generic_route_in_all_output_modes(
     monkeypatch.setattr(HFTransport, "_post_json", fake_post)
     policy = _policy(
         enabled_capabilities={tool_name},
-        enabled_parameter_families=set(CAPABILITY_PARAMETER_FAMILIES[tool_name]),
+        enabled_parameter_families=set(get_tool_spec(tool_name).families),
     )
     handlers = build_core_read_handlers(policy, HFTransport(_StubTokenStore()))
     kwargs = {"uid": 5} if tool_name == "users.read" else {}
@@ -105,8 +104,8 @@ def _policy(
 
 
 def test_core_read_specs_match_registry_rows_and_parameter_families() -> None:
-    specs = get_core_read_specs()
-    assert {spec.tool_name for spec in specs} == {
+    specs = get_specs("core_read")
+    assert {spec.name for spec in specs} == {
         "me.read",
         "users.read",
         "forums.read",
@@ -114,9 +113,8 @@ def test_core_read_specs_match_registry_rows_and_parameter_families() -> None:
         "posts.read",
     }
     for spec in specs:
-        assert set(spec.parameter_families) == set(
-            CAPABILITY_PARAMETER_FAMILIES[spec.capability_family]
-        )
+        assert get_tool_spec(spec.name) is spec
+        assert spec.group == "core_read"
 
 
 def test_build_core_read_handlers_registers_only_policy_allowed_core_rows() -> None:
@@ -147,7 +145,7 @@ def test_me_schema_prunes_advanced_parameter_when_family_not_allowed() -> None:
         enabled_parameter_families={"selectors.user", "fields.me.basic"},
     )
 
-    schema = build_tool_schema(spec, policy)
+    schema = policy.input_schema(spec)
 
     assert "include_basic_fields" in schema["properties"]
     assert "include_advanced_fields" not in schema["properties"]
@@ -165,8 +163,8 @@ def test_threads_and_posts_schema_accept_any_supported_selector() -> None:
         },
     )
 
-    threads_schema = build_tool_schema(get_tool_spec("threads.read"), policy)
-    posts_schema = build_tool_schema(get_tool_spec("posts.read"), policy)
+    threads_schema = policy.input_schema(get_tool_spec("threads.read"))
+    posts_schema = policy.input_schema(get_tool_spec("posts.read"))
 
     assert {"fid", "tid", "uid"} <= set(threads_schema["properties"])
     assert "required" not in threads_schema

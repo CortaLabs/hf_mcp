@@ -14,9 +14,7 @@ import pytest
 
 from hf_mcp.capabilities import CapabilityPolicy
 from hf_mcp.config import HFMCPSettings
-from hf_mcp.metadata import build_tool_meta
 from hf_mcp.registry import get_tool_spec
-from hf_mcp.schemas import build_tool_output_schema, build_tool_schema
 
 PRODUCT_ROOT = Path(__file__).resolve().parents[1]
 SRC_PATH = PRODUCT_ROOT / "src"
@@ -169,7 +167,7 @@ transport._post_json = offline_post
 settings = HFMCPSettings(
     profile="custom",
     enabled_capabilities=frozenset({"forums.index", "forums.read", "threads.read", "posts.read"}),
-    enabled_parameter_families=frozenset({"selectors.forum", "selectors.thread", "selectors.post", "filters.pagination", "fields.posts.body"}),
+    enabled_parameter_families=frozenset({"selectors.forum", "selectors.thread", "selectors.post", "filters.pagination", "fields.posts.body", "output.options"}),
 )
 server.resolve_runtime_bundle = lambda _: RuntimeBundle(transport=transport, settings=settings)
 server.serve_stdio(settings)
@@ -264,7 +262,6 @@ dependency_facts = {
 from hf_mcp.capabilities import CapabilityPolicy
 from hf_mcp.config import HFMCPSettings
 from hf_mcp.registry import get_tool_spec, mcp_tool_name
-from hf_mcp.schemas import build_tool_output_schema, build_tool_schema
 import hf_mcp.server as server_module
 import hf_mcp.dispatcher as dispatcher_module
 import hf_mcp.formatting_engine as formatting_engine
@@ -274,7 +271,7 @@ from hf_mcp.server import _MCPServerToolAdapter
 from mcp.server.mcpserver import MCPServer
 
 probe_schema = json.loads(PROBE_SCHEMA_JSON)
-capabilities = {"bytes.deposit", "bytes.withdraw", "posts.reply", "drafts.delete", "drafts.update"}
+capabilities = {"bytes.deposit", "bytes.withdraw", "posts.reply", "drafts.write"}
 families = {"confirm.live", "writes.bytes", "selectors.thread", "writes.content", "drafts.selector", "drafts.confirm_delete", "drafts.metadata"}
 policy = CapabilityPolicy(HFMCPSettings(
     profile="custom",
@@ -356,10 +353,10 @@ for tool_name, handler in handlers.items():
     adapter.register_tool(
         name=mcp_tool_name(tool_name),
         description=f"Offline schema probe for {tool_name}",
-        input_schema=build_tool_schema(spec, policy),
+        input_schema=policy.input_schema(spec),
         annotations={"readOnlyHint": False, "destructiveHint": True, "openWorldHint": True},
         handler=handler,
-        output_schema=build_tool_output_schema(spec),
+        output_schema=spec.output_schema,
     )
 adapter.register_tool(
     name="wire_probe",
@@ -394,6 +391,7 @@ def test_normal_stdio_read_surface_and_pagination_on_actual_wire(modern: bool) -
                     "selectors.post",
                     "filters.pagination",
                     "fields.posts.body",
+                    "output.options",
                 }
             ),
         )
@@ -462,7 +460,7 @@ def test_normal_stdio_read_surface_and_pagination_on_actual_wire(modern: bool) -
                 assert tool["annotations"]["readOnlyHint"] is True
                 assert tool["annotations"]["destructiveHint"] is False
                 spec = get_tool_spec(name.replace("_", "."))
-                expected_input_schema = build_tool_schema(spec, policy)
+                expected_input_schema = policy.input_schema(spec)
                 if "title" not in expected_input_schema:
                     expected_input_schema["title"] = tool["inputSchema"]["title"]
                 for key, value in tuple(expected_input_schema.items()):
@@ -473,14 +471,9 @@ def test_normal_stdio_read_surface_and_pagination_on_actual_wire(modern: bool) -
                     ):
                         expected_input_schema.pop(key)
                 assert tool["inputSchema"] == expected_input_schema
-                expected_meta = build_tool_meta(spec)
-                assert set(tool["_meta"]) <= set(expected_meta)
-                for key, value in expected_meta.items():
-                    # SDK wire models may omit null extension values. The local
-                    # catalog has no upstream helper; every populated value survives.
-                    assert tool["_meta"].get(key) == value
+                assert not tool.get("_meta")
                 assert "_meta" not in tool["annotations"]
-                expected_output_schema = build_tool_output_schema(spec)
+                expected_output_schema = dict(spec.output_schema or {})
                 if (
                     "title" in tool["outputSchema"]
                     and "title" not in expected_output_schema
@@ -664,8 +657,7 @@ def test_write_and_composition_schema_matrix_on_actual_stdio(
             "bytes.deposit",
             "bytes.withdraw",
             "posts.reply",
-            "drafts.delete",
-            "drafts.update",
+            "drafts.write",
         }
     )
     parameter_families = frozenset(
@@ -766,15 +758,14 @@ def test_write_and_composition_schema_matrix_on_actual_stdio(
                 "drafts.update",
             )
             expected_wire_names = {
-                get_tool_spec(name).tool_name.replace(".", "_")
-                for name in canonical_names
+                get_tool_spec(name).name.replace(".", "_") for name in canonical_names
             }
             expected_wire_names |= {"wire_probe"}
             assert set(tool_rows) == expected_wire_names
             assert "hf_doctor" not in tool_rows
             for canonical_name in canonical_names:
                 spec = get_tool_spec(canonical_name)
-                expected_schema = build_tool_schema(spec, policy)
+                expected_schema = policy.input_schema(spec)
                 if "title" not in expected_schema:
                     expected_schema["title"] = tool_rows[
                         canonical_name.replace(".", "_")

@@ -7,11 +7,11 @@ from typing import Any
 import pytest
 
 
-from hf_mcp.capabilities import CAPABILITY_PARAMETER_FAMILIES, CapabilityPolicy
+from hf_mcp.capabilities import CapabilityPolicy
 from hf_mcp.config import HFMCPSettings
 from hf_mcp.normalizers import normalize_extended_payload
 from hf_mcp.output_modes import ReadOutputDefaults
-from hf_mcp.registry import get_extended_read_specs, get_tool_spec
+from hf_mcp.registry import get_specs, get_tool_spec
 from hf_mcp.token_store import TokenBundle
 from hf_mcp.tools.read_extended import (
     _build_read_tool_result,
@@ -48,7 +48,7 @@ def test_bratings_handler_uses_generic_route_in_all_output_modes(
     monkeypatch.setattr(HFTransport, "_post_json", fake_post)
     policy = _policy(
         enabled_capabilities={"bratings.read"},
-        enabled_parameter_families=set(CAPABILITY_PARAMETER_FAMILIES["bratings.read"]),
+        enabled_parameter_families=set(get_tool_spec("bratings.read").families),
     )
     handlers = build_extended_read_handlers(policy, HFTransport(_StubTokenStore()))
     result = handlers["bratings.read"](
@@ -121,8 +121,8 @@ def _assert_structured_payload_with_flow(
 
 
 def test_extended_read_specs_match_registry_rows_and_parameter_families() -> None:
-    specs = get_extended_read_specs()
-    assert {spec.tool_name for spec in specs} == {
+    specs = get_specs("extended_read")
+    assert {spec.name for spec in specs} == {
         "bytes.read",
         "contracts.read",
         "disputes.read",
@@ -132,16 +132,9 @@ def test_extended_read_specs_match_registry_rows_and_parameter_families() -> Non
         "admin.high_risk.read",
     }
     for spec in specs:
-        expected = get_tool_spec(spec.tool_name)
-        assert spec.helper_path == expected.helper_path
-        if spec.capability_family in CAPABILITY_PARAMETER_FAMILIES:
-            assert (
-                set(spec.parameter_families)
-                == CAPABILITY_PARAMETER_FAMILIES[spec.capability_family]
-            )
-        else:
-            # Admin/high-risk rows are preserved in the matrix even when no capability mapping exists yet.
-            assert spec.parameter_families == ("filters.pagination",)
+        assert get_tool_spec(spec.name) is spec
+        assert spec.group == "extended_read"
+        assert spec.families >= {"output.options"}
 
 
 def test_build_extended_handlers_registers_only_policy_allowed_rows() -> None:
@@ -163,10 +156,14 @@ def test_build_extended_handlers_registers_only_policy_allowed_rows() -> None:
 
     handlers = build_extended_read_handlers(policy, transport)
 
-    assert set(handlers) == {"bytes.read", "sigmarket.order.read"}
+    # admin.high_risk.read has only optional families, so it registers with its
+    # capability alone; contracts.read stays out because its capability is off.
+    assert set(handlers) == {
+        "bytes.read",
+        "sigmarket.order.read",
+        "admin.high_risk.read",
+    }
     assert "contracts.read" not in handlers
-    # Explicit matrix row remains, but policy mapping keeps it fail-closed for now.
-    assert "admin.high_risk.read" not in handlers
 
 
 @pytest.mark.parametrize(

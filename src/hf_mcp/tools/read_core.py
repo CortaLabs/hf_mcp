@@ -9,7 +9,7 @@ from hf_mcp.config import HFMCPSettings
 from hf_mcp.flow import attach_hf_flow, build_hf_flow
 from hf_mcp.normalizers import format_body_fields, normalize_response
 from hf_mcp.output_modes import ReadOutputMode, resolve_read_output_defaults
-from hf_mcp.registry import get_core_read_specs
+from hf_mcp.registry import get_specs
 from hf_mcp.transport import HFTransport
 
 ReadHandler = Callable[..., dict[str, Any]]
@@ -536,10 +536,10 @@ def build_core_read_handlers(
             source=helper,
         )
 
-    for spec in get_core_read_specs():
-        if not policy.can_register(spec.tool_name):
+    for spec in get_specs("core_read"):
+        if not policy.can_register(spec.name):
             continue
-        if spec.tool_name == "me.read":
+        if spec.name == "me.read":
             allow_advanced = "fields.me.advanced" in policy.allowed_parameter_families(
                 "me.read"
             )
@@ -570,8 +570,8 @@ def build_core_read_handlers(
                     },
                 )
 
-            handlers[spec.tool_name] = _me_handler
-        elif spec.tool_name == "users.read":
+            handlers[spec.name] = _me_handler
+        elif spec.name == "users.read":
 
             def _users_handler(
                 *,
@@ -603,8 +603,8 @@ def build_core_read_handlers(
                     },
                 )
 
-            handlers[spec.tool_name] = _users_handler
-        elif spec.tool_name == "forums.read":
+            handlers[spec.name] = _users_handler
+        elif spec.name == "forums.read":
 
             def _forums_handler(
                 *,
@@ -630,8 +630,8 @@ def build_core_read_handlers(
                     },
                 )
 
-            handlers[spec.tool_name] = _forums_handler
-        elif spec.tool_name == "threads.read":
+            handlers[spec.name] = _forums_handler
+        elif spec.name == "threads.read":
 
             def _threads_handler(
                 *,
@@ -663,8 +663,8 @@ def build_core_read_handlers(
                     },
                 )
 
-            handlers[spec.tool_name] = _threads_handler
-        elif spec.tool_name == "posts.read":
+            handlers[spec.name] = _threads_handler
+        elif spec.name == "posts.read":
 
             def _posts_handler(
                 *,
@@ -703,7 +703,7 @@ def build_core_read_handlers(
                     },
                 )
 
-            handlers[spec.tool_name] = _posts_handler
+            handlers[spec.name] = _posts_handler
     return handlers
 
 
