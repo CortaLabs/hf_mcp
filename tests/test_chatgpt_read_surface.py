@@ -214,7 +214,7 @@ from hf_mcp.config import HFMCPSettings
 from hf_mcp.registry import get_tool_spec, mcp_tool_name
 import hf_mcp.server as server_module
 import hf_mcp.dispatcher as dispatcher_module
-import hf_mcp.formatting_engine as formatting_engine
+import hf_mcp.draft_store as draft_store
 import hf_mcp.tools.drafts as drafts_module
 import hf_mcp.transport as transport_module
 from hf_mcp.server import build_server
@@ -242,7 +242,7 @@ dispatcher_module.load_token_store = _deny_effect("token_loads")
 for method_name in ("read", "read_raw", "write", "_post_json"):
     setattr(transport_module.HFTransport, method_name, _deny_effect("transport_calls"))
 for module, function_names in (
-    (formatting_engine, ("write_draft_artifact", "update_draft_metadata", "delete_draft_artifact")),
+    (draft_store, ("write_draft_artifact", "update_draft_metadata", "delete_draft_artifact")),
     (drafts_module, ("update_draft_metadata", "delete_draft_artifact")),
 ):
     for function_name in function_names:

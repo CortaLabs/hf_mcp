@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from hf_mcp.formatting_engine import write_draft_artifact
+from hf_mcp.draft_store import write_draft_artifact
 from hf_mcp.flow import attach_hf_flow, build_hf_flow
 
 

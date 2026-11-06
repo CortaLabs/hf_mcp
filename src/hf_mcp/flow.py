@@ -5,11 +5,11 @@ import re
 from typing import Any
 
 from hf_mcp import __version__
+from hf_mcp.registry import DRAFT_ID_PATTERN
 
 FLOW_KEY: str = "_hf_flow"
 _FLOW_VERSION = 1
 _SERVER_NAME = "hf-mcp"
-_DRAFT_ID_PATTERN = re.compile(r"^[a-f0-9]{32}$")
 _CHILD_KEYS = ("children", "child_forums", "childforums", "forums", "subforums")
 
 # Entity kinds, in the order the envelope reports them (as "<kind>_ids").
@@ -168,7 +168,7 @@ def _coerce_draft_id(raw_value: Any) -> str | None:
     if not isinstance(raw_value, str):
         return None
     draft_id = raw_value.strip().lower()
-    return draft_id if _DRAFT_ID_PATTERN.fullmatch(draft_id) else None
+    return draft_id if re.fullmatch(DRAFT_ID_PATTERN, draft_id) else None
 
 
 def _as_rows(payload: Mapping[str, Any], key: str) -> list[Mapping[str, Any]]:

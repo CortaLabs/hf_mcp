@@ -11,7 +11,7 @@ from hf_mcp.config import HFMCPSettings
 from hf_mcp.registry import TOOLS, get_specs, get_tool_spec
 from hf_mcp.token_store import TokenBundle
 from hf_mcp.transport import HFTransport
-from hf_mcp.formatting_engine import write_draft_artifact
+from hf_mcp.draft_store import write_draft_artifact
 from hf_mcp.tools.write_documented import (
     build_write_handlers,
     bump_live,
