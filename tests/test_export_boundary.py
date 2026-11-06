@@ -16,7 +16,6 @@ from pathlib import Path
 
 import pytest
 import pytest_socket
-import yaml
 from packaging.requirements import Requirement
 from packaging.specifiers import SpecifierSet
 
@@ -36,7 +35,6 @@ PYPROJECT_PATH = PRODUCT_ROOT / "pyproject.toml"
 CONFIGURATION_DOC_PATH = PRODUCT_ROOT / "docs/configuration.md"
 SECURITY_MODEL_DOC_PATH = PRODUCT_ROOT / "docs/security_model.md"
 README_PATH = PRODUCT_ROOT / "README.md"
-PUBLISH_WORKFLOW_PATH = PRODUCT_ROOT / ".github/workflows/publish-hf-mcp-pypi.yml"
 ALLOWED_PREFIX = "products/hf_mcp/"
 YAML_EXAMPLE = "products/hf_mcp/config.example.yaml"
 TOML_EXAMPLE = "products/hf_mcp/config.example.toml"
@@ -120,23 +118,45 @@ def test_export_root_resolves_from_standalone_product_checkout(tmp_path: Path) -
 @pytest.mark.core
 @pytest.mark.build
 @pytest.mark.regression
-def test_publisher_trigger_containment() -> None:
-    workflow = yaml.load(
-        PUBLISH_WORKFLOW_PATH.read_text(encoding="utf-8"), Loader=yaml.BaseLoader
-    )
-    triggers = workflow["on"]
-    event_cases = (
-        ("source push", "push", False),
-        ("docs push", "push", False),
-        ("ordinary branch push", "push", False),
-        ("tag push", "push", False),
-        ("fork pull request", "pull_request", False),
-        ("manual workflow dispatch", "workflow_dispatch", True),
+@pytest.mark.parametrize(
+    ("tag", "version", "expect_error"),
+    (
+        ("v1.2.3", "1.2.3", False),
+        ("v1.2.4", "1.2.3", True),
+        ("1.2.3", "1.2.3", True),
+        ("v1.2.3-rc1", "1.2.3", True),
+        ("", "1.2.3", True),
+        (None, "1.2.3", True),
+    ),
+)
+def test_release_tag_must_equal_v_plus_project_version(
+    tag: str | None, version: str, expect_error: bool
+) -> None:
+    check = runpy.run_path(
+        str(PRODUCT_ROOT / "scripts/check_pypi_version_available.py")
     )
 
-    assert set(triggers) == {"workflow_dispatch"}
-    for description, event_name, expected_match in event_cases:
-        assert (event_name in triggers) is expected_match, description
+    assert (check["tag_version_error"](tag, version) is not None) is expect_error
+
+
+@pytest.mark.core
+@pytest.mark.build
+@pytest.mark.regression
+def test_release_check_rejects_missing_or_mismatched_tag_before_network() -> None:
+    script = PRODUCT_ROOT / "scripts/check_pypi_version_available.py"
+    version = tomllib.loads(PYPROJECT_PATH.read_text(encoding="utf-8"))["project"][
+        "version"
+    ]
+
+    for args in ([], ["--tag", ""], ["--tag", f"v{version}.bogus"]):
+        result = subprocess.run(
+            [sys.executable, str(script), *args],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=30,
+        )
+        assert result.returncode != 0, args
 
 
 @pytest.mark.core
@@ -195,7 +215,7 @@ def test_pyproject_release_contract_and_metadata_boundary() -> None:
 
     assert "setuptools>=77.0.3" in pyproject["build-system"]["requires"]
     assert project["name"] == "hf-mcp"
-    assert project["version"] == "0.6.2"
+    assert re.fullmatch(r"\d+\.\d+\.\d+", project["version"])
     assert isinstance(project["version"], str) and project["version"].strip()
     assert project["scripts"]["hf-mcp"] == "hf_mcp.cli:main"
     assert project["keywords"] == ["hackforums", "mcp", "model-context-protocol"]

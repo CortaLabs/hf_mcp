@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 import sys
 import tomllib
@@ -13,7 +14,26 @@ from pathlib import Path
 PACKAGE_NAME = "hf-mcp"
 
 
-def main() -> int:
+def tag_version_error(tag: str | None, version: str) -> str | None:
+    """Return a refusal message unless ``tag`` is exactly ``v`` + ``version``."""
+    if not tag:
+        return "Refusing release check: no release tag was provided."
+    expected = f"v{version}"
+    if tag != expected:
+        return (
+            f"Refusing release check: tag {tag!r} does not match project.version "
+            f"{version!r} (expected {expected!r})."
+        )
+    return None
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--tag", default="", help="Release tag; must equal v<project.version>."
+    )
+    args = parser.parse_args(argv)
+
     package_root = Path(__file__).resolve().parents[1]
     pyproject_path = package_root / "pyproject.toml"
     data = tomllib.loads(pyproject_path.read_text(encoding="utf-8"))
@@ -35,6 +55,11 @@ def main() -> int:
             f"Refusing release check: missing project.version in {pyproject_path}.",
             file=sys.stderr,
         )
+        return 1
+
+    tag_error = tag_version_error(args.tag, version)
+    if tag_error:
+        print(tag_error, file=sys.stderr)
         return 1
 
     url = f"https://pypi.org/pypi/{PACKAGE_NAME}/json"

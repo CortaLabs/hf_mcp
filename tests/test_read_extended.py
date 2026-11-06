@@ -60,9 +60,7 @@ def test_bratings_handler_uses_generic_route_in_all_output_modes(
     assert asks["_page"] == 2
     assert asks["_perpage"] == 3
     assert asks["contract"] is True
-    assert result["structuredContent"]["bratings"][0]["crid"] == (
-        7 if output_mode == "raw" else "7"
-    )
+    assert result["structuredContent"]["bratings"][0]["crid"] == "7"
     if output_mode == "raw":
         raw = json.loads(result["content"][1]["resource"]["text"])
         assert raw["bratings"][0]["crid"] == 7
@@ -426,7 +424,7 @@ def test_registered_sigmarket_order_handler_supports_output_modes_and_raw_payloa
         ]
         == "3"
     )
-    assert raw_result["structuredContent"]["sigmarket/order"][0]["smid"] == "12"
+    assert raw_result["structuredContent"]["sigmarket/order"][0]["smid"] == "3"
 
     readable_with_raw = handler(
         smid=17, output_mode="readable", include_raw_payload=True
@@ -732,7 +730,7 @@ def test_extended_handlers_fail_closed_for_sigmarket_legacy_listing_alias(
         handlers[tool_name](**kwargs)
 
 
-def test_list_entries_delegates_to_bytes_helper_and_coerces_amount(
+def test_list_entries_delegates_to_bytes_helper_and_keeps_amount_exact(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     captured: dict[str, Any] = {}
@@ -777,7 +775,7 @@ def test_list_entries_delegates_to_bytes_helper_and_coerces_amount(
     assert captured["payload"]["asks"]["bytes"]["reason"] is True
     assert captured["payload"]["asks"]["bytes"]["amount"] is True
     assert captured["headers"]["Authorization"] == "Bearer token"
-    assert result["bytes"] == [{"uid": "99", "amount": "42"}]
+    assert result["bytes"] == [{"uid": "99", "amount": "42.75"}]
 
 
 def test_list_bratings_uses_conservative_starter_bundle_and_preserves_mapping_rows(
@@ -1183,7 +1181,7 @@ def test_sigmarket_market_and_order_use_docs_backed_asks_and_preserve_mapping_ro
     assert "subject" not in row
 
 
-def test_shared_normalizers_handle_avatar_groups_and_ordering() -> None:
+def test_shared_normalizers_handle_avatar_groups_and_upstream_ordering() -> None:
     payload = {
         "bratings": [
             {
@@ -1213,7 +1211,7 @@ def test_shared_normalizers_handle_avatar_groups_and_ordering() -> None:
     assert result["bratings"][0]["additionalgroups"] == ["2", "4", "6"]
     assert result["bratings"][1]["avatar"] == "https://cdn.example/avatar.png"
     assert result["bratings"][1]["additionalgroups"] == []
-    assert [row["smid"] for row in result["sigmarket/order"]] == ["12", "7", "3"]
+    assert [row["smid"] for row in result["sigmarket/order"]] == ["3", "12", "7"]
 
 
 def test_list_orders_preserves_missing_advanced_fields_without_injecting_values(

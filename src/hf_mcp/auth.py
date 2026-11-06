@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import secrets
+import socket
 import time
 import urllib.error
 import urllib.parse
@@ -18,6 +19,7 @@ from .config import (
     HFMCPSettings,
 )
 from .token_store import TokenBundle
+from .transport import HFAPIError, build_error
 
 DEFAULT_AUTHORIZE_ENDPOINT = "https://hackforums.net/api/v2/authorize"
 HF_BROWSER_USER_AGENT = (
@@ -51,14 +53,16 @@ def authorize_via_loopback(
         "HF_MCP_AUTHORIZE_URL", DEFAULT_AUTHORIZE_ENDPOINT
     )
     token_url = settings.runtime_env.get("HF_MCP_TOKEN_URL", DEFAULT_AUTHORIZE_ENDPOINT)
+    _require_https_endpoint(authorize_url)
+    _require_https_endpoint(token_url)
 
     timeout_raw = settings.runtime_env.get("HF_MCP_AUTH_TIMEOUT_SECONDS", "180")
     try:
         timeout_seconds = int(timeout_raw)
-    except (TypeError, ValueError) as exc:
+    except (TypeError, ValueError):
         raise ValueError(
             "HF_MCP_AUTH_TIMEOUT_SECONDS must be an integer number of seconds."
-        ) from exc
+        ) from None
 
     state = secrets.token_urlsafe(24)
     browser_url = _build_authorize_url(
@@ -92,7 +96,11 @@ def authorize_via_loopback(
         client_secret=client_secret,
         code=code,
     )
-    return TokenBundle.from_payload(token_payload)
+    try:
+        return TokenBundle.from_payload(token_payload)
+    except ValueError:
+        pass
+    raise _local_auth_error("UPSTREAM_PROTOCOL_ERROR")
 
 
 def _build_authorize_url(
@@ -167,7 +175,7 @@ def _await_loopback_callback(
     server.server_close()
 
     if "error" in callback_state:
-        raise ValueError(f"OAuth provider returned error: {callback_state['error']}")
+        raise _local_auth_error("AUTH_REJECTED")
     if "code" not in callback_state:
         raise TimeoutError("Timed out waiting for OAuth loopback callback.")
     return callback_state
@@ -198,19 +206,66 @@ def _exchange_code_for_token(
         },
     )
 
+    failure_code: str | None = None
+    http_status: int | None = None
+    parsed: object = None
     try:
         with urllib.request.urlopen(request, timeout=15) as response:
-            response_body = response.read().decode("utf-8")
+            parsed = json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as error:
-        error_body = error.read().decode("utf-8", errors="replace")
-        raise RuntimeError(
-            f"Token exchange failed: HTTP {error.code}. {error_body}"
-        ) from error
+        error.close()
+        http_status = error.code
+        failure_code = _exchange_status_code(http_status)
+    except (TimeoutError, socket.timeout):
+        failure_code = "TIMEOUT"
+    except urllib.error.URLError as error:
+        failure_code = (
+            "TIMEOUT"
+            if isinstance(error.reason, (TimeoutError, socket.timeout))
+            else "NETWORK_ERROR"
+        )
+    except OSError:
+        failure_code = "NETWORK_ERROR"
+    except (ValueError, RecursionError):  # bad UTF-8 or bad JSON
+        failure_code = "UPSTREAM_PROTOCOL_ERROR"
 
-    parsed = json.loads(response_body)
-    if not isinstance(parsed, dict):
-        raise ValueError("Token exchange returned non-object JSON payload.")
+    if failure_code is None and not isinstance(parsed, dict):
+        failure_code = "UPSTREAM_PROTOCOL_ERROR"
+    if failure_code is not None:
+        raise _local_auth_error(failure_code, http_status=http_status)
+    assert isinstance(parsed, dict)
     return parsed
+
+
+def _exchange_status_code(status: int) -> str:
+    if status == 429:
+        return "RATE_LIMITED"
+    if 500 <= status <= 599:
+        return "UPSTREAM_UNAVAILABLE"
+    if status in {400, 401, 403}:
+        return "AUTH_REJECTED"
+    return "UPSTREAM_REJECTED"
+
+
+def _local_auth_error(code: str, http_status: int | None = None) -> HFAPIError:
+    return HFAPIError(build_error(code, operation="local", http_status=http_status))
+
+
+def _require_https_endpoint(url: str) -> None:
+    """Refuse non-https or host-less endpoints before any network or browser use."""
+    try:
+        parsed = urllib.parse.urlparse(url.strip())
+        valid = parsed.scheme == "https" and bool(parsed.hostname)
+    except ValueError:
+        valid = False
+    if not valid:
+        raise HFAPIError(
+            build_error(
+                "INVALID_ARGUMENT",
+                operation="local",
+                message="Authorization endpoints must be HTTPS URLs with a host.",
+            )
+        ) from None
 
 
 def _required_setting(settings: HFMCPSettings, name: str) -> str:
