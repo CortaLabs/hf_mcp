@@ -15,7 +15,7 @@ _EMITTED_TAG_PATTERN = re.compile(
     re.IGNORECASE,
 )
 _STRICT_TAGS: frozenset[str] = frozenset({"b", "i", "s", "url", "img", "quote", "list"})
-_URL_ATTRIBUTE_PATTERN = re.compile(r"\[url=(?P<dest>[^\]]*)\]", re.IGNORECASE)
+_URL_ATTRIBUTE_PATTERN = re.compile(r"\[url\s*=(?P<dest>[^\]]*)\]", re.IGNORECASE)
 _URL_BODY_PATTERN = re.compile(
     r"\[url\](?P<dest>.*?)\[/url\]", re.IGNORECASE | re.DOTALL
 )

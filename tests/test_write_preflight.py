@@ -71,21 +71,115 @@ def test_unsafe_image_destinations_are_rejected(source_format: str, dest: str) -
             assert dest.strip() not in str(excinfo.value)
 
 
-@pytest.mark.parametrize("source_format", SOURCES)
-def test_safe_destinations_pass_without_rewriting(source_format: str) -> None:
-    bodies = [
-        "[url=https://example.com/a?b=1#c]site[/url]",
-        "[url=http://example.com]site[/url]",
-        "[url]https://example.com/path[/url]",
-        "[url]HTTPS://Example.com[/url]",
-        "[img]https://example.com/a.png[/img]",
-        "[img=100x100]https://example.com/a.png[/img]",
-        "plain text without links",
+SAFE_MYCODE_BODIES = [
+    "[url=https://example.com/a?b=1#c]site[/url]",
+    "[url=http://example.com]site[/url]",
+    "[url]https://example.com/path[/url]",
+    "[url]http://example.com/path[/url]",
+    "[url]HTTPS://Example.com[/url]",
+    "[img]https://example.com/a.png[/img]",
+    "[img=100x100]https://example.com/a.png[/img]",
+    "plain text without links",
+]
+
+
+@pytest.mark.parametrize("body", SAFE_MYCODE_BODIES)
+def test_safe_destinations_reach_transport_byte_identical(body: str) -> None:
+    transport = _CountingTransport()
+    create_thread_live(
+        transport=transport,  # type: ignore[arg-type]
+        fid=1,
+        subject="s",
+        message=body,
+        confirm_live=True,
+        message_format="mycode",
+    )
+    reply_to_thread_live(
+        transport=transport,  # type: ignore[arg-type]
+        tid=1,
+        message=body,
+        confirm_live=True,
+        message_format="mycode",
+    )
+    assert [c["asks"] for c in transport.calls] == [
+        {"threads": {"_fid": 1, "_subject": "s", "_message": body}},
+        {"posts": {"_tid": 1, "_message": body}},
     ]
-    for body in bodies:
-        original = body
+
+
+@pytest.mark.parametrize("source_format", SOURCES)
+@pytest.mark.parametrize("body", SAFE_MYCODE_BODIES)
+def test_safe_destinations_pass_validation(body: str, source_format: str) -> None:
+    validate_write_body(body, source_format=source_format)  # type: ignore[arg-type]
+
+
+def test_safe_markdown_links_convert_to_exact_mycode_at_transport() -> None:
+    transport = _CountingTransport()
+    reply_to_thread_live(
+        transport=transport,  # type: ignore[arg-type]
+        tid=1,
+        message="[a](https://example.com) ![i](https://example.com/a.png)",
+        confirm_live=True,
+        message_format="markdown",
+    )
+    assert [c["asks"] for c in transport.calls] == [
+        {
+            "posts": {
+                "_tid": 1,
+                "_message": (
+                    "[url=https://example.com]a[/url] "
+                    "[img]https://example.com/a.png[/img]"
+                ),
+            }
+        }
+    ]
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "![a](javascript:x)",
+        "[a](javascript:x)",
+        "[a](data:text/html,x)",
+        "[a](//evil.example)",
+        "[a](https://user@host.example)",
+    ],
+)
+def test_unsafe_markdown_destinations_are_flagged_in_report(text: str) -> None:
+    report = prepare_formatting_report(text, "markdown")
+    assert any(issue.severity == "error" for issue in report.issues)
+    assert report.integrity < 1.0
+
+
+@pytest.mark.parametrize("text", ["<javascript:x>", "[r][1]\n\n[1]: javascript:x"])
+def test_markdown_autolink_and_reference_link_stay_literal_text(text: str) -> None:
+    # The converter emits these as literal text, not [url]/[img] tags, so they
+    # are not clickable destinations in the posted MyCode.
+    report = prepare_formatting_report(text, "markdown")
+    assert "[url" not in report.mycode.lower()
+    assert "[img" not in report.mycode.lower()
+
+
+@pytest.mark.parametrize("source_format", SOURCES)
+@pytest.mark.parametrize(
+    "body", ["[url =javascript:x]y[/url]", "[url\t=javascript:x]y[/url]"]
+)
+def test_whitespace_before_equals_does_not_bypass_validation(
+    body: str, source_format: str
+) -> None:
+    with pytest.raises(WritePreflightError):
         validate_write_body(body, source_format=source_format)  # type: ignore[arg-type]
-        assert body == original
+
+
+@pytest.mark.parametrize("source_format", SOURCES)
+def test_ipv6_literal_links_are_rejected(source_format: str) -> None:
+    # Documented limitation: bracketed IPv6 hosts collide with the bracket
+    # delimiter rule and are rejected.
+    with pytest.raises(WritePreflightError):
+        validate_write_body(
+            "[url=http://[::1]/x]a[/url]",
+            source_format=source_format,  # type: ignore[arg-type]
+        )
 
 
 @pytest.mark.parametrize("source_format", SOURCES)
@@ -134,7 +228,10 @@ class _CountingTransport:
 UNSAFE_TEXT = "[url=javascript&#58;alert(1)]x[/url]"
 
 
-def test_threads_create_and_posts_reply_reject_unsafe_text_before_transport() -> None:
+@pytest.mark.parametrize("message_format", SOURCES)
+def test_threads_create_and_posts_reply_reject_unsafe_text_before_transport(
+    message_format: str,
+) -> None:
     transport = _CountingTransport()
     with pytest.raises(WritePreflightError):
         create_thread_live(
@@ -143,6 +240,7 @@ def test_threads_create_and_posts_reply_reject_unsafe_text_before_transport() ->
             subject="s",
             message=UNSAFE_TEXT,
             confirm_live=True,
+            message_format=message_format,
         )
     with pytest.raises(WritePreflightError):
         reply_to_thread_live(
@@ -150,6 +248,7 @@ def test_threads_create_and_posts_reply_reject_unsafe_text_before_transport() ->
             tid=1,
             message=UNSAFE_TEXT,
             confirm_live=True,
+            message_format=message_format,
         )
     assert transport.calls == []
 
