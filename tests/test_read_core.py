@@ -10,7 +10,6 @@ import pytest
 from hf_mcp.capabilities import CapabilityPolicy
 from hf_mcp.config import HFMCPSettings
 from hf_mcp.dispatcher import build_handlers
-from hf_mcp.normalizers import normalize_response
 from hf_mcp.output_modes import ReadOutputDefaults
 from hf_mcp.registry import get_specs, get_tool_spec
 from hf_mcp.token_store import TokenBundle
@@ -884,7 +883,7 @@ def test_registered_posts_handler_formats_mycode_body_fields_by_default(
     }
 
     monkeypatch.setattr(
-        HFTransport, "read", lambda self, asks, helper=None: normalize_response(payload)
+        HFTransport, "read_raw", lambda self, asks, helper=None: payload
     )
 
     settings = HFMCPSettings(
@@ -939,7 +938,7 @@ def test_registered_threads_handler_returns_rich_markdown_thread_content(
     }
 
     monkeypatch.setattr(
-        HFTransport, "read", lambda self, asks, helper=None: normalized_payload
+        HFTransport, "read_raw", lambda self, asks, helper=None: normalized_payload
     )
 
     settings = HFMCPSettings(
@@ -976,7 +975,7 @@ def test_registered_threads_handler_returns_rich_markdown_thread_content(
 def test_registered_posts_handler_supports_output_modes_and_raw_payload_attachment(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    captured: dict[str, list[dict[str, Any]]] = {"read": [], "read_raw": []}
+    captured: list[dict[str, Any]] = []
     normalized_payload = {
         "posts": [
             {
@@ -1012,19 +1011,12 @@ def test_registered_posts_handler_supports_output_modes_and_raw_payload_attachme
         }
     }
 
-    def _fake_read(
-        self: HFTransport, asks: dict[str, Any], helper: str | None = None
-    ) -> dict[str, Any]:
-        captured["read"].append({"asks": asks, "helper": helper})
-        return normalized_payload
-
     def _fake_read_raw(
         self: HFTransport, asks: dict[str, Any], helper: str | None = None
     ) -> dict[str, Any]:
-        captured["read_raw"].append({"asks": asks, "helper": helper})
+        captured.append({"asks": asks, "helper": helper})
         return raw_payload
 
-    monkeypatch.setattr(HFTransport, "read", _fake_read)
     monkeypatch.setattr(HFTransport, "read_raw", _fake_read_raw)
 
     settings = HFMCPSettings(
@@ -1090,10 +1082,8 @@ def test_registered_posts_handler_supports_output_modes_and_raw_payload_attachme
     assert defaults_result["content"][1]["type"] == "resource"
     assert json.loads(defaults_result["content"][1]["resource"]["text"]) == raw_payload
 
-    assert len(captured["read"]) == 2
-    assert len(captured["read_raw"]) == 2
-    assert all(call["helper"] is None for call in captured["read"])
-    assert all(call["helper"] is None for call in captured["read_raw"])
+    assert len(captured) == 4
+    assert all(call["helper"] is None for call in captured)
 
 
 def test_core_read_flow_chain_adds_hf_flow_and_preserves_endpoint_root_payloads(
@@ -1133,7 +1123,7 @@ def test_core_read_flow_chain_adds_hf_flow_and_preserves_endpoint_root_payloads(
         assert helper is None
         return payload_by_helper[next(iter(asks))]
 
-    monkeypatch.setattr(HFTransport, "read", _fake_read)
+    monkeypatch.setattr(HFTransport, "read_raw", _fake_read)
 
     policy = _policy(
         enabled_capabilities={

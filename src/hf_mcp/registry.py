@@ -41,7 +41,6 @@ class ToolSpec:
     capability: str
     operation: Operation
     group: Group
-    helper_path: str | None
     description: str
     input_schema: dict[str, Any]
     required_families: frozenset[str]
@@ -175,7 +174,6 @@ def _tool(
     properties: dict[str, Any],
     *,
     operation: Operation | None = None,
-    helper_path: str | None = None,
     required: tuple[str, ...] = (),
     any_of: tuple[str, ...] = (),
     required_families: tuple[str, ...] = (),
@@ -199,7 +197,6 @@ def _tool(
         capability=capability,
         operation=operation,
         group=group,
-        helper_path=helper_path,
         description=description,
         input_schema=schema,
         required_families=frozenset(required_families),
@@ -224,7 +221,6 @@ _LOCAL_WRITE = (False, False, False, False)
 def _read(
     name: str,
     group: Group,
-    helper: str,
     description: str,
     properties: dict[str, Any],
     **kw: Any,
@@ -235,7 +231,6 @@ def _read(
         group,
         description,
         {**properties, **_output()},
-        helper_path=helper,
         flags=_REMOTE_READ,
         **kw,
     )
@@ -243,7 +238,6 @@ def _read(
 
 def _write(
     name: str,
-    helper: str,
     description: str,
     properties: dict[str, Any],
     **kw: Any,
@@ -254,7 +248,6 @@ def _write(
         "write",
         description,
         properties,
-        helper_path=helper,
         flags=_REMOTE_WRITE,
         **kw,
     )
@@ -266,7 +259,6 @@ TOOLS: tuple[ToolSpec, ...] = (
     _read(
         "me.read",
         "core_read",
-        "me",
         "Read the current account's profile; advanced fields are optional. Output supports readable, structured, or raw modes.",
         {
             "include_basic_fields": _flag("fields.me.basic", True, wire=True),
@@ -276,7 +268,6 @@ TOOLS: tuple[ToolSpec, ...] = (
     _read(
         "users.read",
         "core_read",
-        "users",
         "Read a public user profile by user ID, with optional profile fields, pagination, and readable, structured, or raw output.",
         {
             **_ids("selectors.user", "uid"),
@@ -302,7 +293,6 @@ TOOLS: tuple[ToolSpec, ...] = (
     _read(
         "forums.read",
         "core_read",
-        "forums",
         f"Read forum details by forum ID, {_PAGED_SUFFIX}",
         {**_ids("selectors.forum", "fid"), **_paging()},
         required=("fid",),
@@ -311,7 +301,6 @@ TOOLS: tuple[ToolSpec, ...] = (
     _read(
         "threads.read",
         "core_read",
-        "threads",
         "Browse threads by forum, thread, or user selector; optionally include first-post content. Supports pagination and readable, structured, or raw output.",
         {
             **_ids("selectors.forum", "fid"),
@@ -323,7 +312,6 @@ TOOLS: tuple[ToolSpec, ...] = (
     _read(
         "posts.read",
         "core_read",
-        "posts",
         "Read posts by thread, post, or user selector; optionally include post bodies. Supports pagination and readable, structured, or raw output.",
         {
             **_ids("selectors.post", "pid"),
@@ -336,7 +324,6 @@ TOOLS: tuple[ToolSpec, ...] = (
     _read(
         "bytes.read",
         "extended_read",
-        "bytes",
         "Read a user's Bytes account or transaction entries with supported filters, pagination, and optional amount fields; output can be readable, structured, or raw.",
         {
             **_ids(
@@ -356,7 +343,6 @@ TOOLS: tuple[ToolSpec, ...] = (
     _read(
         "contracts.read",
         "extended_read",
-        "contracts",
         f"Browse contract records by supported contract or user selector, {_PAGED_SUFFIX}",
         {
             **_ids("selectors.contract", "cid", "uid", wire=("cid",)),
@@ -366,7 +352,6 @@ TOOLS: tuple[ToolSpec, ...] = (
     _read(
         "disputes.read",
         "extended_read",
-        "disputes",
         f"Browse disputes by supported dispute or participant selector, {_PAGED_SUFFIX}",
         {
             **_ids(
@@ -384,7 +369,6 @@ TOOLS: tuple[ToolSpec, ...] = (
     _read(
         "bratings.read",
         "extended_read",
-        "bratings",
         f"Browse b-rating records by supported user or contract selector, {_PAGED_SUFFIX}",
         {
             **_ids(
@@ -402,14 +386,12 @@ TOOLS: tuple[ToolSpec, ...] = (
     _read(
         "sigmarket.market.read",
         "extended_read",
-        "sigmarket/market",
         f"Browse Signature Market listings by supported listing or user selector, {_PAGED_SUFFIX}",
         {**_ids("selectors.sigmarket", "uid"), **_paging()},
     ),
     _read(
         "sigmarket.order.read",
         "extended_read",
-        "sigmarket/order",
         f"Browse Signature Market orders by supported order, listing, or user selector, {_PAGED_SUFFIX}",
         {
             **_ids(
@@ -427,7 +409,6 @@ TOOLS: tuple[ToolSpec, ...] = (
     _read(
         "admin.high_risk.read",
         "extended_read",
-        "admin/high-risk/read",
         "Read high-risk admin data when enabled. Supports pagination and readable, structured, or raw output.",
         _paging(),
     ),
@@ -519,7 +500,6 @@ TOOLS: tuple[ToolSpec, ...] = (
     ),
     _write(
         "threads.create",
-        "threads",
         "Send a live thread-creation request to a selected forum with a subject and message. Requires explicit live confirmation.",
         {
             **_ids("selectors.forum", "fid"),
@@ -532,7 +512,6 @@ TOOLS: tuple[ToolSpec, ...] = (
     ),
     _write(
         "posts.reply",
-        "posts",
         "Send a reply to a selected thread with message content and explicit live confirmation.",
         {
             **_ids("selectors.thread", "tid"),
@@ -545,7 +524,6 @@ TOOLS: tuple[ToolSpec, ...] = (
     ),
     _write(
         "bytes.transfer",
-        "bytes",
         "Send a live Bytes transfer to a selected user with an amount and explicit live confirmation.",
         {
             **_ids("selectors.bytes", "target_uid"),
@@ -557,7 +535,6 @@ TOOLS: tuple[ToolSpec, ...] = (
     ),
     _write(
         "bytes.deposit",
-        "bytes/deposit",
         "Send a live Bytes deposit request with an amount and explicit live confirmation.",
         {
             "amount": _p("writes.bytes", "integer", minimum=100),
@@ -568,7 +545,6 @@ TOOLS: tuple[ToolSpec, ...] = (
     ),
     _write(
         "bytes.withdraw",
-        "bytes/withdraw",
         "Send a live Bytes withdrawal request with an amount and explicit live confirmation.",
         {
             "amount": _p("writes.bytes", "integer", minimum=100),
@@ -579,7 +555,6 @@ TOOLS: tuple[ToolSpec, ...] = (
     ),
     _write(
         "bytes.bump",
-        "bytes/bump",
         "Send a live Bytes bump request for a selected thread with explicit live confirmation.",
         {**_ids("selectors.thread", "tid"), **_confirm_live()},
         required=("tid", "confirm_live"),

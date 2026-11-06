@@ -29,7 +29,7 @@ def _coerce_output_mode(raw_value: object, *, field_name: str) -> ReadOutputMode
     return cast(ReadOutputMode, mode)
 
 
-def _coerce_bool(raw_value: object, *, field_name: str) -> bool:
+def coerce_bool(raw_value: object, *, field_name: str) -> bool:
     if not isinstance(raw_value, bool):
         raise ValueError(f"`{field_name}` must be a boolean.")
     return raw_value
@@ -51,7 +51,7 @@ def parse_read_output_defaults(raw_value: object) -> ReadOutputDefaults:
             raw_value["mode"], field_name="read_output_defaults.mode"
         )
     if "include_raw_payload" in raw_value:
-        include_raw_payload = _coerce_bool(
+        include_raw_payload = coerce_bool(
             raw_value["include_raw_payload"],
             field_name="read_output_defaults.include_raw_payload",
         )
@@ -65,7 +65,7 @@ def parse_read_output_defaults(raw_value: object) -> ReadOutputDefaults:
 
 
 def resolve_read_output_defaults(
-    settings: HFMCPSettings,
+    settings: HFMCPSettings | None,
     output_mode: str | None,
     include_raw_payload: bool | None,
     body_format: str | None = None,
@@ -79,7 +79,7 @@ def resolve_read_output_defaults(
     resolved_include_raw_payload = (
         base_defaults.include_raw_payload
         if include_raw_payload is None
-        else _coerce_bool(include_raw_payload, field_name="include_raw_payload")
+        else coerce_bool(include_raw_payload, field_name="include_raw_payload")
     )
     if body_format is None and resolved_mode == "raw":
         resolved_body_format: BodyFormat = "raw"
@@ -94,4 +94,9 @@ def resolve_read_output_defaults(
     )
 
 
-__all__ = ["ReadOutputDefaults", "resolve_read_output_defaults"]
+__all__ = [
+    "ReadOutputDefaults",
+    "ReadOutputMode",
+    "coerce_bool",
+    "resolve_read_output_defaults",
+]

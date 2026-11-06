@@ -731,7 +731,7 @@ def test_extended_read_handler_includes_hf_flow_structured_content(
         assert helper == "sigmarket/order"
         return {"sigmarket/order": [{"smid": "17", "buyer": "2047020", "seller": "1"}]}
 
-    monkeypatch.setattr(HFTransport, "read", _fake_read)
+    monkeypatch.setattr(HFTransport, "read_raw", _fake_read)
     settings = _settings(
         {"sigmarket.order.read"}, {"selectors.sigmarket", "filters.pagination"}
     )
