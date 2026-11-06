@@ -1,17 +1,25 @@
 from __future__ import annotations
 
+import io
+import json
+import logging
+import os
+import stat
+import urllib.error
 import urllib.parse
+import urllib.request
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-
 import hf_mcp.auth as auth_module
 from hf_mcp.auth import authorize_via_loopback
 from hf_mcp.cli import main
 from hf_mcp.config import HFMCPSettings
-from hf_mcp.token_store import TokenBundle, load_token_store
+from hf_mcp.token_store import TokenBundle, TokenStore, load_token_store
+from hf_mcp.transport import HFAPIError
 
 PRODUCT_ROOT = Path(__file__).resolve().parents[1]
 SRC_PATH = PRODUCT_ROOT / "src"
@@ -689,3 +697,341 @@ def test_load_token_store_rejects_repo_relative_path(
     monkeypatch.setenv("HF_MCP_TOKEN_PATH", "products/hf_mcp/token.json")
     with pytest.raises(ValueError, match="absolute path"):
         load_token_store(_settings())
+
+
+# --- private token file and quiet auth failures (HF-R2-AUTH) -------------
+
+MARKER = "SEEDED-SECRET-MARKER"
+
+
+def _write_token(path: Path, mode: int = 0o600) -> None:
+    path.write_text(
+        json.dumps({"access_token": MARKER, "token_type": "Bearer", "scope": ["a"]}),
+        encoding="utf-8",
+    )
+    path.chmod(mode)
+
+
+def _bundle() -> TokenBundle:
+    return TokenBundle(access_token=MARKER, token_type="Bearer", scope=frozenset({"a"}))
+
+
+def test_token_round_trips_and_legacy_0600_file_loads(tmp_path: Path) -> None:
+    store = TokenStore(tmp_path / "sub" / "token.json")
+    store.save_bundle(_bundle())
+    assert stat.S_IMODE(store.path.stat().st_mode) == 0o600
+    assert stat.S_IMODE(store.path.parent.stat().st_mode) == 0o700
+    assert store.load_bundle() == _bundle()
+
+    legacy = tmp_path / "legacy.json"
+    _write_token(legacy)
+    assert TokenStore(legacy).load_bundle() == _bundle()
+    assert TokenStore(tmp_path / "missing.json").load_bundle() is None
+
+
+@pytest.mark.parametrize("mode", [0o400, 0o640, 0o644, 0o700])
+def test_load_rejects_non_0600_modes(tmp_path: Path, mode: int) -> None:
+    path = tmp_path / "token.json"
+    _write_token(path, mode)
+    with pytest.raises(PermissionError) as caught:
+        TokenStore(path).load_bundle()
+    assert MARKER not in str(caught.value)
+    assert str(tmp_path) not in str(caught.value)
+
+
+def test_load_rejects_foreign_owner(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    path = tmp_path / "token.json"
+    _write_token(path)
+    owner = path.stat().st_uid
+    monkeypatch.setattr(os, "geteuid", lambda: owner + 1)
+    with pytest.raises(PermissionError):
+        TokenStore(path).load_bundle()
+
+
+def test_load_rejects_links_fifo_and_directory(tmp_path: Path) -> None:
+    real = tmp_path / "real.json"
+    _write_token(real)
+    link = tmp_path / "link.json"
+    link.symlink_to(real)
+    dangling = tmp_path / "dangling.json"
+    dangling.symlink_to(tmp_path / "nowhere.json")
+    fifo = tmp_path / "fifo.json"
+    os.mkfifo(fifo, 0o600)
+    directory = tmp_path / "dir.json"
+    directory.mkdir(mode=0o600)
+    for path in (link, dangling, fifo, directory):
+        with pytest.raises(PermissionError) as caught:
+            TokenStore(path).load_bundle()
+        assert MARKER not in str(caught.value)
+        assert str(path) not in str(caught.value)
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        b"\xff\xfe",
+        b"{not json",
+        b"[1]",
+        b'{"access_token": ""}',
+        b'{"x":"' + MARKER.encode(),
+    ],
+)
+def test_load_invalid_content_is_fixed_value_error(
+    tmp_path: Path, content: bytes
+) -> None:
+    path = tmp_path / "token.json"
+    path.write_bytes(content)
+    path.chmod(0o600)
+    with pytest.raises(ValueError) as caught:
+        TokenStore(path).load_bundle()
+    assert str(caught.value) == "Token file content is invalid."
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
+
+
+def test_require_missing_is_auth_unavailable_and_load_never_writes(
+    tmp_path: Path,
+) -> None:
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    store = TokenStore(empty / "token.json")
+    with pytest.raises(HFAPIError) as caught:
+        store.require_bundle()
+    assert caught.value.error["code"] == "AUTH_UNAVAILABLE"
+    assert caught.value.error["operation"] == "local"
+    assert list(empty.iterdir()) == []
+
+    bad = tmp_path / "bad.json"
+    _write_token(bad, 0o644)
+    before = (bad.stat().st_mode, bad.read_bytes())
+    with pytest.raises(PermissionError):
+        TokenStore(bad).load_bundle()
+    assert (bad.stat().st_mode, bad.read_bytes()) == before
+
+
+def test_load_token_store_keeps_final_symlink_unresolved(tmp_path: Path) -> None:
+    target = tmp_path / "target.json"
+    _write_token(target)
+    link = tmp_path / "link.json"
+    link.symlink_to(target)
+    store = load_token_store(
+        _settings(token_path=link, runtime_env={"HF_MCP_TOKEN_PATH": str(link)})
+    )
+    assert store.path == link
+    with pytest.raises(PermissionError):
+        store.load_bundle()
+
+
+def test_save_ignores_predictable_tmp_symlink_trap(tmp_path: Path) -> None:
+    victim = tmp_path / "victim.txt"
+    victim.write_text("keep", encoding="utf-8")
+    path = tmp_path / "token.json"
+    (tmp_path / "token.json.tmp").symlink_to(victim)
+    TokenStore(path).save_bundle(_bundle())
+    assert victim.read_text(encoding="utf-8") == "keep"
+    assert TokenStore(path).load_bundle() == _bundle()
+
+
+def test_save_over_symlink_replaces_link_not_target(tmp_path: Path) -> None:
+    victim = tmp_path / "victim.txt"
+    victim.write_text("keep", encoding="utf-8")
+    path = tmp_path / "token.json"
+    path.symlink_to(victim)
+    TokenStore(path).save_bundle(_bundle())
+    assert victim.read_text(encoding="utf-8") == "keep"
+    assert not path.is_symlink()
+
+
+def test_interrupted_save_keeps_prior_file_and_leaves_no_temp(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    work = tmp_path / "work"
+    work.mkdir()
+    path = work / "token.json"
+    _write_token(path)
+    before = path.read_bytes()
+
+    def _boom(*_: object) -> None:
+        raise OSError("disk")
+
+    monkeypatch.setattr(os, "replace", _boom)
+    other = TokenBundle(access_token="other", token_type="Bearer", scope=frozenset())
+    with pytest.raises(OSError):
+        TokenStore(path).save_bundle(other)
+    assert path.read_bytes() == before
+    assert [p.name for p in work.iterdir()] == ["token.json"]
+
+
+def test_save_never_chmods_existing_directory(tmp_path: Path) -> None:
+    tmp_path.chmod(0o755)
+    TokenStore(tmp_path / "token.json").save_bundle(_bundle())
+    assert stat.S_IMODE(tmp_path.stat().st_mode) == 0o755
+
+
+def test_clear_removes_regular_file_only(tmp_path: Path) -> None:
+    path = tmp_path / "token.json"
+    _write_token(path)
+    TokenStore(path).clear()
+    TokenStore(path).clear()
+    assert not path.exists()
+
+    victim = tmp_path / "victim.txt"
+    victim.write_text("keep", encoding="utf-8")
+    link = tmp_path / "link.json"
+    link.symlink_to(victim)
+    with pytest.raises(PermissionError):
+        TokenStore(link).clear()
+    assert victim.exists() and link.is_symlink()
+
+
+def test_loopback_provider_error_param_is_not_reflected(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _FakeRequest:
+        def __init__(self, path: str) -> None:
+            self.path = path
+            self.wfile = io.BytesIO()
+
+        def send_response(self, _: int) -> None:
+            return None
+
+        def send_header(self, *_: str) -> None:
+            return None
+
+        def end_headers(self) -> None:
+            return None
+
+    class _FakeServer:
+        def __init__(self, address: tuple[str, int], handler: Any) -> None:
+            self._handler = handler
+            self.timeout = 0.0
+
+        def handle_request(self) -> None:
+            request = _FakeRequest(f"/callback?error={MARKER}&state={MARKER}")
+            self._handler.do_GET(request)
+
+        def server_close(self) -> None:
+            return None
+
+    monkeypatch.setattr(auth_module, "HTTPServer", _FakeServer)
+    with pytest.raises(HFAPIError) as caught:
+        auth_module._await_loopback_callback(
+            "http://127.0.0.1:8765/callback", timeout_seconds=10
+        )
+    assert caught.value.error["code"] == "AUTH_REJECTED"
+    assert MARKER not in str(caught.value)
+    assert caught.value.__cause__ is None
+
+
+class _Resp:
+    def __init__(self, body: bytes) -> None:
+        self._body = body
+
+    def __enter__(self) -> _Resp:
+        return self
+
+    def __exit__(self, *_: object) -> bool:
+        return False
+
+    def read(self) -> bytes:
+        return self._body
+
+
+def _exchange() -> dict[str, object]:
+    return auth_module._exchange_code_for_token(
+        token_url="https://hackforums.net/api/v2/authorize",
+        client_id="client",
+        client_secret=MARKER,
+        code=MARKER,
+    )
+
+
+def _http_error(status: int) -> urllib.error.HTTPError:
+    return urllib.error.HTTPError(
+        "https://x.test",
+        status,
+        MARKER,
+        {},
+        io.BytesIO(MARKER.encode()),  # type: ignore[arg-type]
+    )
+
+
+@pytest.mark.parametrize(
+    ("make_error", "code"),
+    [
+        (lambda: _http_error(400), "AUTH_REJECTED"),
+        (lambda: _http_error(500), "AUTH_REJECTED"),
+        (lambda: urllib.error.URLError(MARKER), "NETWORK_ERROR"),
+        (lambda: urllib.error.URLError(TimeoutError(MARKER)), "TIMEOUT"),
+        (lambda: TimeoutError(MARKER), "TIMEOUT"),
+        (lambda: ConnectionResetError(MARKER), "NETWORK_ERROR"),
+    ],
+)
+def test_exchange_transport_failures_are_fixed_safe_categories(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
+    make_error: Callable[[], BaseException],
+    code: str,
+) -> None:
+    calls: list[object] = []
+
+    def _urlopen(request: object, timeout: int) -> _Resp:
+        calls.append(request)
+        raise make_error()
+
+    monkeypatch.setattr("hf_mcp.auth.urllib.request.urlopen", _urlopen)
+    caplog.set_level(logging.DEBUG)
+    with pytest.raises(HFAPIError) as caught:
+        _exchange()
+    err = caught.value
+    assert len(calls) == 1
+    assert err.error["code"] == code
+    assert err.error["operation"] == "local"
+    assert err.__cause__ is None and err.__context__ is None
+    assert MARKER not in str(err) and MARKER not in repr(err.error)
+    captured = capsys.readouterr()
+    assert MARKER not in captured.err + captured.out + caplog.text
+
+
+@pytest.mark.parametrize(
+    "body",
+    [b"\xff\xfe", b"{" + MARKER.encode(), b"[1]", b'"' + MARKER.encode() + b'"'],
+)
+def test_exchange_unreadable_body_is_protocol_error(
+    monkeypatch: pytest.MonkeyPatch, body: bytes
+) -> None:
+    monkeypatch.setattr(
+        "hf_mcp.auth.urllib.request.urlopen", lambda request, timeout: _Resp(body)
+    )
+    with pytest.raises(HFAPIError) as caught:
+        _exchange()
+    assert caught.value.error["code"] == "UPSTREAM_PROTOCOL_ERROR"
+    assert MARKER not in str(caught.value)
+    assert caught.value.__context__ is None
+
+
+def test_token_payload_without_access_token_is_protocol_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("hf_mcp.auth.secrets.token_urlsafe", lambda _: "s")
+    monkeypatch.setattr(
+        "hf_mcp.auth._await_loopback_callback",
+        lambda **_: {"code": "abc", "state": "s"},
+    )
+    monkeypatch.setattr(
+        "hf_mcp.auth._exchange_code_for_token", lambda **_: {"token_type": MARKER}
+    )
+    settings = _settings(
+        runtime_env={
+            "HF_MCP_CLIENT_ID": "client",
+            "HF_MCP_CLIENT_SECRET": "secret",
+            "HF_MCP_REDIRECT_URI": "http://127.0.0.1:8765/callback",
+        }
+    )
+    with pytest.raises(HFAPIError) as caught:
+        authorize_via_loopback(settings, open_browser=False)
+    assert caught.value.error["code"] == "UPSTREAM_PROTOCOL_ERROR"
+    assert MARKER not in str(caught.value)
