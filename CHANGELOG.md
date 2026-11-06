@@ -2,6 +2,14 @@
 
 All notable changes to hf-mcp are listed here, newest first.
 
+## 0.8.1
+
+Markdown conversion no longer fails on pathological input, and the installed-build check is more reliable. Deeply nested blockquotes are reported instead of raising an error, and messages that mix `[code]` and `[php]` blocks convert quickly even when they are unbalanced.
+
+- Markdown blockquotes nested deeper than 16 levels no longer raise an internal error. Levels 1 to 16 convert as before; deeper `>` markers stay as literal text, and the conversion reports a `blockquote_depth_truncated` finding (kind `loss`) that covers the whole message.
+- Mixed `[code]` and `[php]` closers now convert in linear time. Text that closes only one of the two tags no longer makes every opener of the other tag rescan to the end of the message. Matches are unchanged: an opener still pairs with the closer of its own tag.
+- `scripts/smoke_installed.py` reads server replies through a line queue, so two replies arriving in one write are no longer lost.
+
 ## 0.8.0
 
 Three new local tools let you convert text and fill your own post templates without touching Hack Forums. `formatting.convert` turns Markdown or MyCode into Hack Forums MyCode and reports what could not be carried over. `templates.list` and `templates.render` read named template files from a folder you choose. Under the hood the server was rebuilt around one tool table, so what a client sees in `tools/list` is exactly what is validated, and the converter no longer slows down on hostile input.
@@ -20,7 +28,7 @@ Breaking:
 - A `custom` profile (or any overlay) must list `output.options` in `enabled_parameter_families` to keep `output_mode`, `include_raw_payload` and `body_format` on the read tools, and `view` and `include_inactive` on `forums.index`. Before, those arguments were always offered; now they are removed from the published schema unless that family is enabled.
 - A tool now registers only when its capability is enabled and every parameter family it requires is enabled; 0.7.2 needed only one overlapping family. The draft tools used to follow `formatting.preflight`; now `drafts.list` and `drafts.read` need `drafts.read`, and `drafts.update` and `drafts.delete` need `drafts.write`, plus their `drafts.selector`, `drafts.filters`, `drafts.metadata` and `drafts.confirm_delete` families as the tool requires. An existing `custom` profile or overlay can lose tools it used to get.
 - The `reader` profile no longer includes `formatting.preflight`, `drafts.update` or `drafts.delete`; they are in `forum_operator` and `full_api`. In exchange `reader` gains `formatting.convert`, `templates.list` and `templates.render`.
-- Messages and sources over 500,000 characters (draft source files: bytes) are refused instead of being accepted, and so are titles, categories and subjects over 512 characters and file selectors over 4,096.
+- Messages and sources over 500,000 characters are refused instead of being accepted, and so are titles, categories and subjects over 512 characters and file selectors over 4,096.
 - The `RESOURCE_UNAVAILABLE` sentence changed from "The requested Hack Forums resource is unavailable." Match on the error `code`, not the text.
 - `forum_operator` grew from 20 to 23 tools and `full_api` from 24 to 27. A client that pins the exact tool list will see the new tools.
 
