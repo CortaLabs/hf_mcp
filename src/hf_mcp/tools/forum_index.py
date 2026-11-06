@@ -5,29 +5,7 @@ from typing import Any
 
 from hf_mcp.flow import attach_hf_flow, build_hf_flow
 from hf_mcp.forum_catalog import build_forum_index_payload, load_forum_catalog
-from hf_mcp.mycode import coerce_body_format
-
-_VALID_OUTPUT_MODES: frozenset[str] = frozenset({"readable", "structured", "raw"})
-
-
-def _coerce_output_mode(raw_value: str | None) -> str:
-    if raw_value is None:
-        return "readable"
-    if not isinstance(raw_value, str):
-        raise ValueError("`output_mode` must be a string.")
-    mode = raw_value.strip()
-    if mode not in _VALID_OUTPUT_MODES:
-        valid = ", ".join(sorted(_VALID_OUTPUT_MODES))
-        raise ValueError(f"Unknown read output mode '{mode}'. Valid modes: {valid}.")
-    return mode
-
-
-def _coerce_bool(raw_value: bool | None, *, field_name: str, default: bool) -> bool:
-    if raw_value is None:
-        return default
-    if not isinstance(raw_value, bool):
-        raise ValueError(f"`{field_name}` must be a boolean.")
-    return raw_value
+from hf_mcp.output_modes import coerce_bool, resolve_read_output_defaults
 
 
 def _iter_nodes(nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -64,19 +42,14 @@ def build_forum_index_handlers() -> dict[str, Any]:
         body_format: str | None = None,
     ) -> dict[str, Any]:
         resolved_view = "flat" if view is None else view
-        resolved_include_inactive = _coerce_bool(
-            include_inactive,
-            field_name="include_inactive",
-            default=False,
+        resolved_include_inactive = (
+            False
+            if include_inactive is None
+            else coerce_bool(include_inactive, field_name="include_inactive")
         )
-        resolved_mode = _coerce_output_mode(output_mode)
-        resolved_include_raw_payload = _coerce_bool(
-            include_raw_payload,
-            field_name="include_raw_payload",
-            default=False,
+        defaults = resolve_read_output_defaults(
+            None, output_mode, include_raw_payload, body_format
         )
-        if body_format is not None:
-            coerce_body_format(body_format, field_name="body_format")
 
         payload = build_forum_index_payload(
             view=resolved_view,
@@ -109,7 +82,7 @@ def build_forum_index_handlers() -> dict[str, Any]:
                 ),
             }
         ]
-        if resolved_mode == "raw" or resolved_include_raw_payload:
+        if defaults.mode == "raw" or defaults.include_raw_payload:
             content.append(
                 {
                     "type": "resource",
