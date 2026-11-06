@@ -7,10 +7,10 @@ from typing import Literal
 from .mycode import (
     ConversionFinding,
     MessageFormat,
-    analyze_conversion,
     coerce_message_format,
+    convert_message,
+    finditer_paired,
     format_body_text,
-    format_write_text,
 )
 from .write_preflight import WritePreflightError, validate_write_body
 
@@ -19,6 +19,7 @@ IssueSeverity = Literal["info", "warn", "error"]
 _JSON_LIKE_CODE_PATTERN = re.compile(
     r"\[(?:code|php)\](?P<body>.*?)\[/\s*(?:code|php)\]", re.IGNORECASE | re.DOTALL
 )
+_JSON_LIKE_CODE_CLOSER_PATTERN = re.compile(r"\[/\s*(?:code|php)\]", re.IGNORECASE)
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,13 +69,12 @@ def prepare_formatting_report(
     value: str, message_format: str = "mycode"
 ) -> FormattingReport:
     source_format = coerce_message_format(message_format, field_name="message_format")
-    mycode = format_write_text(value, source_format)
+    mycode, findings = convert_message(value, source_format)
     validation_issues = _validation_issues(mycode, source_format)
     mutation_issues = _mutation_issues(mycode)
     simulated_hf_mycode = simulate_hf_canonicalization(mycode)
     simulated_agent_markdown = format_body_text(simulated_hf_mycode, "markdown")
     issues = validation_issues + mutation_issues
-    findings = analyze_conversion(value, source_format)
     return FormattingReport(
         source_format=source_format,
         source_text=value,
@@ -134,7 +134,9 @@ def _mutation_issues(mycode: str) -> tuple[FormattingIssue, ...]:
 
     json_like_blocks = [
         match.group("body")
-        for match in _JSON_LIKE_CODE_PATTERN.finditer(mycode)
+        for match in finditer_paired(
+            _JSON_LIKE_CODE_PATTERN, _JSON_LIKE_CODE_CLOSER_PATTERN, mycode
+        )
         if '"' in match.group("body")
         or "{" in match.group("body")
         or "}" in match.group("body")
