@@ -8,11 +8,10 @@ import pytest
 
 from hf_mcp.capabilities import CapabilityPolicy
 from hf_mcp.config import HFMCPSettings
-from hf_mcp.registry import build_registry, get_documented_write_specs, get_tool_spec
-from hf_mcp.schemas import build_tool_schema
+from hf_mcp.registry import TOOLS, get_specs, get_tool_spec
 from hf_mcp.token_store import TokenBundle
 from hf_mcp.transport import HFTransport
-from hf_mcp.formatting_engine import write_draft_artifact
+from hf_mcp.draft_store import write_draft_artifact
 from hf_mcp.tools.write_documented import (
     build_write_handlers,
     bump_live,
@@ -84,8 +83,8 @@ def _policy(
 
 
 def test_write_specs_include_only_concrete_core_rows_for_absence_path() -> None:
-    specs = get_documented_write_specs()
-    assert {spec.tool_name for spec in specs} == {
+    specs = get_specs("write")
+    assert {spec.name for spec in specs} == {
         "threads.create",
         "posts.reply",
         "bytes.transfer",
@@ -94,7 +93,7 @@ def test_write_specs_include_only_concrete_core_rows_for_absence_path() -> None:
         "bytes.bump",
     }
     forbidden = {"contracts.write", "sigmarket.write", "admin.high_risk.write"}
-    assert forbidden.isdisjoint({spec.tool_name for spec in build_registry()})
+    assert forbidden.isdisjoint({spec.name for spec in TOOLS})
 
 
 def test_build_write_handlers_registers_only_core_rows_allowed_by_policy() -> None:
@@ -707,7 +706,7 @@ def test_handlers_accept_kwargs_generated_from_repaired_write_schemas() -> None:
     }
 
     for tool_name, kwargs in schema_kwargs.items():
-        schema = build_tool_schema(get_tool_spec(tool_name), policy)
+        schema = policy.input_schema(get_tool_spec(tool_name))
         assert set(kwargs) == set(schema["properties"])
         handlers[tool_name](**kwargs)
 

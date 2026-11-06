@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import copy
 from pathlib import Path
 
 
 import hf_mcp
-from hf_mcp.flow import FLOW_KEY, attach_hf_flow, build_hf_flow
+from hf_mcp.flow import FLOW_KEY, attach_hf_flow, build_hf_flow, prune_flow_actions
 
 PRODUCT_ROOT = Path(__file__).resolve().parents[1]
 SRC_PATH = PRODUCT_ROOT / "src"
@@ -345,3 +346,73 @@ def test_flow_envelope_reports_server_name_and_package_version() -> None:
         )
         assert flow["version"] == 1
         assert flow["server"] == {"name": "hf-mcp", "version": hf_mcp.__version__}
+
+
+def _threads_envelope() -> dict[str, object]:
+    payload = {"threads": [{"tid": "6324346", "fid": "12", "uid": "5"}]}
+    flow = build_hf_flow(
+        tool_name="threads.read", normalized_payload=payload, arguments={}
+    )
+    return attach_hf_flow({"threads": payload["threads"]}, flow)
+
+
+def test_prune_flow_actions_drops_actions_for_disabled_tools() -> None:
+    envelope = _threads_envelope()
+    assert set(_action_tools(envelope[FLOW_KEY])) == {
+        "posts.read",
+        "users.read",
+        "forums.read",
+    }
+
+    pruned = prune_flow_actions(envelope, {"posts.read", "forums.read"})
+
+    assert set(_action_tools(pruned[FLOW_KEY])) == {"posts.read", "forums.read"}
+    assert pruned["threads"] == envelope["threads"]
+    assert pruned[FLOW_KEY]["entities"] == envelope[FLOW_KEY]["entities"]
+    assert prune_flow_actions(envelope, set())[FLOW_KEY]["next_actions"] == []
+
+
+def test_prune_flow_actions_keeps_remaining_actions_in_order() -> None:
+    envelope = _threads_envelope()
+    original = _action_tools(envelope[FLOW_KEY])
+
+    pruned = prune_flow_actions(envelope, {"forums.read", "posts.read"})
+
+    assert _action_tools(pruned[FLOW_KEY]) == [
+        tool for tool in original if tool in {"forums.read", "posts.read"}
+    ]
+
+
+def test_prune_flow_actions_returns_a_copy_and_never_mutates_its_input() -> None:
+    envelope = _threads_envelope()
+    snapshot = copy.deepcopy(envelope)
+
+    pruned = prune_flow_actions(envelope, {"posts.read"})
+
+    assert envelope == snapshot
+    assert pruned is not envelope
+    assert pruned[FLOW_KEY] is not envelope[FLOW_KEY]
+    assert pruned[FLOW_KEY]["next_actions"] is not envelope[FLOW_KEY]["next_actions"]
+    plain = {"ok": True}
+    assert prune_flow_actions(plain, {"posts.read"}) == plain
+    assert prune_flow_actions(plain, {"posts.read"}) is not plain
+
+
+def test_prune_flow_actions_drops_non_string_and_unhashable_tools() -> None:
+    kept = {"tool": "posts.read", "arguments": {}, "label": "kept"}
+    envelope = {
+        FLOW_KEY: {
+            "next_actions": [
+                {"tool": ["posts.read"], "arguments": {}, "label": "list"},
+                {"tool": {"name": "posts.read"}, "arguments": {}, "label": "dict"},
+                {"tool": 7, "arguments": {}, "label": "int"},
+                {"tool": None, "arguments": {}, "label": "none"},
+                {"arguments": {}, "label": "missing"},
+                kept,
+            ]
+        }
+    }
+
+    pruned = prune_flow_actions(envelope, frozenset({"posts.read"}))
+
+    assert pruned[FLOW_KEY]["next_actions"] == [kept]

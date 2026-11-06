@@ -7,13 +7,11 @@ from typing import Any
 import pytest
 
 
-from hf_mcp.capabilities import CAPABILITY_PARAMETER_FAMILIES, CapabilityPolicy
+from hf_mcp.capabilities import CapabilityPolicy
 from hf_mcp.config import HFMCPSettings
-from hf_mcp.dispatcher import RuntimeBundle, register_tools
-from hf_mcp.normalizers import normalize_response
+from hf_mcp.dispatcher import build_handlers
 from hf_mcp.output_modes import ReadOutputDefaults
-from hf_mcp.registry import get_core_read_specs, get_tool_spec, mcp_tool_name
-from hf_mcp.schemas import build_tool_schema
+from hf_mcp.registry import WIRE_KEY, get_specs, get_tool_spec
 from hf_mcp.token_store import TokenBundle
 from hf_mcp.tools.read_core import (
     build_core_read_handlers,
@@ -23,33 +21,11 @@ from hf_mcp.tools.read_core import (
     list_posts,
     list_threads,
 )
+from hf_mcp.tools.read_extended import build_extended_read_handlers
 from hf_mcp.transport import HFTransport
 
 PRODUCT_ROOT = Path(__file__).resolve().parents[1]
 SRC_PATH = PRODUCT_ROOT / "src"
-
-
-class _CaptureServer:
-    def __init__(self) -> None:
-        self.tools: dict[str, dict[str, Any]] = {}
-
-    def register_tool(
-        self,
-        *,
-        name: str,
-        description: str,
-        input_schema: dict[str, Any],
-        annotations: dict[str, Any],
-        output_schema: dict[str, object] | None = None,
-        handler: Any,
-    ) -> None:
-        self.tools[name] = {
-            "description": description,
-            "input_schema": input_schema,
-            "annotations": annotations,
-            "output_schema": output_schema,
-            "handler": handler,
-        }
 
 
 @pytest.mark.parametrize("tool_name", ["me.read", "users.read"])
@@ -73,7 +49,7 @@ def test_account_reads_use_generic_route_in_all_output_modes(
     monkeypatch.setattr(HFTransport, "_post_json", fake_post)
     policy = _policy(
         enabled_capabilities={tool_name},
-        enabled_parameter_families=set(CAPABILITY_PARAMETER_FAMILIES[tool_name]),
+        enabled_parameter_families=set(get_tool_spec(tool_name).families),
     )
     handlers = build_core_read_handlers(policy, HFTransport(_StubTokenStore()))
     kwargs = {"uid": 5} if tool_name == "users.read" else {}
@@ -105,8 +81,8 @@ def _policy(
 
 
 def test_core_read_specs_match_registry_rows_and_parameter_families() -> None:
-    specs = get_core_read_specs()
-    assert {spec.tool_name for spec in specs} == {
+    specs = get_specs("core_read")
+    assert {spec.name for spec in specs} == {
         "me.read",
         "users.read",
         "forums.read",
@@ -114,9 +90,8 @@ def test_core_read_specs_match_registry_rows_and_parameter_families() -> None:
         "posts.read",
     }
     for spec in specs:
-        assert set(spec.parameter_families) == set(
-            CAPABILITY_PARAMETER_FAMILIES[spec.capability_family]
-        )
+        assert get_tool_spec(spec.name) is spec
+        assert spec.group == "core_read"
 
 
 def test_build_core_read_handlers_registers_only_policy_allowed_core_rows() -> None:
@@ -147,7 +122,7 @@ def test_me_schema_prunes_advanced_parameter_when_family_not_allowed() -> None:
         enabled_parameter_families={"selectors.user", "fields.me.basic"},
     )
 
-    schema = build_tool_schema(spec, policy)
+    schema = policy.input_schema(spec)
 
     assert "include_basic_fields" in schema["properties"]
     assert "include_advanced_fields" not in schema["properties"]
@@ -165,8 +140,8 @@ def test_threads_and_posts_schema_accept_any_supported_selector() -> None:
         },
     )
 
-    threads_schema = build_tool_schema(get_tool_spec("threads.read"), policy)
-    posts_schema = build_tool_schema(get_tool_spec("posts.read"), policy)
+    threads_schema = policy.input_schema(get_tool_spec("threads.read"))
+    posts_schema = policy.input_schema(get_tool_spec("posts.read"))
 
     assert {"fid", "tid", "uid"} <= set(threads_schema["properties"])
     assert "required" not in threads_schema
@@ -186,21 +161,17 @@ def test_threads_and_posts_schema_accept_any_supported_selector() -> None:
 
 
 def test_dispatcher_output_excludes_disabled_core_read_capability() -> None:
-    policy = _policy(
-        enabled_capabilities={"users.read"},
-        enabled_parameter_families={
-            "selectors.user",
-            "fields.users.profile",
-            "filters.pagination",
-        },
+    settings = HFMCPSettings(
+        profile="test",
+        enabled_capabilities=frozenset({"users.read"}),
+        enabled_parameter_families=frozenset(
+            {"selectors.user", "fields.users.profile", "filters.pagination"}
+        ),
     )
-    server = _CaptureServer()
 
-    register_tools(server, policy, RuntimeBundle())
+    handlers = build_handlers(CapabilityPolicy(settings), settings, None)
 
-    assert mcp_tool_name("users.read") not in server.tools
-    assert mcp_tool_name("me.read") not in server.tools
-    assert mcp_tool_name("forums.read") not in server.tools
+    assert handlers == {}
 
 
 def test_list_posts_delegates_to_generic_transport_and_returns_normalized_output(
@@ -913,7 +884,7 @@ def test_registered_posts_handler_formats_mycode_body_fields_by_default(
     }
 
     monkeypatch.setattr(
-        HFTransport, "read", lambda self, asks, helper=None: normalize_response(payload)
+        HFTransport, "read_raw", lambda self, asks, helper=None: payload
     )
 
     settings = HFMCPSettings(
@@ -968,7 +939,7 @@ def test_registered_threads_handler_returns_rich_markdown_thread_content(
     }
 
     monkeypatch.setattr(
-        HFTransport, "read", lambda self, asks, helper=None: normalized_payload
+        HFTransport, "read_raw", lambda self, asks, helper=None: normalized_payload
     )
 
     settings = HFMCPSettings(
@@ -1005,7 +976,7 @@ def test_registered_threads_handler_returns_rich_markdown_thread_content(
 def test_registered_posts_handler_supports_output_modes_and_raw_payload_attachment(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    captured: dict[str, list[dict[str, Any]]] = {"read": [], "read_raw": []}
+    captured: list[dict[str, Any]] = []
     normalized_payload = {
         "posts": [
             {
@@ -1041,19 +1012,12 @@ def test_registered_posts_handler_supports_output_modes_and_raw_payload_attachme
         }
     }
 
-    def _fake_read(
-        self: HFTransport, asks: dict[str, Any], helper: str | None = None
-    ) -> dict[str, Any]:
-        captured["read"].append({"asks": asks, "helper": helper})
-        return normalized_payload
-
     def _fake_read_raw(
         self: HFTransport, asks: dict[str, Any], helper: str | None = None
     ) -> dict[str, Any]:
-        captured["read_raw"].append({"asks": asks, "helper": helper})
+        captured.append({"asks": asks, "helper": helper})
         return raw_payload
 
-    monkeypatch.setattr(HFTransport, "read", _fake_read)
     monkeypatch.setattr(HFTransport, "read_raw", _fake_read_raw)
 
     settings = HFMCPSettings(
@@ -1119,10 +1083,8 @@ def test_registered_posts_handler_supports_output_modes_and_raw_payload_attachme
     assert defaults_result["content"][1]["type"] == "resource"
     assert json.loads(defaults_result["content"][1]["resource"]["text"]) == raw_payload
 
-    assert len(captured["read"]) == 2
-    assert len(captured["read_raw"]) == 2
-    assert all(call["helper"] is None for call in captured["read"])
-    assert all(call["helper"] is None for call in captured["read_raw"])
+    assert len(captured) == 4
+    assert all(call["helper"] is None for call in captured)
 
 
 def test_core_read_flow_chain_adds_hf_flow_and_preserves_endpoint_root_payloads(
@@ -1162,7 +1124,7 @@ def test_core_read_flow_chain_adds_hf_flow_and_preserves_endpoint_root_payloads(
         assert helper is None
         return payload_by_helper[next(iter(asks))]
 
-    monkeypatch.setattr(HFTransport, "read", _fake_read)
+    monkeypatch.setattr(HFTransport, "read_raw", _fake_read)
 
     policy = _policy(
         enabled_capabilities={
@@ -1225,3 +1187,81 @@ def test_core_read_flow_chain_adds_hf_flow_and_preserves_endpoint_root_payloads(
     assert ("users.read", (("uid", 5),)) in post_actions
     assert ("forums.read", (("fid", 375),)) in post_actions
     assert ("posts.read", (("pid", 7),)) in post_actions
+
+
+_TOGGLE_SELECTORS: dict[str, dict[str, Any]] = {
+    "users.read": {"uid": 5},
+    "posts.read": {"tid": 7},
+}
+
+
+def _wire_include_toggles() -> list[tuple[str, str]]:
+    return [
+        (spec.name, name)
+        for spec in get_specs("core_read") + get_specs("extended_read")
+        for name, prop in spec.input_schema["properties"].items()
+        if name.startswith("include_")
+        and name != "include_raw_payload"
+        and prop.get(WIRE_KEY)
+    ]
+
+
+class _AsksRecorder(HFTransport):
+    def __init__(self) -> None:
+        super().__init__(token_store=_StubTokenStore(), base_url="https://x.test")
+        self.asks: dict[str, Any] = {}
+
+    def read_raw(self, asks: Any, helper: str | None = None) -> dict[str, Any]:  # type: ignore[override]
+        self.asks = asks
+        return {}
+
+
+def _toggle_asks(tool_name: str, toggle: str, value: bool) -> dict[str, Any]:
+    recorder = _AsksRecorder()
+    policy = _policy(
+        enabled_capabilities={tool_name},
+        enabled_parameter_families=set(get_tool_spec(tool_name).families),
+    )
+    handlers = build_core_read_handlers(policy, recorder)
+    handlers.update(build_extended_read_handlers(policy, recorder))
+    handlers[tool_name](**_TOGGLE_SELECTORS.get(tool_name, {}), **{toggle: value})
+    (body,) = recorder.asks.values()
+    return dict(body)
+
+
+# The exact request fields each include_* toggle adds, written out independently
+# of the client's field table (the 0.7.2 wire contract).
+_TOGGLE_FIELDS: dict[tuple[str, str], frozenset[str]] = {
+    ("me.read", "include_basic_fields"): frozenset(
+        "uid username usergroup displaygroup additionalgroups postnum awards bytes "
+        "vault threadnum avatar avatardimensions avatartype lastvisit usertitle "
+        "website timeonline reputation referrals".split()
+    ),
+    ("me.read", "include_advanced_fields"): frozenset(
+        "invisible lastactive totalpms unreadpms warningpoints".split()
+    ),
+    ("users.read", "include_profile_fields"): frozenset(
+        "uid username usergroup displaygroup additionalgroups postnum awards myps "
+        "threadnum avatar avatardimensions avatartype usertitle website timeonline "
+        "reputation referrals".split()
+    ),
+    ("posts.read", "include_post_body"): frozenset({"message"}),
+    ("bytes.read", "include_amount"): frozenset({"amount"}),
+}
+
+
+def test_every_include_toggle_in_the_registry_has_an_expected_field_set() -> None:
+    assert set(_wire_include_toggles()) == set(_TOGGLE_FIELDS)
+
+
+@pytest.mark.parametrize(("tool_name", "toggle"), sorted(_TOGGLE_FIELDS))
+def test_include_toggle_adds_exactly_its_request_fields(
+    tool_name: str, toggle: str
+) -> None:
+    on = _toggle_asks(tool_name, toggle, True)
+    off = _toggle_asks(tool_name, toggle, False)
+
+    assert set(on) - set(off) == _TOGGLE_FIELDS[(tool_name, toggle)]
+    assert set(off) - set(on) == set()
+    assert all(on[field] is True for field in _TOGGLE_FIELDS[(tool_name, toggle)])
+    assert {key: off[key] for key in off} == {key: on[key] for key in off}

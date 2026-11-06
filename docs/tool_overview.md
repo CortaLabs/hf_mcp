@@ -111,6 +111,35 @@ PM boundary:
 | `sigmarket.order.read` | available now | Browse-first optional-filter read |
 | `admin.high_risk.read` | available now | Read high-risk admin surface data (privileged scope) |
 
+## Available local tools
+
+These run on your machine only. Nothing is sent to Hack Forums, and none of them
+takes `confirm_live`.
+
+| Tool | Availability | What it is for |
+|---|---|---|
+| `formatting.preflight` | available now | Check how MyCode or Markdown converts to Hack Forums MyCode, report conversion findings, and optionally save a local draft |
+| `formatting.convert` | available now | Convert Markdown or MyCode (`message`, `message_format`) to Hack Forums MyCode and report `conversion_findings`; nothing is saved |
+| `templates.list` | available now | List the named templates in `templates_dir` with their placeholders; invalid files are only counted in `invalid_count` |
+| `templates.render` | available now | Fill a named template (`name`, `values`) and return its `source_text` and Hack Forums `mycode`; nothing is saved |
+| `drafts.list` | available now | List local drafts with optional status, category, title or schedule filters |
+| `drafts.read` | available now | Read one local draft by `draft_id` or `draft_path`, including its full MyCode |
+| `drafts.update` | available now | Update a local draft's title, category, status or scheduled-time metadata |
+| `drafts.delete` | available now | Delete a local draft (needs explicit delete confirmation) |
+
+Template file rules and the `templates_dir` setting are in
+[`configuration.md`](configuration.md#post-templates). Every free-text message or
+source is limited to 500,000 characters.
+
+## Profiles
+
+| Profile | Tools |
+|---|---|
+| `reader` (default) | 18: all 13 reads, `formatting.convert`, `templates.list`, `templates.render`, `drafts.list`, `drafts.read` |
+| `forum_operator` | 23: `reader` plus `formatting.preflight`, `drafts.update`, `drafts.delete`, `threads.create`, `posts.reply` |
+| `full_api` | all 27: `forum_operator` plus `bytes.transfer`, `bytes.deposit`, `bytes.withdraw`, `bytes.bump` |
+| `custom` | none until you opt in; list `output.options` among the enabled parameter families to keep `output_mode`, `include_raw_payload` and `body_format` (plus `view` and `include_inactive` on `forums.index`) |
+
 ## Available writes
 
 All write tools below require `confirm_live=true`.

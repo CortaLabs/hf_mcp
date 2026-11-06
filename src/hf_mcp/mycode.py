@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import lru_cache
 import re
-from typing import Callable, Iterator, Literal, cast
+from typing import Callable, Iterable, Iterator, Literal, cast
 
 BodyFormat = Literal["raw", "clean", "markdown"]
 MessageFormat = Literal["mycode", "markdown"]
@@ -53,9 +54,22 @@ _MYCODE_TAG_PATTERN = re.compile(
 )
 _RAW_MYCODE_TAG_PATTERN = re.compile(r"\[/?[a-zA-Z][a-zA-Z0-9_-]*(?:=[^\]]*)?\]|\[\*\]")
 _MARKDOWN_SETEXT_PATTERN = re.compile(r"^ {0,3}(?:=+|-+)[ \t]*$")
+_CODE_CLOSER_PATTERN = re.compile(r"\[/(?:code|php)\]", re.IGNORECASE)
+_QUOTE_CLOSER_PATTERN = re.compile(r"\[/quote\]", re.IGNORECASE)
+_LIST_CLOSER_PATTERN = re.compile(r"\[/list\]", re.IGNORECASE)
+_URL_CLOSER_PATTERN = re.compile(r"\[/url\]", re.IGNORECASE)
+_IMAGE_CLOSER_PATTERN = re.compile(r"\[/\s*(?:img|uimg)\]", re.IGNORECASE)
 _STRUCTURAL_TAGS: frozenset[str] = frozenset(
     {"url", "img", "uimg", "quote", "list", "code", "php"}
 )
+_LINE_BREAK_PATTERN = re.compile(r"\r\n?")
+_NON_LINE_BREAK_PATTERN = re.compile(r"[^\r\n]")
+_EMPHASIS_RUN_PATTERN = re.compile(r"\*+|_+|~+")
+_ESCAPE_RUN_PATTERN = re.compile(r"\\+")
+_LABEL_SPECIAL_PATTERN = re.compile(r"[\\\[\]*_~]")
+_WHITESPACE_PATTERN = re.compile(r"\s")
+_LINK_OPENING_PATTERN = re.compile(r"!?\[")
+_BRACKET_OR_ESCAPE_PATTERN = re.compile(r"[\\\[\]]")
 _ESCAPABLE = r"!\"#$%&'()*+,-./:;<=>?@[\]^_`{|}~"
 
 
@@ -94,41 +108,66 @@ class _MappedText:
     @classmethod
     def from_source(cls, value: str) -> _MappedText:
         """Map text to its source, folding CRLF and lone CR into LF."""
-        characters: list[str] = []
+        if "\r" not in value:
+            return cls(value, list(zip(range(len(value)), range(1, len(value) + 1))))
+        pieces: list[str] = []
         spans: list[tuple[int, int]] = []
-        index = 0
-        while index < len(value):
-            if value[index] == "\r":
-                width = 2 if value.startswith("\r\n", index) else 1
-                characters.append("\n")
-                spans.append((index, index + width))
-                index += width
-            else:
-                characters.append(value[index])
-                spans.append((index, index + 1))
-                index += 1
-        return cls("".join(characters), spans)
+        cursor = 0
+        for match in _LINE_BREAK_PATTERN.finditer(value):
+            plain = value[cursor : match.start()]
+            pieces.append(plain)
+            spans.extend(
+                zip(range(cursor, match.start()), range(cursor + 1, match.start() + 1))
+            )
+            pieces.append("\n")
+            spans.append((match.start(), match.end()))
+            cursor = match.end()
+        pieces.append(value[cursor:])
+        spans.extend(zip(range(cursor, len(value)), range(cursor + 1, len(value) + 1)))
+        return cls("".join(pieces), spans)
 
     def source_span(self, start: int, end: int) -> tuple[int, int]:
-        spans = self.source_spans[start:end]
-        if not spans:
+        # Spans are ordered, so a range's first start and last end bound it.
+        end = min(end, len(self.source_spans))
+        if start >= end:
             return 0, 0
-        return min(span[0] for span in spans), max(span[1] for span in spans)
+        return self.source_spans[start][0], self.source_spans[end - 1][1]
 
-    def replace(self, start: int, end: int, replacement: str) -> None:
-        source_span = self.source_span(start, end)
-        self.text = self.text[:start] + replacement + self.text[end:]
-        self.source_spans[start:end] = [source_span] * len(replacement)
+    def replace_many(self, edits: list[tuple[int, int, str]]) -> None:
+        """Apply non-overlapping edits, given in any order, in one linear pass.
+
+        Every edit addresses the text as it was before the call, and each
+        replacement inherits the source span of the range it replaces.
+        """
+        if not edits:
+            return
+        text_parts: list[str] = []
+        spans: list[tuple[int, int]] = []
+        cursor = 0
+        for start, end, replacement in sorted(edits, key=lambda item: item[0]):
+            source_span = self.source_span(start, end)
+            text_parts.append(self.text[cursor:start])
+            text_parts.append(replacement)
+            spans.extend(self.source_spans[cursor:start])
+            spans.extend([source_span] * len(replacement))
+            cursor = end
+        text_parts.append(self.text[cursor:])
+        spans.extend(self.source_spans[cursor:])
+        self.text = "".join(text_parts)
+        self.source_spans = spans
 
 
 class _Shield:
     """The one protection mechanism: swap text for an inert token, restore it last."""
 
-    def __init__(self, source: str, label: str) -> None:
+    def __init__(self, source: str, label: str, *, joiner: str = "_") -> None:
+        # `joiner` lets a caller keep emphasis characters out of its tokens, so the
+        # emphasis scanner never stops inside a token.
         attempt = 0
-        while f"\x00HF_MCP_{label}_{attempt}_" in source:
+        while f"\x00HF{joiner}MCP{joiner}{label}{joiner}{attempt}{joiner}" in source:
             attempt += 1
-        self._prefix = f"\x00HF_MCP_{label}_{attempt}_"
+        self._prefix = f"\x00HF{joiner}MCP{joiner}{label}{joiner}{attempt}{joiner}"
+        self._token_pattern = re.compile(re.escape(self._prefix) + r"(\d+)\x00")
         self._items: list[str] = []
 
     def token(self, replacement: str) -> str:
@@ -136,10 +175,15 @@ class _Shield:
         return f"{self._prefix}{len(self._items) - 1}\x00"
 
     def restore(self, text: str) -> str:
-        # Later items may embed earlier tokens, so unwind in reverse.
-        for index in reversed(range(len(self._items))):
-            text = text.replace(f"{self._prefix}{index}\x00", self._items[index])
-        return text
+        # An item only embeds tokens minted before it, so expanding each token
+        # recursively in one pass equals unwinding the items in reverse.
+        def expand(match: re.Match[str]) -> str:
+            index = int(match.group(1))
+            if index >= len(self._items):
+                return match.group(0)
+            return self._token_pattern.sub(expand, self._items[index])
+
+        return self._token_pattern.sub(expand, text)
 
 
 TAG_RULES: dict[str, MyCodeRule] = {
@@ -198,6 +242,9 @@ def coerce_message_format(raw_value: object, *, field_name: str) -> MessageForma
 def format_body_text(value: str, body_format: BodyFormat) -> str:
     if body_format == "raw":
         return value
+    if "[" not in value and "&" not in value and "\\" not in value:
+        # Every rewrite below starts from a `[`, `&` or `\`; plain text only tidies.
+        return _tidy_text(value)
 
     shield = _Shield(value, "PROTECTED_CODE")
 
@@ -212,7 +259,7 @@ def format_body_text(value: str, body_format: BodyFormat) -> str:
             return "\n" + shield.token(block) + "\n"
         return shield.token(code)
 
-    text = _CODE_BLOCK_PATTERN.sub(_stash_code, value)
+    text = _sub_paired(_CODE_BLOCK_PATTERN, _CODE_CLOSER_PATTERN, _stash_code, value)
     text = _protect_malformed_markup(text, shield)
     text = _convert_spoilers(text)
     text = _convert_quotes(text, body_format)
@@ -240,35 +287,40 @@ def _protect_malformed_markup(text: str, shield: _Shield) -> str:
 
 def _malformed_markup_ranges(text: str) -> list[tuple[int, int]]:
     stack: list[tuple[str, int]] = []
+    # Stack indices of each open tag name, so the nearest opener of a closing
+    # tag is found without walking the stack.
+    open_indices: dict[str, list[int]] = {}
     malformed_start: int | None = None
     malformed_ranges: list[tuple[int, int]] = []
 
-    for match in _MYCODE_TAG_PATTERN.finditer(text):
-        tag_name = match.group("name").lower()
+    tag_names: dict[str, tuple[str, bool]] = {}  # raw name -> (lowercase, is void)
+
+    for match in _finditer_closed(_MYCODE_TAG_PATTERN, text):
+        raw_name = match.group("name")
+        known = tag_names.get(raw_name)
+        if known is None:
+            lowered = raw_name.lower()
+            known = tag_names[raw_name] = (lowered, _is_void_tag(lowered))
+        tag_name, is_void = known
         if not match.group("close"):
-            if not _is_void_tag(tag_name):
+            if not is_void:
+                open_indices.setdefault(tag_name, []).append(len(stack))
                 stack.append((tag_name, match.start()))
             continue
 
-        matching_index = next(
-            (
-                index
-                for index in range(len(stack) - 1, -1, -1)
-                if stack[index][0] == tag_name
-            ),
-            None,
-        )
-        if matching_index is None:
+        indices = open_indices.get(tag_name)
+        if not indices:
             if stack and malformed_start is None:
                 malformed_start = stack[0][1]
             continue
+        matching_index = indices[-1]
 
         if matching_index != len(stack) - 1:
             if malformed_start is None:
                 malformed_start = stack[0][1]
-            del stack[matching_index:]
-        else:
-            stack.pop()
+        for dropped_name, _ in stack[matching_index:]:
+            open_indices[dropped_name].pop()
+        del stack[matching_index:]
 
         if malformed_start is not None and not stack:
             malformed_ranges.append((malformed_start, match.end()))
@@ -281,13 +333,58 @@ def _malformed_markup_ranges(text: str) -> list[tuple[int, int]]:
     return malformed_ranges
 
 
+def _finditer_closed(pattern: re.Pattern[str], text: str) -> Iterator[re.Match[str]]:
+    """Scan only up to the last `]`, which every bracketed tag pattern must end on.
+
+    A tag opener with an unterminated `[^\\]]*` attribute otherwise rescans to the
+    end of the text from every `[`, which is quadratic on repeated openers. No
+    match can end past the last `]`, so bounding the scan never changes a match.
+    """
+    return pattern.finditer(text, 0, text.rfind("]") + 1)
+
+
+def finditer_paired(
+    pattern: re.Pattern[str], closer: re.Pattern[str], text: str
+) -> Iterator[re.Match[str]]:
+    """Match an opener-to-closer pattern without rescanning for missing closers.
+
+    A lazy `opener(.*?)closer` pattern retries every opener that no closer
+    follows by scanning to the end of the text, which is quadratic on repeated
+    openers. No match can end past the last closer, so bounding the scan there
+    never changes a match.
+    """
+    last_closer_end = 0
+    for last in closer.finditer(text):
+        last_closer_end = last.end()
+    return pattern.finditer(text, 0, last_closer_end)
+
+
+def _sub_paired(
+    pattern: re.Pattern[str],
+    closer: re.Pattern[str],
+    replace: Callable[[re.Match[str]], str],
+    text: str,
+) -> str:
+    """`pattern.sub(replace, text)` built on `finditer_paired`."""
+    pieces: list[str] = []
+    cursor = 0
+    for match in finditer_paired(pattern, closer, text):
+        pieces.append(text[cursor : match.start()])
+        pieces.append(replace(match))
+        cursor = match.end()
+    if not pieces:
+        return text
+    pieces.append(text[cursor:])
+    return "".join(pieces)
+
+
 def _is_void_tag(name: str) -> bool:
     rule = TAG_RULES.get(name)
     return rule is not None and rule.void
 
 
 def _convert_spoilers(text: str) -> str:
-    matches = list(_SPOILER_TAG_PATTERN.finditer(text))
+    matches = list(_finditer_closed(_SPOILER_TAG_PATTERN, text))
     open_stack: list[int] = []
     paired_openings: set[int] = set()
     paired_closings: set[int] = set()
@@ -326,20 +423,37 @@ def markdown_to_mycode(value: str) -> str:
     return _convert_markdown_to_mycode(value).text
 
 
-def _mask(chars: list[str], start: int, end: int) -> None:
-    for position in range(start, end):
-        if chars[position] not in "\r\n":
-            chars[position] = " "
+def _masked(text: str, ranges: Iterable[tuple[int, int]]) -> str:
+    """Blank every character in `ranges` except line breaks, keeping all offsets."""
+    pieces: list[str] = []
+    cursor = 0
+    for start, end in sorted(ranges):
+        if end <= cursor:
+            continue
+        start = max(start, cursor)
+        pieces.append(text[cursor:start])
+        pieces.append(_NON_LINE_BREAK_PATTERN.sub(" ", text[start:end]))
+        cursor = end
+    pieces.append(text[cursor:])
+    return "".join(pieces)
 
 
 def _convert_markdown_to_mycode(value: str) -> _ConversionResult:
     findings: list[ConversionFinding] = []
-    shield = _Shield(value, "MARKDOWN")
+    shield = _Shield(value, "MD", joiner="-")
     mapped = _MappedText.from_source(value)
     readable_protected_spans: list[tuple[int, int]] = []
 
+    pending_edits: list[tuple[int, int, str]] = []
+
     def protect_range(start: int, end: int, replacement: str) -> None:
-        mapped.replace(start, end, shield.token(replacement))
+        # Each phase walks its matches last-to-first against one snapshot of the
+        # text; the edits land together so a phase costs one pass, not one per match.
+        pending_edits.append((start, end, shield.token(replacement)))
+
+    def apply_protected() -> None:
+        mapped.replace_many(pending_edits)
+        pending_edits.clear()
 
     def finding(
         code: str,
@@ -352,16 +466,18 @@ def _convert_markdown_to_mycode(value: str) -> _ConversionResult:
 
     # Tilde fences and pipe tables are located with backtick fences masked, so
     # their contents never read as a table; both are emitted verbatim or as code.
-    analysis_chars = list(mapped.text)
-    for match in _MARKDOWN_CODE_BLOCK_PATTERN.finditer(mapped.text):
-        _mask(analysis_chars, match.start(), match.end())
+    without_code = _masked(
+        mapped.text,
+        (m.span() for m in _MARKDOWN_CODE_BLOCK_PATTERN.finditer(mapped.text)),
+    )
     protected_source_ranges: list[tuple[int, int, str]] = []
-    for match in _MARKDOWN_TILDE_FENCE_PATTERN.finditer("".join(analysis_chars)):
+    fence_spans: list[tuple[int, int]] = []
+    for match in _MARKDOWN_TILDE_FENCE_PATTERN.finditer(without_code):
         protected_source_ranges.append(
             (match.start(), match.end(), "unsupported_fence")
         )
-        _mask(analysis_chars, match.start(), match.end())
-    for start, end in _iter_markdown_table_ranges("".join(analysis_chars)):
+        fence_spans.append(match.span())
+    for start, end in _iter_markdown_table_ranges(_masked(without_code, fence_spans)):
         protected_source_ranges.append((start, end, "table_as_code"))
 
     for start, end, code in sorted(
@@ -377,14 +493,18 @@ def _convert_markdown_to_mycode(value: str) -> _ConversionResult:
         else:
             finding(code, *source_span)
             protect_range(start, end, source_text)
+    apply_protected()
 
-    for match in reversed(list(_MARKDOWN_CODE_BLOCK_PATTERN.finditer(mapped.text))):
+    fences = list(_MARKDOWN_CODE_BLOCK_PATTERN.finditer(mapped.text))
+    fence_line_starts = _line_starts(mapped.text, [m.start() for m in fences])
+    for match, line_start in reversed(list(zip(fences, fence_line_starts))):
         readable_protected_spans.append(mapped.source_span(match.start(), match.end()))
         protect_range(
             match.start(),
             match.end(),
-            _code_block(_dedent_fence_body(mapped.text, match)),
+            _code_block(_dedent_fence_body(mapped.text, match, line_start)),
         )
+    apply_protected()
 
     # Inline code is opaque to link and emphasis parsing. Brackets cannot be
     # escaped in MyCode, so only [code] can carry them literally.
@@ -397,6 +517,7 @@ def _convert_markdown_to_mycode(value: str) -> _ConversionResult:
             protect_range(match.start(), match.end(), f"[code]{code}[/code]")
         else:
             protect_range(match.start(), match.end(), f"[font=monospace]{code}[/font]")
+    apply_protected()
 
     # Link recognition runs on the code tokens, so a code span in a destination
     # is opaque rather than whitespace or a title.
@@ -416,7 +537,7 @@ def _convert_markdown_to_mycode(value: str) -> _ConversionResult:
                 mapped.source_span(label_end, label_end + 1),
             )
         )
-        if any(character.isspace() for character in destination):
+        if _WHITESPACE_PATTERN.search(destination):
             finding("link_title", *mapped.source_span(start, end))
             protect_range(start, end, current[start:end])
             continue
@@ -429,6 +550,9 @@ def _convert_markdown_to_mycode(value: str) -> _ConversionResult:
                     mapped.source_span(opening + 1, label_end)
                 )
             rendered = f"[img]{destination}[/img]"
+        elif not _LABEL_SPECIAL_PATTERN.search(label):
+            # Nothing in the label is an escape, tag or emphasis, so it passes through.
+            rendered = f"[url={destination}]{label}[/url]"
         else:
             label_mapped = _MappedText(
                 label, mapped.source_spans[opening + 1 : label_end].copy()
@@ -446,11 +570,13 @@ def _convert_markdown_to_mycode(value: str) -> _ConversionResult:
             )
             rendered = f"[url={destination}]{converted_label}[/url]"
         protect_range(start, end, rendered)
+    apply_protected()
 
     # Raw tags first so a bare URL cannot swallow the tag text that follows it.
     _protect_mycode_tags(mapped, shield)
     for match in reversed(list(_MARKDOWN_BARE_URL_PATTERN.finditer(mapped.text))):
         protect_range(match.start(), match.end(), match.group(0))
+    apply_protected()
 
     _protect_escapes(mapped, shield)
 
@@ -468,11 +594,27 @@ def _convert_markdown_to_mycode(value: str) -> _ConversionResult:
     )
 
 
-def _dedent_fence_body(text: str, fence: re.Match[str]) -> str:
+def _line_starts(text: str, positions: list[int]) -> list[int]:
+    """Start of the line holding each ascending position, in one forward sweep."""
+    starts: list[int] = []
+    line_start = 0
+    scanned = 0
+    for position in positions:
+        newline = text.rfind("\n", scanned, position)
+        if newline >= 0:
+            line_start = newline + 1
+        scanned = position
+        starts.append(line_start)
+    return starts
+
+
+def _dedent_fence_body(text: str, fence: re.Match[str], line_start: int) -> str:
     """Drop the opening fence's own indent from each body line (fence in a list item)."""
-    line_start = text.rfind("\n", 0, fence.start()) + 1
-    indent = len(text[line_start : fence.start()])
-    if indent == 0 or text[line_start : fence.start()].strip():
+    indent = fence.start() - line_start
+    # A non-space just before the fence settles it without copying the whole prefix.
+    if indent == 0 or not text[fence.start() - 1].isspace():
+        return fence.group("body")
+    if text[line_start : fence.start()].strip():
         return fence.group("body")
     lines = fence.group("body").splitlines(keepends=True)
     return "".join(
@@ -505,15 +647,15 @@ def _iter_markdown_table_ranges(text: str) -> Iterator[tuple[int, int]]:
 
 
 def _iter_markdown_links(text: str) -> Iterator[tuple[int, int, int, int | None]]:
+    if "](" not in text:
+        return  # a link needs its label to close straight into a destination
     pairs = _markdown_bracket_pairs(text)
     index = 0
-    while index < len(text):
+    while (candidate := _LINK_OPENING_PATTERN.search(text, index)) is not None:
+        index = candidate.start()
         image = text.startswith("![", index)
         opening = index + 1 if image else index
-        if (
-            _markdown_character_is_escaped(text, opening)
-            or text[opening : opening + 1] != "["
-        ):
+        if _markdown_character_is_escaped(text, opening):
             index += 1
             continue
         label_end = pairs.get(opening)
@@ -536,7 +678,8 @@ def _markdown_bracket_pairs(text: str) -> dict[int, int]:
     pairs: dict[int, int] = {}
     stack: list[int] = []
     index = 0
-    while index < len(text):
+    while (special := _BRACKET_OR_ESCAPE_PATTERN.search(text, index)) is not None:
+        index = special.start()
         character = text[index]
         if character == "\\":
             run_end = index
@@ -554,6 +697,8 @@ def _markdown_bracket_pairs(text: str) -> dict[int, int]:
 
 
 def _markdown_character_is_escaped(text: str, index: int) -> bool:
+    if index == 0 or text[index - 1] != "\\":
+        return False
     backslashes = 0
     index -= 1
     while index >= 0 and text[index] == "\\":
@@ -587,32 +732,28 @@ def _markdown_destination_end(text: str, opening: int) -> int | None:
 
 
 def _markdown_escape_runs(text: str) -> Iterator[tuple[int, int, int | None]]:
-    index = 0
-    while index < len(text):
-        if text[index] != "\\":
-            index += 1
-            continue
-        end = index
-        while end < len(text) and text[end] == "\\":
-            end += 1
+    for run in _ESCAPE_RUN_PATTERN.finditer(text):
+        index, end = run.span()
         escaped_character = (
             end
             if (end - index) % 2 and end < len(text) and text[end] in _ESCAPABLE
             else None
         )
         yield index, end, escaped_character
-        index = escaped_character + 1 if escaped_character is not None else end
 
 
 def _protect_mycode_tags(mapped: _MappedText, shield: _Shield) -> None:
     """Keep raw MyCode tags, including `[*]`, away from the emphasis scanner."""
-    for match in reversed(list(_RAW_MYCODE_TAG_PATTERN.finditer(mapped.text))):
+    edits: list[tuple[int, int, str]] = []
+    for match in reversed(list(_finditer_closed(_RAW_MYCODE_TAG_PATTERN, mapped.text))):
         if not _markdown_character_is_escaped(mapped.text, match.start()):
-            mapped.replace(match.start(), match.end(), shield.token(match.group(0)))
+            edits.append((match.start(), match.end(), shield.token(match.group(0))))
+    mapped.replace_many(edits)
 
 
 def _protect_escapes(mapped: _MappedText, shield: _Shield) -> None:
     """Replace each escaped character with a token that carries the bare character."""
+    edits: list[tuple[int, int, str]] = []
     for start, end, escaped_character in reversed(
         list(_markdown_escape_runs(mapped.text))
     ):
@@ -623,7 +764,8 @@ def _protect_escapes(mapped: _MappedText, shield: _Shield) -> None:
             end = escaped_character + 1
         elif run_length % 2:
             replacement += "\\"
-        mapped.replace(start, end, replacement)
+        edits.append((start, end, replacement))
+    mapped.replace_many(edits)
 
 
 def _convert_markdown_emphasis(
@@ -635,20 +777,24 @@ def _convert_markdown_emphasis(
 
     def convert(start: int, end: int) -> str:
         output: list[str] = []
+        # Earliest position from which a marker's close search already failed in
+        # this span. Every opener begins right after a non-marker character, so a
+        # failed search proves every later opener of that marker fails too.
+        failed_from: dict[str, int] = {}
         index = start
         while index < end:
-            marker = next(
-                (item for item in delimiters if text.startswith(item, index)), None
-            )
-            if marker is None:
-                output.append(text[index])
-                index += 1
-                continue
-            run_end = index + len(marker)
-            while run_end < end and text[run_end] == marker[0]:
-                run_end += 1
-            if run_end - index != len(marker):
-                output.append(text[index:run_end])
+            run = _EMPHASIS_RUN_PATTERN.search(text, index, end)
+            if run is None:
+                output.append(text[index:end])
+                break
+            if run.start() > index:
+                output.append(text[index : run.start()])
+            index, run_end = run.span()
+            # Only a run of exactly 1-3 `*`/`_` or 2 `~` is a delimiter; any other
+            # run is literal text.
+            marker = text[index:run_end]
+            if marker not in delimiters:
+                output.append(marker)
                 index = run_end
                 continue
             if (
@@ -664,7 +810,12 @@ def _convert_markdown_emphasis(
                 index = run_end
                 continue
 
-            closing = _find_markdown_emphasis_close(text, marker, run_end, end)
+            if failed_from.get(marker, end + 1) <= run_end:
+                closing = None
+            else:
+                closing = _find_markdown_emphasis_close(text, marker, run_end, end)
+                if closing is None:
+                    failed_from[marker] = run_end
             if closing is None or closing == run_end:
                 if closing is None and on_unmatched is not None:
                     on_unmatched(index, run_end)
@@ -803,6 +954,16 @@ def format_write_text(value: str, message_format: MessageFormat) -> str:
     return markdown_to_mycode(value)
 
 
+def convert_message(
+    value: str, message_format: MessageFormat
+) -> tuple[str, tuple[ConversionFinding, ...]]:
+    """The MyCode to write and its conversion findings, from one conversion pass."""
+    if message_format == "markdown":
+        result = _convert_markdown_to_mycode(value)
+        return result.text, result.findings
+    return value, _readable_projection_findings(value)
+
+
 def decode_double_quote_entities(value: str) -> str:
     return _DOUBLE_QUOTE_ENTITY_PATTERN.sub('"', value)
 
@@ -833,17 +994,18 @@ def _readable_projection_findings(
     protected_spans: tuple[tuple[int, int], ...] | list[tuple[int, int]] = (),
 ) -> tuple[ConversionFinding, ...]:
     findings: list[ConversionFinding] = []
-    masked = list(value)
-
-    for match in _CODE_BLOCK_PATTERN.finditer(value):
-        _mask(masked, match.start(), match.end())
-    for start, end in protected_spans:
-        _mask(masked, start, end)
-    for start, end in _malformed_markup_ranges("".join(masked)):
-        _mask(masked, start, end)
-
-    text = "".join(masked)
-    for match in _MYCODE_TAG_PATTERN.finditer(text):
+    masked = _masked(
+        value,
+        [
+            match.span()
+            for match in finditer_paired(
+                _CODE_BLOCK_PATTERN, _CODE_CLOSER_PATTERN, value
+            )
+        ]
+        + list(protected_spans),
+    )
+    text = _masked(masked, _malformed_markup_ranges(masked))
+    for match in _finditer_closed(_MYCODE_TAG_PATTERN, text):
         if not _is_known_tag(match):
             findings.append(
                 ConversionFinding(
@@ -856,7 +1018,7 @@ def _readable_projection_findings(
             )
 
     spoiler_stack: list[re.Match[str]] = []
-    for match in _SPOILER_TAG_PATTERN.finditer(text):
+    for match in _finditer_closed(_SPOILER_TAG_PATTERN, text):
         if not match.group("close"):
             spoiler_stack.append(match)
         elif spoiler_stack:
@@ -901,7 +1063,7 @@ def _convert_quotes(text: str, body_format: BodyFormat) -> str:
     previous = None
     while previous != text:
         previous = text
-        text = _QUOTE_PATTERN.sub(_replace, text)
+        text = _sub_paired(_QUOTE_PATTERN, _QUOTE_CLOSER_PATTERN, _replace, text)
     return text
 
 
@@ -929,7 +1091,7 @@ def _convert_lists(text: str, body_format: BodyFormat) -> str:
         marker = "- " if body_format == "markdown" else ""
         return "\n".join(f"{marker}{item}" for item in items)
 
-    return _LIST_PATTERN.sub(_replace, text)
+    return _sub_paired(_LIST_PATTERN, _LIST_CLOSER_PATTERN, _replace, text)
 
 
 def _convert_links_and_images(text: str, body_format: BodyFormat) -> str:
@@ -948,10 +1110,33 @@ def _convert_links_and_images(text: str, body_format: BodyFormat) -> str:
         url = match.group("url").strip()
         return f"![]({url})" if body_format == "markdown" else url
 
-    text = _URL_WITH_TARGET_PATTERN.sub(_replace_target_link, text)
-    text = _URL_PATTERN.sub(_replace_link, text)
-    text = _IMAGE_PATTERN.sub(_replace_image, text)
+    text = _sub_paired(
+        _URL_WITH_TARGET_PATTERN, _URL_CLOSER_PATTERN, _replace_target_link, text
+    )
+    text = _sub_paired(_URL_PATTERN, _URL_CLOSER_PATTERN, _replace_link, text)
+    text = _sub_paired(_IMAGE_PATTERN, _IMAGE_CLOSER_PATTERN, _replace_image, text)
     return text
+
+
+@lru_cache(maxsize=None)
+def _void_tag_pattern(tag_name: str) -> re.Pattern[str]:
+    return re.compile(rf"\[{re.escape(tag_name)}\]", re.IGNORECASE)
+
+
+@lru_cache(maxsize=None)
+def _paired_tag_patterns(
+    tag_name: str, rule_attribute: str | None
+) -> tuple[re.Pattern[str], re.Pattern[str]]:
+    """The opener-to-closer pattern and the closer pattern of a paired tag."""
+    attribute = (
+        f"=(?:{rule_attribute})" if rule_attribute is not None else r"(?:=[^\]]*)?"
+    )
+    pattern = re.compile(
+        rf"\[{re.escape(tag_name)}{attribute}\](.*?)\[/{re.escape(tag_name)}\]",
+        re.IGNORECASE | re.DOTALL,
+    )
+    closer = re.compile(rf"\[/{re.escape(tag_name)}\]", re.IGNORECASE)
+    return pattern, closer
 
 
 def _apply_tag_rules(text: str, body_format: BodyFormat) -> str:
@@ -962,20 +1147,17 @@ def _apply_tag_rules(text: str, body_format: BodyFormat) -> str:
             replacement = (
                 rule.markdown_prefix if body_format == "markdown" else rule.clean_prefix
             )
-            text = re.compile(rf"\[{re.escape(tag_name)}\]", re.IGNORECASE).sub(
+            text = _void_tag_pattern(tag_name).sub(
                 replacement.replace("\\", "\\\\"), text
             )
             continue
-        attribute = (
-            f"=(?:{rule.attribute})" if rule.attribute is not None else r"(?:=[^\]]*)?"
-        )
-        pattern = re.compile(
-            rf"\[{re.escape(tag_name)}{attribute}\](.*?)\[/{re.escape(tag_name)}\]",
-            re.IGNORECASE | re.DOTALL,
-        )
+        pattern, closer = _paired_tag_patterns(tag_name, rule.attribute)
         for _ in range(20):
-            updated = pattern.sub(
-                lambda match: _render_rule(rule, match.group(1), body_format), text
+            updated = _sub_paired(
+                pattern,
+                closer,
+                lambda match: _render_rule(rule, match.group(1), body_format),
+                text,
             )
             if updated == text:
                 break
@@ -992,7 +1174,8 @@ def _render_rule(rule: MyCodeRule, body: str, body_format: BodyFormat) -> str:
 
 def _tidy_text(text: str) -> str:
     text = text.replace("\r\n", "\n").replace("\r", "\n")
-    text = re.sub(r"[ \t]+\n", "\n", text)
+    # Anchor on the start of the run, or each space of a long run rescans it.
+    text = re.sub(r"(?<![ \t])[ \t]+\n", "\n", text)
     text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip()
 
@@ -1004,6 +1187,7 @@ __all__ = [
     "TAG_RULES",
     "analyze_conversion",
     "coerce_body_format",
+    "convert_message",
     "coerce_message_format",
     "decode_double_quote_entities",
     "format_body_text",

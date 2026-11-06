@@ -7,14 +7,13 @@ from typing import Any
 import pytest
 
 
-from hf_mcp.capabilities import CAPABILITY_PARAMETER_FAMILIES, CapabilityPolicy
+from hf_mcp.capabilities import CapabilityPolicy
 from hf_mcp.config import HFMCPSettings
 from hf_mcp.normalizers import normalize_extended_payload
 from hf_mcp.output_modes import ReadOutputDefaults
-from hf_mcp.registry import get_extended_read_specs, get_tool_spec
+from hf_mcp.registry import get_specs, get_tool_spec
 from hf_mcp.token_store import TokenBundle
 from hf_mcp.tools.read_extended import (
-    _build_read_tool_result,
     build_extended_read_handlers,
     list_admin_high_risk,
     list_bratings,
@@ -48,7 +47,7 @@ def test_bratings_handler_uses_generic_route_in_all_output_modes(
     monkeypatch.setattr(HFTransport, "_post_json", fake_post)
     policy = _policy(
         enabled_capabilities={"bratings.read"},
-        enabled_parameter_families=set(CAPABILITY_PARAMETER_FAMILIES["bratings.read"]),
+        enabled_parameter_families=set(get_tool_spec("bratings.read").families),
     )
     handlers = build_extended_read_handlers(policy, HFTransport(_StubTokenStore()))
     result = handlers["bratings.read"](
@@ -121,8 +120,8 @@ def _assert_structured_payload_with_flow(
 
 
 def test_extended_read_specs_match_registry_rows_and_parameter_families() -> None:
-    specs = get_extended_read_specs()
-    assert {spec.tool_name for spec in specs} == {
+    specs = get_specs("extended_read")
+    assert {spec.name for spec in specs} == {
         "bytes.read",
         "contracts.read",
         "disputes.read",
@@ -132,16 +131,9 @@ def test_extended_read_specs_match_registry_rows_and_parameter_families() -> Non
         "admin.high_risk.read",
     }
     for spec in specs:
-        expected = get_tool_spec(spec.tool_name)
-        assert spec.helper_path == expected.helper_path
-        if spec.capability_family in CAPABILITY_PARAMETER_FAMILIES:
-            assert (
-                set(spec.parameter_families)
-                == CAPABILITY_PARAMETER_FAMILIES[spec.capability_family]
-            )
-        else:
-            # Admin/high-risk rows are preserved in the matrix even when no capability mapping exists yet.
-            assert spec.parameter_families == ("filters.pagination",)
+        assert get_tool_spec(spec.name) is spec
+        assert spec.group == "extended_read"
+        assert spec.families >= {"output.options"}
 
 
 def test_build_extended_handlers_registers_only_policy_allowed_rows() -> None:
@@ -163,10 +155,14 @@ def test_build_extended_handlers_registers_only_policy_allowed_rows() -> None:
 
     handlers = build_extended_read_handlers(policy, transport)
 
-    assert set(handlers) == {"bytes.read", "sigmarket.order.read"}
+    # admin.high_risk.read has only optional families, so it registers with its
+    # capability alone; contracts.read stays out because its capability is off.
+    assert set(handlers) == {
+        "bytes.read",
+        "sigmarket.order.read",
+        "admin.high_risk.read",
+    }
     assert "contracts.read" not in handlers
-    # Explicit matrix row remains, but policy mapping keeps it fail-closed for now.
-    assert "admin.high_risk.read" not in handlers
 
 
 @pytest.mark.parametrize(
@@ -300,7 +296,7 @@ def test_sigmarket_order_legacy_oid_alias_maps_to_canonical_smid_payload(
         captured["helper"] = helper
         return {"sigmarket/order": []}
 
-    monkeypatch.setattr(HFTransport, "read", _fake_read)
+    monkeypatch.setattr(HFTransport, "read_raw", _fake_read)
 
     settings = HFMCPSettings(
         profile="test",
@@ -329,7 +325,7 @@ def test_sigmarket_order_legacy_oid_alias_maps_to_canonical_smid_payload(
 def test_registered_sigmarket_order_handler_supports_output_modes_and_raw_payload_attachment(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    captured: dict[str, list[dict[str, Any]]] = {"read": [], "read_raw": []}
+    captured: list[dict[str, Any]] = []
     read_payload = {
         "sigmarket/order": [
             {"smid": "3", "status": "1", "dateline": "1710000000", "amount": "5"},
@@ -343,19 +339,12 @@ def test_registered_sigmarket_order_handler_supports_output_modes_and_raw_payloa
         ]
     }
 
-    def _fake_read(
-        self: HFTransport, asks: dict[str, Any], helper: str | None = None
-    ) -> dict[str, Any]:
-        captured["read"].append({"asks": asks, "helper": helper})
-        return read_payload
-
     def _fake_read_raw(
         self: HFTransport, asks: dict[str, Any], helper: str | None = None
     ) -> dict[str, Any]:
-        captured["read_raw"].append({"asks": asks, "helper": helper})
+        captured.append({"asks": asks, "helper": helper})
         return raw_payload
 
-    monkeypatch.setattr(HFTransport, "read", _fake_read)
     monkeypatch.setattr(HFTransport, "read_raw", _fake_read_raw)
 
     settings = HFMCPSettings(
@@ -452,16 +441,9 @@ def test_registered_sigmarket_order_handler_supports_output_modes_and_raw_payloa
     assert defaults_result["content"][1]["type"] == "resource"
     assert json.loads(defaults_result["content"][1]["resource"]["text"]) == raw_payload
 
-    assert len(captured["read"]) == 2
-    assert len(captured["read_raw"]) == 3
-    assert all(call["helper"] == "sigmarket/order" for call in captured["read"])
-    assert all(call["helper"] == "sigmarket/order" for call in captured["read_raw"])
-    assert all(
-        call["asks"]["sigmarket/order"]["_smid"] == 17 for call in captured["read"]
-    )
-    assert all(
-        call["asks"]["sigmarket/order"]["_smid"] == 17 for call in captured["read_raw"]
-    )
+    assert len(captured) == 5
+    assert all(call["helper"] == "sigmarket/order" for call in captured)
+    assert all(call["asks"]["sigmarket/order"]["_smid"] == 17 for call in captured)
 
 
 @pytest.mark.parametrize(
@@ -558,7 +540,7 @@ def test_extended_handlers_emit_hf_flow_with_expected_pivots(
         del helper
         return response_payload
 
-    monkeypatch.setattr(HFTransport, "read", _fake_read)
+    monkeypatch.setattr(HFTransport, "read_raw", _fake_read)
 
     policy = _policy(
         enabled_capabilities={
@@ -588,18 +570,25 @@ def test_extended_handlers_emit_hf_flow_with_expected_pivots(
     assert expected_actions <= _actions_as_tuples(flow)
 
 
-def test_admin_high_risk_read_result_does_not_emit_hf_flow_until_flow_is_designed() -> (
-    None
-):
-    result = _build_read_tool_result(
-        tool_name="admin.high_risk.read",
-        normalized_payload={"admin/high-risk/read": [{"uid": "7", "risk_score": "99"}]},
-        mode="readable",
-        raw_payload=None,
-        include_raw_payload=False,
-        arguments={"page": 1},
-        source="admin/high-risk/read",
+def test_admin_high_risk_read_result_does_not_emit_hf_flow_until_flow_is_designed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def _fake_read(
+        self: HFTransport, asks: dict[str, Any], helper: str | None = None
+    ) -> dict[str, Any]:
+        return {"admin/high-risk/read": [{"uid": "7", "risk_score": "99"}]}
+
+    monkeypatch.setattr(HFTransport, "read_raw", _fake_read)
+    policy = _policy(
+        enabled_capabilities={"admin.high_risk.read"},
+        enabled_parameter_families=set(get_tool_spec("admin.high_risk.read").families),
     )
+    transport = HFTransport(
+        token_store=_StubTokenStore(), base_url="https://example.test"
+    )
+    handler = build_extended_read_handlers(policy, transport)["admin.high_risk.read"]
+
+    result = handler(page=1)
 
     assert result["structuredContent"] == {
         "admin/high-risk/read": [{"uid": "7", "risk_score": "99"}]
@@ -624,7 +613,7 @@ def test_readable_summary_omits_dispute_free_text_notes(
             ]
         }
 
-    monkeypatch.setattr(HFTransport, "read", _fake_read)
+    monkeypatch.setattr(HFTransport, "read_raw", _fake_read)
 
     settings = HFMCPSettings(
         profile="test",

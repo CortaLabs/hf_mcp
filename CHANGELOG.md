@@ -2,6 +2,28 @@
 
 All notable changes to hf-mcp are listed here, newest first.
 
+## 0.8.0
+
+Three new local tools let you convert text and fill your own post templates without touching Hack Forums. `formatting.convert` turns Markdown or MyCode into Hack Forums MyCode and reports what could not be carried over. `templates.list` and `templates.render` read named template files from a folder you choose. Under the hood the server was rebuilt around one tool table, so what a client sees in `tools/list` is exactly what is validated, and the converter no longer slows down on hostile input.
+
+- New read-only local tools `formatting.convert`, `templates.list` and `templates.render`. Nothing is saved and nothing is sent. Profile sizes are now `reader` 18 (unchanged in count, different contents; see Breaking), `forum_operator` 23 (was 20) and `full_api` 27 (was 24).
+- New `templates_dir` setting (YAML, or `HF_MCP_TEMPLATES_DIR`; default `~/.config/hf_mcp/templates`; `~` is expanded and the result must be absolute). A template is `<name>.md` or `<name>.mycode` directly in that folder. It must be a regular file (symlinks are not followed), valid UTF-8 and at most 64 KiB, and it must open with a `---` front-matter block that may hold `description` and `placeholders` (both optional). Placeholders are written `{{key}}`; every placeholder used in the body must be declared and every declared key must be used. Invalid files are counted in `invalid_count` and never listed, and no path or file text is returned. At most 256 candidate files are read per call; any further candidates are counted in `invalid_count` and never read. No templates ship with the package.
+- The server now runs on the MCP SDK's public lowlevel `Server`. The published input schema is the validation, `tools/list` no longer carries the internal `x-hf-*` schema keys or tool `_meta` entries, and every tool is declared once in a single registry table that drives the profiles, the schemas and the capability policy.
+- The `_hf_flow` layer was rewritten around one relation table, reads go through one HF client boundary, the draft store moved out of the formatting engine, and the release build and installed-smoke scripts were slimmed down.
+- The Markdown converter now runs in linear time. Inputs that took seconds, such as `*a ` repeated, now convert in under two seconds at the full 500,000-character limit, with identical output.
+- Every free-text message and source (tool arguments, converter input and rendered templates) shares one published limit of 500,000 characters, and a draft source file is limited to 500,000 bytes. Titles, categories, subjects and date-time values are limited to 512 characters, and file selectors to 4,096.
+- An undeclared argument is now named in the error when it looks like a parameter name, for example `Invalid arguments: colour`. Any other name is masked and the value is never echoed.
+- `RESOURCE_UNAVAILABLE` now reads "The requested resource is unavailable." because it also covers a missing template.
+
+Breaking:
+
+- A `custom` profile (or any overlay) must list `output.options` in `enabled_parameter_families` to keep `output_mode`, `include_raw_payload` and `body_format` on the read tools, and `view` and `include_inactive` on `forums.index`. Before, those arguments were always offered; now they are removed from the published schema unless that family is enabled.
+- A tool now registers only when its capability is enabled and every parameter family it requires is enabled; 0.7.2 needed only one overlapping family. The draft tools used to follow `formatting.preflight`; now `drafts.list` and `drafts.read` need `drafts.read`, and `drafts.update` and `drafts.delete` need `drafts.write`, plus their `drafts.selector`, `drafts.filters`, `drafts.metadata` and `drafts.confirm_delete` families as the tool requires. An existing `custom` profile or overlay can lose tools it used to get.
+- The `reader` profile no longer includes `formatting.preflight`, `drafts.update` or `drafts.delete`; they are in `forum_operator` and `full_api`. In exchange `reader` gains `formatting.convert`, `templates.list` and `templates.render`.
+- Messages and sources over 500,000 characters (draft source files: bytes) are refused instead of being accepted, and so are titles, categories and subjects over 512 characters and file selectors over 4,096.
+- The `RESOURCE_UNAVAILABLE` sentence changed from "The requested Hack Forums resource is unavailable." Match on the error `code`, not the text.
+- `forum_operator` grew from 20 to 23 tools and `full_api` from 24 to 27. A client that pins the exact tool list will see the new tools.
+
 ## 0.7.2
 
 Markdown now becomes the right MyCode: headings, numbered and nested lists, horizontal rules, inline code and escaped characters. Tables stay readable in a code block, and anything that cannot be carried over is reported. Raw bodies and code pass through unchanged. `formatting.preflight` and `drafts.read` return the full MyCode instead of a 500-character preview.

@@ -1,19 +1,17 @@
 # hf-mcp capability exposure configuration
 #
 # Presets:
-# - reader: read-oriented exposure
-# - forum_operator: read + core content/bytes write exposure
+# - reader: remote reads, forums.index, drafts.read (list/read local drafts),
+#   formatting.convert and templates.read (templates.list/render)
+# - forum_operator: reader + formatting.preflight, drafts.write (update/delete
+#   local drafts), threads.create and posts.reply
 # - full_api: broadest shipped exposure preset (explicit opt-in)
 # - custom: start empty and explicitly opt in
 #
 # IMPORTANT:
 # Presets are exposure control for a user/deployment. They do not reduce product
-# scope. docs/coverage_matrix.md contains both:
-# - tools that are available, including core reads plus
-#   `bytes.read`, `contracts.read`, `disputes.read`, `bratings.read`,
-#   `sigmarket.market.read`, `sigmarket.order.read`, and `admin.high_risk.read`
-# - documented API rows that no preset exposes:
-#   `contracts.write`, `sigmarket.write`, `admin.high_risk.write`
+# scope. A tool registers only when its capability is enabled AND every parameter
+# family it requires is enabled; the capability list below is the full tool table.
 
 profile: reader
 
@@ -30,6 +28,12 @@ profile: reader
 # Optional draft artifact root. Must be absolute.
 # Defaults to ~/.config/hf_mcp/drafts
 # draft_dir: /home/user/.config/hf_mcp/drafts
+
+# Optional template directory for templates.list / templates.render. Must be
+# absolute. A missing directory means zero templates. Templates are your own
+# <name>.md or <name>.mycode files; none ship with the package.
+# Defaults to ~/.config/hf_mcp/templates (env: HF_MCP_TEMPLATES_DIR)
+# templates_dir: /home/user/.config/hf_mcp/templates
 
 # Read output defaults for all read tools.
 # Valid modes: readable, structured, raw
@@ -48,12 +52,12 @@ read_output_defaults:
 # me.read, users.read, forums.read, threads.read, posts.read, bytes.read,
 # contracts.read, disputes.read, bratings.read, sigmarket.market.read,
 # sigmarket.order.read, admin.high_risk.read, formatting.preflight,
-# threads.create, posts.reply, bytes.transfer, bytes.deposit,
-# bytes.withdraw, bytes.bump
+# formatting.convert, templates.read, drafts.read, drafts.write, threads.create, posts.reply, bytes.transfer,
+# bytes.deposit, bytes.withdraw, bytes.bump
 #
 # Browse anchor expectations:
-# - threads.read => fid required; tid optional narrowing selector
-# - posts.read => tid required; pid optional narrowing selector
+# - threads.read => at least one of fid, tid, uid
+# - posts.read => at least one of pid, tid, uid
 #
 # Read output contract:
 # - Read tools default to readable text + canonical structuredContent
@@ -63,11 +67,12 @@ read_output_defaults:
 # Write safety:
 # - no automated live writes: hf-mcp never posts on its own
 # - concrete writes require confirm_live=true
-# - contracts.write, sigmarket.write, and admin.high_risk.write are not available
 
 # Parameter families currently exposed by profile = "full_api":
 # selectors.user, selectors.forum, selectors.thread, selectors.post,
 # selectors.bytes, selectors.contract, selectors.dispute, selectors.sigmarket,
 # filters.pagination, fields.me.basic, fields.me.advanced,
 # fields.users.profile, fields.posts.body, fields.bytes.amount,
-# formatting.content, writes.content, writes.bytes, confirm.live
+# formatting.content, formatting.convert, templates.render, writes.content, writes.bytes, confirm.live,
+# drafts.selector, drafts.filters, drafts.metadata, drafts.confirm_delete,
+# output.options

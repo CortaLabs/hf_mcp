@@ -7,9 +7,10 @@ from typing import Any
 
 from hf_mcp.capabilities import CapabilityPolicy
 from hf_mcp.flow import attach_hf_flow, build_hf_flow
-from hf_mcp.formatting_engine import read_draft_artifact, prepare_formatting_report
+from hf_mcp.draft_store import read_draft_artifact
+from hf_mcp.formatting_engine import prepare_formatting_report
 from hf_mcp.mycode import coerce_message_format
-from hf_mcp.registry import get_documented_write_specs
+from hf_mcp.registry import get_specs
 from hf_mcp.transport import HFTransport
 from hf_mcp.write_preflight import WritePreflightError, validate_write_body
 
@@ -242,13 +243,13 @@ def build_write_handlers(
         return _call
 
     handlers: dict[str, WriteHandler] = {}
-    for spec in get_documented_write_specs():
-        if not policy.can_register(spec.tool_name):
+    for spec in get_specs("write"):
+        if not policy.can_register(spec.name):
             continue
-        handler = tool_handlers.get(spec.tool_name)
+        handler = tool_handlers.get(spec.name)
         if handler is None:
             continue
-        handlers[spec.tool_name] = _bind_handler(handler)
+        handlers[spec.name] = _bind_handler(handler)
     return handlers
 
 

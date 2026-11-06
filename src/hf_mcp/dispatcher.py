@@ -1,15 +1,11 @@
 from __future__ import annotations
 
-import inspect
-from dataclasses import dataclass
+from collections.abc import Awaitable, Callable
 from typing import Any
 
-from .annotations import build_annotations
 from .capabilities import CapabilityPolicy
-from .config import DEFAULT_DRAFT_DIR, HFMCPSettings
-from .metadata import get_tool_specs
-from .registry import get_tool_spec, mcp_tool_name
-from .schemas import build_tool_output_schema, build_tool_schema
+from .config import HFMCPSettings
+from .registry import TOOLS
 from .token_store import load_token_store
 from .tools.drafts import build_draft_handlers
 from .tools.forum_index import build_forum_index_handlers
@@ -19,20 +15,15 @@ from .tools.read_extended import build_extended_read_handlers
 from .tools.write_documented import build_write_handlers
 from .transport import HFTransport
 
-
-@dataclass(frozen=True, slots=True)
-class RuntimeBundle:
-    transport: object | None = None
-    auth_context: object | None = None
-    settings: HFMCPSettings | None = None
+Handler = Callable[..., dict[str, Any] | Awaitable[dict[str, Any]]]
 
 
-def resolve_runtime_bundle(settings: HFMCPSettings) -> RuntimeBundle:
+def resolve_transport(settings: HFMCPSettings) -> HFTransport:
+    """Return the transport for ``settings``; fail closed without credentials."""
     _require_runtime_secrets(settings)
     store = load_token_store(settings)
-    bundle = store.require_bundle()
-    transport = HFTransport(token_store=store)
-    return RuntimeBundle(transport=transport, auth_context=bundle, settings=settings)
+    store.require_bundle()
+    return HFTransport(token_store=store)
 
 
 def _require_runtime_secrets(settings: HFMCPSettings) -> None:
@@ -42,118 +33,33 @@ def _require_runtime_secrets(settings: HFMCPSettings) -> None:
             raise ValueError(f"Missing required environment variable: {env_name}")
 
 
-def _tool_description(tool_name: str, operation: str) -> str:
-    return get_tool_spec(tool_name).description
+def build_handlers(
+    policy: CapabilityPolicy,
+    settings: HFMCPSettings,
+    transport: HFTransport | None,
+) -> dict[str, Handler]:
+    """Return the handler of every registered tool, keyed by canonical tool name.
 
-
-def _shape_live_input_schema(
-    tool_name: str, input_schema: dict[str, object], handler: Any
-) -> dict[str, object]:
-    properties = input_schema.get("properties")
-    if not isinstance(properties, dict):
-        return input_schema
-
-    schema = dict(input_schema)
-    shaped_properties: dict[str, object] = {}
-    handler_parameters = inspect.signature(handler).parameters
-    for parameter_name, parameter_schema in properties.items():
-        if tool_name == "me.read" and parameter_name == "uid":
-            continue
-
-        if not isinstance(parameter_schema, dict):
-            shaped_properties[parameter_name] = parameter_schema
-            continue
-
-        shaped_schema = dict(parameter_schema)
-        handler_parameter = handler_parameters.get(parameter_name)
-        if "default" not in shaped_schema and handler_parameter is not None:
-            default = handler_parameter.default
-            if default is not inspect.Parameter.empty and default is not None:
-                shaped_schema["default"] = default
-        shaped_properties[parameter_name] = shaped_schema
-
-    schema["properties"] = shaped_properties
-    required_values = schema.get("required")
-    if isinstance(required_values, list):
-        required = [
-            value
-            for value in required_values
-            if isinstance(value, str) and value in shaped_properties
-        ]
-        if required:
-            schema["required"] = required
-        else:
-            schema.pop("required", None)
-    return schema
-
-
-def _register_via_register_tool(
-    server: Any,
-    *,
-    name: str,
-    description: str,
-    input_schema: dict[str, object],
-    annotations: dict[str, object],
-    output_schema: dict[str, object] | None,
-    handler: Any,
-) -> bool:
-    register_tool = getattr(server, "register_tool", None)
-    if not callable(register_tool):
-        return False
-
-    register_tool(
-        name=name,
-        description=description,
-        input_schema=input_schema,
-        annotations=annotations,
-        output_schema=output_schema,
-        handler=handler,
+    Local tools need no transport; remote rows are present only when one is given.
+    """
+    draft_dir = settings.draft_dir
+    available: dict[str, Handler] = {}
+    available.update(
+        build_formatting_handlers(
+            draft_dir=draft_dir, templates_dir=settings.templates_dir
+        )
     )
-    return True
+    available.update(build_draft_handlers(draft_dir=draft_dir))
+    available.update(build_forum_index_handlers())
+    if transport is not None:
+        available.update(build_core_read_handlers(policy, transport))
+        available.update(build_extended_read_handlers(policy, transport))
+        available.update(build_write_handlers(policy, transport, draft_dir=draft_dir))
+    return {
+        spec.name: available[spec.name]
+        for spec in TOOLS
+        if spec.name in available and policy.can_register(spec.name)
+    }
 
 
-def register_tools(
-    server: Any, policy: CapabilityPolicy, runtime: RuntimeBundle
-) -> None:
-    draft_dir = (
-        runtime.settings.draft_dir
-        if runtime.settings is not None
-        else DEFAULT_DRAFT_DIR
-    )
-    concrete_handlers: dict[str, Any] = build_formatting_handlers(draft_dir=draft_dir)
-    concrete_handlers.update(build_draft_handlers(draft_dir=draft_dir))
-    concrete_handlers.update(build_forum_index_handlers())
-    transport = runtime.transport
-
-    if isinstance(transport, HFTransport):
-        concrete_handlers.update(build_core_read_handlers(policy, transport))
-        concrete_handlers.update(build_extended_read_handlers(policy, transport))
-        concrete_handlers.update(
-            build_write_handlers(policy, transport, draft_dir=draft_dir)
-        )
-
-    for spec in get_tool_specs(policy):
-        handler = concrete_handlers.get(spec.tool_name)
-        if handler is None:
-            continue
-        schema = _shape_live_input_schema(
-            spec.tool_name, build_tool_schema(spec, policy), handler
-        )
-        output_schema = build_tool_output_schema(spec)
-        annotations = build_annotations(spec)
-        registered = _register_via_register_tool(
-            server,
-            name=mcp_tool_name(spec.tool_name),
-            description=_tool_description(spec.tool_name, spec.operation),
-            input_schema=schema,
-            annotations=annotations,
-            output_schema=output_schema,
-            handler=handler,
-        )
-        if not registered:
-            raise TypeError(
-                "Server does not expose a compatible register_tool(name=..., ...) API."
-            )
-
-
-__all__ = ["RuntimeBundle", "register_tools", "resolve_runtime_bundle"]
+__all__ = ["Handler", "build_handlers", "resolve_transport"]

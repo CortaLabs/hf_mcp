@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import textwrap
 from pathlib import Path
 
@@ -8,6 +9,7 @@ import yaml
 
 
 from hf_mcp.capabilities import CapabilityPolicy
+from hf_mcp.registry import FAMILY_KEY, TOOLS, WIRE_KEY, get_tool_spec
 from hf_mcp.config import (
     ALL_CAPABILITIES,
     ALL_PARAMETER_FAMILIES,
@@ -56,6 +58,45 @@ def _extract_commented_csv_rows(example_text: str, heading: str) -> set[str]:
     return values
 
 
+def _policy(capabilities: set[str], families: set[str]) -> CapabilityPolicy:
+    return CapabilityPolicy(
+        HFMCPSettings(
+            profile="custom",
+            enabled_capabilities=frozenset(capabilities),
+            enabled_parameter_families=frozenset(families),
+        )
+    )
+
+
+def _preset_policy(profile: str) -> CapabilityPolicy:
+    return CapabilityPolicy(
+        HFMCPSettings(
+            profile=profile,
+            enabled_capabilities=PRESET_CAPABILITIES[profile],
+            enabled_parameter_families=PRESET_PARAMETER_FAMILIES[profile],
+        )
+    )
+
+
+def _any_of_families(spec) -> set[str]:
+    properties = spec.input_schema["properties"]
+    return {
+        properties[name][FAMILY_KEY]
+        for branch in spec.input_schema.get("anyOf", ())
+        for name in branch["required"]
+    }
+
+
+def _walk_keys(node: object):
+    if isinstance(node, dict):
+        for key, value in node.items():
+            yield key
+            yield from _walk_keys(value)
+    elif isinstance(node, list):
+        for item in node:
+            yield from _walk_keys(item)
+
+
 def test_default_profile_is_reader_when_profile_omitted(tmp_path: Path) -> None:
     settings = load_settings(config_path=tmp_path / "missing.yaml", env={})
 
@@ -65,66 +106,149 @@ def test_default_profile_is_reader_when_profile_omitted(tmp_path: Path) -> None:
     assert settings.enabled_parameter_families == PRESET_PARAMETER_FAMILIES["reader"]
 
 
-def test_full_api_profile_is_explicit_opt_in(tmp_path: Path) -> None:
-    config_path = _write_config(
-        tmp_path,
-        """
-        profile: full_api
-        """,
-    )
+def test_full_api_profile_is_explicit_opt_in_and_registers_every_tool(
+    tmp_path: Path,
+) -> None:
+    config_path = _write_config(tmp_path, "profile: full_api")
     settings = load_settings(config_path=config_path, env={})
-
-    assert settings.profile == "full_api"
-    assert settings.enabled_capabilities == PRESET_CAPABILITIES["full_api"]
-    assert settings.enabled_parameter_families == PRESET_PARAMETER_FAMILIES["full_api"]
-    assert settings.enabled_parameter_families == ALL_PARAMETER_FAMILIES
-
-
-def test_full_api_profile_exposes_verified_concrete_surface_only() -> None:
-    settings = HFMCPSettings(
-        profile="full_api",
-        enabled_capabilities=PRESET_CAPABILITIES["full_api"],
-        enabled_parameter_families=PRESET_PARAMETER_FAMILIES["full_api"],
-    )
     policy = CapabilityPolicy(settings)
 
-    retained_rows = {
+    assert settings.enabled_capabilities == ALL_CAPABILITIES
+    assert settings.enabled_parameter_families == ALL_PARAMETER_FAMILIES
+    assert len(TOOLS) == 27
+    assert all(policy.can_register(spec.name) for spec in TOOLS)
+
+
+def test_unknown_names_fail_with_config_errors(tmp_path: Path) -> None:
+    for phantom in ("contracts.write", "sigmarket.write", "admin.high_risk.write"):
+        config_path = _write_config(
+            tmp_path, f"profile: custom\nenabled_capabilities: [{phantom}]"
+        )
+        with pytest.raises(ValueError, match="Unknown capability"):
+            load_settings(config_path=config_path, env={})
+    config_path = _write_config(
+        tmp_path, "profile: reader\nenabled_parameter_families: [nope.family]"
+    )
+    with pytest.raises(ValueError, match="Unknown parameter family"):
+        load_settings(config_path=config_path, env={})
+    assert not _policy({"posts.read"}, set()).can_register("hf.doctor")
+
+
+def test_every_tool_requires_all_of_its_required_families() -> None:
+    for spec in TOOLS:
+        enabled = set(spec.required_families) | _any_of_families(spec)
+        assert _policy({spec.capability}, enabled).can_register(spec.name), spec.name
+        for family in spec.required_families:
+            policy = _policy({spec.capability}, enabled - {family})
+            assert not policy.can_register(spec.name), (spec.name, family)
+        assert not _policy(set(), set(ALL_PARAMETER_FAMILIES)).can_register(spec.name)
+
+
+def test_optional_only_read_tools_register_with_no_filters_enabled() -> None:
+    optional_only = [
+        spec
+        for spec in TOOLS
+        if not spec.required_families and "anyOf" not in spec.input_schema
+    ]
+    assert {spec.name for spec in optional_only} >= {
+        "me.read",
+        "bytes.read",
+        "contracts.read",
         "admin.high_risk.read",
+        "forums.index",
+        "drafts.list",
+    }
+    for spec in optional_only:
+        assert _policy({spec.capability}, set()).can_register(spec.name), spec.name
+
+
+def test_bytes_bump_requires_thread_selector_and_live_confirmation() -> None:
+    spec = get_tool_spec("bytes.bump")
+    assert spec.required_families == {"selectors.thread", "confirm.live"}
+    assert _policy({"bytes.bump"}, {"selectors.thread", "confirm.live"}).can_register(
+        "bytes.bump"
+    )
+    assert not _policy({"bytes.bump"}, {"selectors.thread"}).can_register("bytes.bump")
+    assert not _policy({"bytes.bump"}, {"confirm.live"}).can_register("bytes.bump")
+
+
+def test_any_of_tool_is_not_registrable_when_every_branch_is_pruned() -> None:
+    capabilities = {"threads.read"}
+    assert not _policy(capabilities, {"filters.pagination"}).can_register(
+        "threads.read"
+    )
+    policy = _policy(capabilities, {"selectors.forum"})
+    assert policy.can_register("threads.read")
+    schema = policy.input_schema(get_tool_spec("threads.read"))
+    assert schema["anyOf"] == [{"required": ["fid"]}]
+    assert "tid" not in schema["properties"]
+
+
+def test_reader_preset_has_positive_and_negative_controls() -> None:
+    policy = _preset_policy("reader")
+
+    for name in (
+        "threads.read",
+        "bytes.read",
+        "forums.index",
+        "drafts.list",
+        "drafts.read",
+    ):
+        assert policy.can_register(name), name
+    for name in (
+        "formatting.preflight",
+        "drafts.update",
+        "drafts.delete",
         "threads.create",
         "posts.reply",
         "bytes.transfer",
-        "bytes.deposit",
-        "bytes.withdraw",
-        "bytes.bump",
-    }
-    removed_rows = {
-        "contracts.write",
-        "sigmarket.write",
-        "admin.high_risk.write",
-    }
-    for name in retained_rows:
-        assert name in settings.enabled_capabilities
-        assert policy.can_register(name) is True
-    for name in removed_rows:
-        assert name not in settings.enabled_capabilities
-        assert policy.can_register(name) is False
-
-
-def test_reader_preset_disables_registration_for_write_capabilities(
-    tmp_path: Path,
-) -> None:
-    config_path = _write_config(
-        tmp_path,
-        """
-        profile: reader
-        """,
-    )
-    settings = load_settings(config_path=config_path, env={})
-    policy = CapabilityPolicy(settings)
-
-    assert policy.can_register("posts.read") is True
-    assert policy.can_register("posts.reply") is False
+    ):
+        assert not policy.can_register(name), name
     assert "writes.content" not in policy.allowed_parameter_families("posts.read")
+
+
+def test_forum_operator_preset_has_positive_and_negative_controls() -> None:
+    policy = _preset_policy("forum_operator")
+
+    for name in (
+        "threads.read",
+        "drafts.read",
+        "formatting.preflight",
+        "drafts.update",
+        "drafts.delete",
+        "threads.create",
+        "posts.reply",
+    ):
+        assert policy.can_register(name), name
+    for name in ("bytes.transfer", "bytes.deposit", "bytes.withdraw", "bytes.bump"):
+        assert not policy.can_register(name), name
+
+
+def test_custom_preset_is_empty_and_full_api_is_everything() -> None:
+    assert PRESET_CAPABILITIES["custom"] == frozenset()
+    assert PRESET_PARAMETER_FAMILIES["custom"] == frozenset()
+    custom = _preset_policy("custom")
+    assert not any(custom.can_register(spec.name) for spec in TOOLS)
+    assert PRESET_CAPABILITIES["full_api"] == ALL_CAPABILITIES
+
+
+def test_draft_grants_split_read_and_write() -> None:
+    families = {
+        "drafts.selector",
+        "drafts.filters",
+        "drafts.metadata",
+        "drafts.confirm_delete",
+    }
+    read_only = _policy({"drafts.read"}, families)
+    assert read_only.can_register("drafts.list")
+    assert read_only.can_register("drafts.read")
+    assert not read_only.can_register("drafts.update")
+    assert not read_only.can_register("drafts.delete")
+    write_only = _policy({"drafts.write"}, families)
+    assert write_only.can_register("drafts.update")
+    assert write_only.can_register("drafts.delete")
+    assert not write_only.can_register("drafts.list")
+    assert not _policy({"formatting.preflight"}, families).can_register("drafts.read")
 
 
 def test_forum_operator_can_disable_parameter_family_explicitly(tmp_path: Path) -> None:
@@ -136,24 +260,26 @@ def test_forum_operator_can_disable_parameter_family_explicitly(tmp_path: Path) 
           - confirm.live
         """,
     )
-    settings = load_settings(config_path=config_path, env={})
-    policy = CapabilityPolicy(settings)
+    policy = CapabilityPolicy(load_settings(config_path=config_path, env={}))
 
-    assert policy.can_register("posts.reply") is True
-    assert "writes.content" in policy.allowed_parameter_families("posts.reply")
-    assert "confirm.live" not in policy.allowed_parameter_families("posts.reply")
+    assert policy.can_register("posts.reply") is False
+    assert policy.allowed_parameter_families("posts.reply") == frozenset()
+    assert policy.can_register("posts.read") is True
 
 
 @pytest.mark.parametrize(
     ("disabled_family", "tool", "expected_register"),
     [
-        ("selectors.user", "users.read", True),
+        ("selectors.user", "users.read", False),
         ("selectors.contract", "contracts.read", True),
         ("selectors.sigmarket", "sigmarket.market.read", True),
         ("formatting.content", "formatting.preflight", False),
-        ("writes.content", "posts.reply", True),
-        ("writes.bytes", "bytes.transfer", True),
-        ("confirm.live", "threads.create", True),
+        ("writes.content", "posts.reply", False),
+        ("writes.bytes", "bytes.transfer", False),
+        ("confirm.live", "threads.create", False),
+        ("drafts.confirm_delete", "drafts.delete", False),
+        ("drafts.metadata", "drafts.update", False),
+        ("drafts.metadata", "drafts.read", True),
     ],
 )
 def test_full_api_family_disables_support_required_permission_groups(
@@ -170,147 +296,43 @@ def test_full_api_family_disables_support_required_permission_groups(
           - {disabled_family}
         """,
     )
-    settings = load_settings(config_path=config_path, env={})
-    policy = CapabilityPolicy(settings)
+    policy = CapabilityPolicy(load_settings(config_path=config_path, env={}))
 
     assert policy.can_register(tool) is expected_register
     assert disabled_family not in policy.allowed_parameter_families(tool)
 
 
-@pytest.mark.parametrize(
-    ("disabled_family", "tool", "schema", "removed_property"),
-    [
-        (
-            "selectors.user",
-            "users.read",
-            {
-                "type": "object",
-                "properties": {
-                    "_uid": {
-                        "type": "integer",
-                        "x-hf-parameter-family": "selectors.user",
-                    },
-                    "_page": {
-                        "type": "integer",
-                        "x-hf-parameter-family": "filters.pagination",
-                    },
-                },
-            },
-            "_uid",
-        ),
-        (
-            "selectors.contract",
-            "contracts.read",
-            {
-                "type": "object",
-                "properties": {
-                    "_cid": {
-                        "type": "integer",
-                        "x-hf-parameter-family": "selectors.contract",
-                    },
-                    "_page": {
-                        "type": "integer",
-                        "x-hf-parameter-family": "filters.pagination",
-                    },
-                },
-            },
-            "_cid",
-        ),
-        (
-            "selectors.sigmarket",
-            "sigmarket.market.read",
-            {
-                "type": "object",
-                "properties": {
-                    "_smid": {
-                        "type": "integer",
-                        "x-hf-parameter-family": "selectors.sigmarket",
-                    },
-                    "_page": {
-                        "type": "integer",
-                        "x-hf-parameter-family": "filters.pagination",
-                    },
-                },
-            },
-            "_smid",
-        ),
-        (
-            "fields.me.advanced",
-            "me.read",
-            {
-                "type": "object",
-                "properties": {
-                    "_uid": {
-                        "type": "integer",
-                        "x-hf-parameter-family": "selectors.user",
-                    },
-                    "_stats": {
-                        "type": "boolean",
-                        "x-hf-parameter-family": "fields.me.advanced",
-                    },
-                },
-            },
-            "_stats",
-        ),
-        (
-            "fields.posts.body",
-            "posts.read",
-            {
-                "type": "object",
-                "properties": {
-                    "_tid": {
-                        "type": "integer",
-                        "x-hf-parameter-family": "selectors.thread",
-                    },
-                    "_body": {
-                        "type": "boolean",
-                        "x-hf-parameter-family": "fields.posts.body",
-                    },
-                },
-            },
-            "_body",
-        ),
-        (
-            "fields.bytes.amount",
-            "bytes.read",
-            {
-                "type": "object",
-                "properties": {
-                    "_uid": {
-                        "type": "integer",
-                        "x-hf-parameter-family": "selectors.bytes",
-                    },
-                    "_amount": {
-                        "type": "boolean",
-                        "x-hf-parameter-family": "fields.bytes.amount",
-                    },
-                },
-            },
-            "_amount",
-        ),
-    ],
-)
-def test_full_api_family_disables_prune_advanced_users_posts_and_bytes_fields(
-    tmp_path: Path,
-    disabled_family: str,
-    tool: str,
-    schema: dict[str, object],
-    removed_property: str,
-) -> None:
-    config_path = _write_config(
-        tmp_path,
-        f"""
-        profile: full_api
-        disabled_parameter_families:
-          - {disabled_family}
-        """,
-    )
-    settings = load_settings(config_path=config_path, env={})
-    policy = CapabilityPolicy(settings)
+def test_published_schemas_are_pruned_clean_idempotent_and_leave_tools_intact() -> None:
+    snapshot = copy.deepcopy([spec.input_schema for spec in TOOLS])
+    for dropped in sorted(ALL_PARAMETER_FAMILIES):
+        policy = _policy(set(ALL_CAPABILITIES), set(ALL_PARAMETER_FAMILIES) - {dropped})
+        for spec in TOOLS:
+            if not policy.can_register(spec.name):
+                continue
+            schema = policy.input_schema(spec)
+            assert schema == policy.input_schema(spec)
+            properties = schema["properties"]
+            for name in properties:
+                assert spec.input_schema["properties"][name][FAMILY_KEY] != dropped
+            assert all(name in properties for name in schema.get("required", ()))
+            if "anyOf" in spec.input_schema:
+                assert schema["anyOf"], (spec.name, dropped)
+            for branch in schema.get("anyOf", ()):
+                assert all(name in properties for name in branch["required"])
+            assert not any(
+                str(key).startswith("x-hf-") for key in _walk_keys(schema)
+            ), spec.name
+    assert snapshot == [spec.input_schema for spec in TOOLS]
 
-    pruned = policy.prune_schema(tool, schema)
 
-    assert removed_property not in pruned.get("properties", {})
+def test_internal_tags_exist_on_every_table_property_but_never_publish() -> None:
+    for spec in TOOLS:
+        for prop in spec.input_schema["properties"].values():
+            assert prop[FAMILY_KEY] in ALL_PARAMETER_FAMILIES
+        assert spec.input_schema["additionalProperties"] is False
+        published = _policy(set(ALL_CAPABILITIES), set(ALL_PARAMETER_FAMILIES))
+        assert FAMILY_KEY not in str(published.input_schema(spec))
+        assert WIRE_KEY not in str(published.input_schema(spec))
 
 
 def test_full_api_can_disable_capability_explicitly(tmp_path: Path) -> None:
@@ -371,45 +393,6 @@ def test_family_without_parent_capability_fails_closed(tmp_path: Path) -> None:
         load_settings(config_path=config_path, env={})
 
 
-def test_prune_schema_removes_disabled_parameter_families() -> None:
-    settings = HFMCPSettings(
-        profile="custom",
-        enabled_capabilities=frozenset({"posts.read"}),
-        enabled_parameter_families=frozenset({"selectors.thread", "fields.posts.body"}),
-    )
-    policy = CapabilityPolicy(settings)
-
-    schema = {
-        "type": "object",
-        "properties": {
-            "_tid": {"type": "integer", "x-hf-parameter-family": "selectors.thread"},
-            "_body": {"type": "boolean", "x-hf-parameter-family": "fields.posts.body"},
-            "_message": {"type": "string", "x-hf-parameter-family": "writes.content"},
-        },
-        "required": ["_tid", "_body", "_message"],
-    }
-
-    pruned = policy.prune_schema("posts.read", schema)
-
-    assert set(pruned["properties"]) == {"_tid", "_body"}
-    assert pruned["required"] == ["_tid", "_body"]
-
-
-def test_prune_schema_returns_closed_schema_for_disabled_tool() -> None:
-    settings = HFMCPSettings(
-        profile="reader",
-        enabled_capabilities=frozenset({"posts.read"}),
-        enabled_parameter_families=frozenset({"selectors.thread"}),
-    )
-    policy = CapabilityPolicy(settings)
-
-    pruned = policy.prune_schema(
-        "posts.reply", {"type": "object", "properties": {"_tid": {}}}
-    )
-
-    assert pruned == {"type": "object", "properties": {}, "additionalProperties": False}
-
-
 def test_example_config_defaults_to_reader_profile() -> None:
     data = yaml.safe_load(
         (PRODUCT_ROOT / "config.example.yaml").read_text(encoding="utf-8")
@@ -431,8 +414,3 @@ def test_example_config_full_api_commentary_matches_runtime_presets() -> None:
 
     assert capability_rows == set(PRESET_CAPABILITIES["full_api"])
     assert parameter_rows == set(PRESET_PARAMETER_FAMILIES["full_api"])
-
-
-def test_full_api_profile_is_strict_subset_of_all_capabilities() -> None:
-    assert PRESET_CAPABILITIES["full_api"].issubset(ALL_CAPABILITIES)
-    assert PRESET_CAPABILITIES["full_api"] != ALL_CAPABILITIES

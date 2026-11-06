@@ -5,7 +5,8 @@ from typing import Any
 
 import pytest
 
-from hf_mcp.formatting_engine import prepare_formatting_report, write_draft_artifact
+from hf_mcp.draft_store import write_draft_artifact
+from hf_mcp.formatting_engine import prepare_formatting_report
 from hf_mcp.tools.write_documented import create_thread_live, reply_to_thread_live
 from hf_mcp.write_preflight import WritePreflightError, validate_write_body
 

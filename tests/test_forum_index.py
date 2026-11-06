@@ -7,46 +7,18 @@ from typing import Any
 
 from hf_mcp.capabilities import CapabilityPolicy
 from hf_mcp.config import HFMCPSettings
-from hf_mcp.dispatcher import RuntimeBundle, register_tools
-from hf_mcp.registry import mcp_tool_name
+from hf_mcp.dispatcher import build_handlers
 from hf_mcp.tools.forum_index import build_forum_index_handlers
 
 PRODUCT_ROOT = Path(__file__).resolve().parents[1]
 SRC_PATH = PRODUCT_ROOT / "src"
 
 
-class _CaptureServer:
-    def __init__(self) -> None:
-        self.tools: dict[str, dict[str, Any]] = {}
-
-    def register_tool(
-        self,
-        *,
-        name: str,
-        description: str,
-        input_schema: dict[str, Any],
-        annotations: dict[str, Any],
-        handler: Any,
-        output_schema: dict[str, object] | None = None,
-    ) -> None:
-        self.tools[name] = {
-            "description": description,
-            "input_schema": input_schema,
-            "annotations": annotations,
-            "handler": handler,
-            "output_schema": output_schema,
-        }
-
-
-def _policy() -> CapabilityPolicy:
-    return CapabilityPolicy(
-        HFMCPSettings(
-            profile="test",
-            enabled_capabilities=frozenset({"forums.read"}),
-            enabled_parameter_families=frozenset(
-                {"selectors.forum", "filters.pagination"}
-            ),
-        )
+def _settings() -> HFMCPSettings:
+    return HFMCPSettings(
+        profile="test",
+        enabled_capabilities=frozenset({"forums.read"}),
+        enabled_parameter_families=frozenset({"selectors.forum", "filters.pagination"}),
     )
 
 
@@ -91,14 +63,13 @@ def test_forums_index_handler_supports_flat_and_tree_views() -> None:
 def test_forums_index_registers_without_transport_and_keeps_structured_content_protocol() -> (
     None
 ):
-    policy = _policy()
-    server = _CaptureServer()
+    settings = _settings()
 
-    register_tools(server, policy, RuntimeBundle())
+    handlers = build_handlers(CapabilityPolicy(settings), settings, None)
 
-    assert mcp_tool_name("forums.index") in server.tools
-    assert mcp_tool_name("forums.read") not in server.tools
-    handler = server.tools[mcp_tool_name("forums.index")]["handler"]
+    assert "forums.index" in handlers
+    assert "forums.read" not in handlers
+    handler = handlers["forums.index"]
     result = handler()
     assert isinstance(result.get("structuredContent"), dict)
     assert "_hf_flow" in result["structuredContent"]
