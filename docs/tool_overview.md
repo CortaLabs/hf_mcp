@@ -138,7 +138,7 @@ source is limited to 500,000 characters.
 | `reader` (default) | 18: all 13 reads, `formatting.convert`, `templates.list`, `templates.render`, `drafts.list`, `drafts.read` |
 | `forum_operator` | 23: `reader` plus `formatting.preflight`, `drafts.update`, `drafts.delete`, `threads.create`, `posts.reply` |
 | `full_api` | all 27: `forum_operator` plus `bytes.transfer`, `bytes.deposit`, `bytes.withdraw`, `bytes.bump` |
-| `custom` | none until you opt in; list `output.options` among the enabled parameter families to keep `output_mode`, `include_raw_payload` and `body_format` |
+| `custom` | none until you opt in; list `output.options` among the enabled parameter families to keep `output_mode`, `include_raw_payload` and `body_format` (plus `view` and `include_inactive` on `forums.index`) |
 
 ## Available writes
 

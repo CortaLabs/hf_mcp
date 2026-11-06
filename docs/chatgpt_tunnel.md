@@ -101,7 +101,7 @@ read_output_defaults:
 ```
 
 The `output.options` family keeps `output_mode`, `include_raw_payload` and
-`body_format` on these reads; a `custom` profile without it drops them from the tool
+`body_format` on these reads (and `view` and `include_inactive` on `forums_index`); a `custom` profile without it drops them from the tool
 schemas. This optional profile excludes write capabilities and the `confirm.live`
 parameter family. Do not pass `--profile custom` on the command line when using
 this YAML: the CLI override replaces its capability overlays. If another agent
