@@ -18,6 +18,7 @@ from hf_mcp.formatting_engine import (
     update_draft_metadata,
     write_draft_artifact,
 )
+from hf_mcp.mycode import analyze_conversion
 from hf_mcp.tools.formatting import preflight_formatting
 
 PRODUCT_ROOT = Path(__file__).resolve().parents[1]
@@ -366,3 +367,57 @@ def test_preflight_formatting_emits_local_hf_flow_actions_only(tmp_path: Path) -
     assert all(not tool.startswith(("threads.", "posts.", "bytes.")) for tool in tools)
     for action in flow["next_actions"]:
         assert "draft_path" not in action.get("arguments", {})
+
+
+def test_preflight_returns_full_mycode_and_findings_not_a_preview(
+    tmp_path: Path,
+) -> None:
+    source = " ".join(f"word{n}" for n in range(600))
+    assert len(source) > 2000
+    result = preflight_formatting(message=source, draft_dir=tmp_path)
+
+    structured = result["structuredContent"]
+    assert structured["mycode"] == prepare_formatting_report(source, "markdown").mycode
+    assert structured["mycode"] == source
+    assert structured["conversion_findings"] == []
+    assert structured["integrity"] == 1.0
+    text = result["content"][0]["text"]
+    assert "structuredContent.mycode" in text
+    assert "structuredContent.conversion_findings" in text
+
+
+@pytest.mark.parametrize(
+    ("source", "code"),
+    [
+        ("| a | b |\n|---|---|\n| 1 | 2 |", "table_as_code"),
+        ("Use `[b]` for bold.", "inline_code_as_block"),
+        ("![logo](https://example.com/a.png)", "image_alt_loss"),
+    ],
+)
+def test_preflight_reports_conversion_losses_and_lowers_integrity(
+    tmp_path: Path, source: str, code: str
+) -> None:
+    structured = preflight_formatting(message=source, draft_dir=tmp_path)[
+        "structuredContent"
+    ]
+
+    findings = structured["conversion_findings"]
+    assert [finding["code"] for finding in findings] == [code]
+    assert findings[0]["kind"] == "loss"
+    assert set(findings[0]) == {"code", "kind", "start", "end"}
+    assert source[findings[0]["start"] : findings[0]["end"]]
+    assert structured["integrity"] < 1.0
+    expected = [
+        {"code": f.code, "kind": f.kind, "start": f.start, "end": f.end}
+        for f in analyze_conversion(source, "markdown")
+    ]
+    assert findings == expected
+
+
+def test_conversion_findings_survive_the_draft_round_trip(tmp_path: Path) -> None:
+    artifact = write_draft_artifact(
+        "![logo](https://example.com/a.png)", "markdown", draft_dir=tmp_path
+    )
+    reloaded = read_draft_artifact(draft_id=artifact.draft_id, draft_dir=tmp_path)
+    assert reloaded.report.conversion_findings == artifact.report.conversion_findings
+    assert reloaded.report.integrity == artifact.report.integrity < 1.0
