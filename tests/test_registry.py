@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -277,6 +278,33 @@ def test_deleted_modules_are_gone() -> None:
         assert not (SRC_PATH / "hf_mcp" / f"{name}.py").exists()
 
 
+def _bounded_pattern(pattern: str) -> bool:
+    """An anchored pattern whose quantifiers are all finite (`{m,n}`/`{n}`)."""
+    return (
+        pattern.startswith("^")
+        and pattern.endswith("$")
+        and re.search(r"[*+]|\{\d*,\}", pattern) is None
+    )
+
+
+@pytest.mark.parametrize(
+    ("pattern", "bounded"),
+    [
+        (registry.DRAFT_ID_PATTERN, True),
+        ("^[a-z]{1,64}$", True),
+        ("^[a-z]+$", False),
+        ("^.*$", False),
+        ("^[a-z]{1,}$", False),
+        ("[a-f]{32}", False),
+        ("", False),
+    ],
+)
+def test_bounded_pattern_helper_accepts_only_finite_anchored_patterns(
+    pattern: str, bounded: bool
+) -> None:
+    assert _bounded_pattern(pattern) is bounded
+
+
 def test_every_free_text_property_publishes_a_max_length() -> None:
     shared = {
         registry.MAX_MESSAGE_CHARS,
@@ -285,6 +313,8 @@ def test_every_free_text_property_publishes_a_max_length() -> None:
     }
     for spec in TOOLS:
         for name, prop in spec.input_schema["properties"].items():
-            if prop["type"] != "string" or "enum" in prop or "pattern" in prop:
+            if prop["type"] != "string" or "enum" in prop:
                 continue
-            assert prop.get("maxLength") in shared, (spec.name, name)
+            assert prop.get("maxLength") in shared or _bounded_pattern(
+                prop.get("pattern", "")
+            ), (spec.name, name)
