@@ -1629,7 +1629,7 @@ def test_create_server_fails_closed_when_token_bundle_is_missing(
         },
     )
 
-    with pytest.raises(RuntimeError, match="No access token found"):
+    with pytest.raises(RuntimeError, match="No usable Hack Forums access token"):
         create_server(settings)
 
 
@@ -1646,7 +1646,7 @@ def test_serve_stdio_fails_closed_when_token_bundle_is_missing(tmp_path: Path) -
         },
     )
 
-    with pytest.raises(RuntimeError, match="No access token found"):
+    with pytest.raises(RuntimeError, match="No usable Hack Forums access token"):
         serve_stdio(settings)
 
 
