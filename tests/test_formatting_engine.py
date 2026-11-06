@@ -33,7 +33,7 @@ def test_formatting_report_models_known_hf_quote_mutations() -> None:
     assert report.source_format == "markdown"
     assert (
         report.mycode
-        == '[code]{"tool":"posts.reply","message_format":"markdown"}\n[/code]'
+        == '[code]\n{"tool":"posts.reply","message_format":"markdown"}\n[/code]'
     )
     assert "&quot;tool&quot;" in report.simulated_hf_mycode
     assert report.integrity < 1.0
@@ -67,9 +67,9 @@ def test_formatting_report_keeps_clean_list_posts_high_integrity() -> None:
     assert report.mycode == (
         "[b]Update[/b]\n\n"
         "[list]\n"
-        "[*] body_format markdown\n"
-        "[*] message_format markdown\n"
-        "[*] hf-mcp-reads guidance\n"
+        "[*]body_format markdown\n"
+        "[*]message_format markdown\n"
+        "[*]hf-mcp-reads guidance\n"
         "[/list]"
     )
     assert report.integrity == 1.0
@@ -143,7 +143,7 @@ def test_cached_source_file_can_be_preflighted_and_loaded_from_default_cache(
     assert loaded.draft_id == artifact.draft_id
     assert (
         loaded.report.mycode
-        == "[b]Approved[/b]\n\n[list]\n[*] posted from disk\n[/list]"
+        == "[b]Approved[/b]\n\n[list]\n[*]posted from disk\n[/list]"
     )
 
 

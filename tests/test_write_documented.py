@@ -416,8 +416,8 @@ def test_write_helpers_can_convert_markdown_messages_to_mycode() -> None:
                     "_message": (
                         "[b]Bold[/b]\n\n"
                         "[list]\n"
-                        "[*] one\n"
-                        "[*] two\n"
+                        "[*]one\n"
+                        "[*]two\n"
                         "[/list]\n\n"
                         "[url=https://example.test]site[/url]"
                     ),
@@ -429,7 +429,7 @@ def test_write_helpers_can_convert_markdown_messages_to_mycode() -> None:
             "asks": {
                 "posts": {
                     "_tid": 44,
-                    "_message": '[quote]quoted[/quote]\n\n[code]{"ok":true}\n[/code]',
+                    "_message": '[quote]quoted[/quote]\n\n[code]\n{"ok":true}\n[/code]',
                 }
             },
             "helper": None,
@@ -458,7 +458,7 @@ def test_reply_can_publish_cached_preflight_draft_by_id_without_resending_messag
             "asks": {
                 "posts": {
                     "_tid": 44,
-                    "_message": "[b]Approved[/b]\n\n[list]\n[*] cached draft body\n[/list]",
+                    "_message": "[b]Approved[/b]\n\n[list]\n[*]cached draft body\n[/list]",
                 }
             },
             "helper": None,
@@ -496,7 +496,7 @@ def test_thread_create_can_publish_cached_preflight_draft_from_configured_dir(
                 "threads": {
                     "_fid": 12,
                     "_subject": "Draft Thread",
-                    "_message": "[b]Approved[/b]\n\n[list]\n[*] thread draft body\n[/list]",
+                    "_message": "[b]Approved[/b]\n\n[list]\n[*]thread draft body\n[/list]",
                 }
             },
             "helper": "threads",

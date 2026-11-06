@@ -4,8 +4,11 @@ from collections.abc import Mapping
 import re
 from typing import Any
 
+from hf_mcp import __version__
+
 FLOW_KEY: str = "_hf_flow"
 _FLOW_VERSION = 1
+_SERVER_NAME = "hf-mcp"
 _DRAFT_ID_PATTERN = re.compile(r"^[a-f0-9]{32}$")
 
 
@@ -714,6 +717,7 @@ def build_hf_flow(
 
     return {
         "version": _FLOW_VERSION,
+        "server": {"name": _SERVER_NAME, "version": __version__},
         "entry_tool": tool_name,
         "breadcrumbs": _build_breadcrumbs(tool_name=tool_name, source=source),
         "entities": entities,
