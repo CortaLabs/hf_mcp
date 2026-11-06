@@ -2,7 +2,9 @@
 
 All notable changes to hf-mcp are listed here, newest first.
 
-## 0.7.0
+## 0.7.1
+
+Version 0.7.0 was tagged but never published to PyPI, so these changes ship as 0.7.1, together with one test-fixture fix.
 
 Errors are now honest and safe. Hack Forums failures, including HTTP 200 responses that report a failure, come back as MCP errors with a stable code instead of looking like success. A write that times out is reported as "outcome unknown" and never retried. Upstream error bodies and tokens are no longer echoed. Lists and byte amounts come back exactly as Hack Forums sent them. Links and images with unsafe schemes such as `javascript:` or `data:` are rejected before posting. The token file is used only when it is a private regular file you own.
 
