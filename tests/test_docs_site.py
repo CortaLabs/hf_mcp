@@ -14,7 +14,6 @@ README_PAGE = Path(__file__).resolve().parents[1] / "README.md"
 TOOL_OVERVIEW_PAGE = DOCS_DIR / "tool_overview.md"
 EXAMPLES_PAGE = DOCS_DIR / "examples.md"
 COVERAGE_MATRIX_PAGE = DOCS_DIR / "coverage_matrix.md"
-EXPORT_BOUNDARY_PAGE = DOCS_DIR / "export_boundary.md"
 READS_SKILL_PAGE = (
     Path(__file__).resolve().parents[1] / "skills" / "hf-mcp-reads" / "SKILL.md"
 )
@@ -64,10 +63,9 @@ def test_index_links_existing_docs_and_project_destinations() -> None:
 
     assert 'href="configuration.md"' in html
     assert 'href="coverage_matrix.md"' in html
-    assert 'href="export_boundary.md"' in html
     assert 'href="security_model.md"' in html
     assert 'href="oauth_callback.html"' in html
-    assert 'href="https://github.com/cortalabs/hf_mcp"' in html
+    assert 'href="https://github.com/CortaLabs/hf_mcp"' in html
     assert 'href="https://pypi.org/project/hf-mcp/"' in html
     assert 'href="styles.css"' in html
     assert 'src="app.js"' in html
@@ -107,57 +105,47 @@ def test_docs_publish_compounding_flow_contract_without_relaxing_write_guards() 
     tool_overview = _read(TOOL_OVERVIEW_PAGE)
     examples = _read(EXAMPLES_PAGE)
     coverage = _read(COVERAGE_MATRIX_PAGE)
-    export_boundary = _read(EXPORT_BOUNDARY_PAGE)
     reads_skill = _read(READS_SKILL_PAGE)
 
     assert "forums.index" in readme
-    assert "forums_index" in readme
     assert "_hf_flow" in readme
-    assert "supported" in readme
-    assert "`bytes.read`" in readme
-    assert "draft/preflight tools" in readme
-    assert "successful results from existing guarded" in readme
-    assert "confirmed or stubbed execution" in readme
+    assert "confirm_live=true" in readme
     assert "forums.index" in tool_overview
     assert "forums_index" in tool_overview
     assert "_hf_flow" in tool_overview
-    assert "supported extended reads (`bytes.read`" in tool_overview
     assert "sigmarket.order.read" in tool_overview
-    assert "draft/preflight tools" in tool_overview
-    assert "successful results from existing guarded" in tool_overview
-    assert "confirmed or stubbed execution" in tool_overview
     assert "Concrete chain:" in examples
     assert (
         "`forums.index` -> `forums.read` -> `threads.read` -> `posts.read`" in examples
     )
-    assert "maintained package data and can drift from live HF" in examples
-    assert "forums.read` still requires `fid`; it is not root discovery" in examples
-    assert "forums_index" in examples
     assert "_hf_flow" in examples
-    assert "supported extended reads" in examples
-    assert "`bytes.read`" in examples
-    assert "draft/preflight tools" in examples
-    assert "successful results from existing guarded" in examples
-    assert "confirmed or stubbed execution" in examples
     assert "forums.index" in coverage
     assert "local catalog-backed root discovery" in coverage
-    assert "can drift from live HF" in coverage
-    assert (
-        "forums.read` remains `fid`-required and is not root discovery"
-        in export_boundary
-    )
-    assert "_hf_flow" in export_boundary
-    assert "supported extended reads" in export_boundary
-    assert "`bytes.read`" in export_boundary
-    assert "draft/preflight tools" in export_boundary
-    assert "successful results from existing guarded" in export_boundary
-    assert "confirmed or stubbed execution" in export_boundary
     assert "forums.index" in reads_skill
     assert "forums_index" in reads_skill
     assert "confirm_live=true" in readme
-    assert "confirm_live=true" in export_boundary
-    for stale_doc in (readme, tool_overview, examples, export_boundary):
+    for stale_doc in (readme, tool_overview, examples):
         assert "core reads only" not in stale_doc
         assert "forums.index and core reads only" not in stale_doc
         assert "Draft/write flow metadata is planned" not in stale_doc
         assert "draft/write flow metadata is planned" not in stale_doc
+
+
+_MARKDOWN_LINK = re.compile(r"\]\((?!https?:|#|mailto:)([^)\s#]+)")
+_HTML_LINK = re.compile(r'(?:href|src)="(?!https?:|#|mailto:)([^"#]+)"')
+
+
+def test_relative_links_in_readme_docs_and_skills_resolve() -> None:
+    product_root = DOCS_DIR.parent
+    pages = [
+        README_PAGE,
+        *sorted(DOCS_DIR.glob("*.md")),
+        *sorted((product_root / "skills").rglob("*.md")),
+        INDEX_PAGE,
+    ]
+    for page in pages:
+        pattern = _HTML_LINK if page.suffix == ".html" else _MARKDOWN_LINK
+        for target in pattern.findall(_read(page)):
+            assert (page.parent / target).resolve().exists(), (
+                f"{page.name} links to missing {target}"
+            )

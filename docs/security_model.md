@@ -21,26 +21,27 @@ as open-world input/output, so controls default to fail-closed behavior.
 - Do not commit credentials into docs, config examples, or tests.
 - Rotate credentials immediately if exposure is suspected.
 
-## Rollout and validation posture
+## Write policy
 
-- Start deployments read-first, then enable write families intentionally.
-- Live-write validation remains manual and operator-controlled.
-- Concrete writes require explicit `confirm_live=true`.
-- Manual live validation in this wave is limited to `posts.reply` on
-  `TID 6083735` and at most one `threads.create` in `FID 375`.
-- No Bytes live writes are in scope for this wave.
-- `contracts.write` remains unexposed in this wave due missing sandbox proof.
-- Signature Market write operations and admin-only high-risk write operations
-  remain unsupported/unexposed in this wave.
-- Keep audit logs outside the tracked package tree.
+- Start read-only (the default `reader` profile), then enable write tools on purpose.
+- The write tools are `threads.create`, `posts.reply`, `bytes.transfer`,
+  `bytes.deposit`, `bytes.withdraw`, and `bytes.bump`. Each one needs
+  `confirm_live=true` on the call; without it the request is refused before any
+  network call.
+- `contracts.write`, Signature Market writes, and admin-only writes are not
+  available. Direct private message operations are not available either.
+- Drafts are local files. `scheduled_at` on a draft is a note for you; `hf-mcp`
+  never schedules or posts on its own.
+- Hack Forums canonicalizes quotes and HTML entities in posted content (for
+  example `&#34;` becomes `&quot;`). Treat that as the API sanitizing input, not
+  something to work around.
+- Calls that need an API scope your Hack Forums app does not have are refused by
+  Hack Forums.
+- Keep audit logs and the token file outside any repository you commit.
 
-## Ownership and cross-links
+## Related docs
 
-- `security_model.md` owns safety posture, guarded-write expectations, and
-  secret-handling guidance.
-- `export_boundary.md` is canonical for package-export truth, JSON-first output
-  framing, and current sigmarket scope limitation status.
-- For configuration policy details, see [configuration.md](configuration.md).
-- For auth bootstrap flow and callback behavior, see
-  [auth_bootstrap.md](auth_bootstrap.md).
-- For concrete request/response examples, see [examples.md](examples.md).
+- [configuration.md](configuration.md): policy, paths, and precedence
+- [auth_bootstrap.md](auth_bootstrap.md): OAuth bootstrap and callback behavior
+- [examples.md](examples.md): request and response examples
+- [tool_overview.md](tool_overview.md): the tool list

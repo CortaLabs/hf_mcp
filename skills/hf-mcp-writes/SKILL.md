@@ -4,13 +4,13 @@ description: Guarded write usage skill for hf-mcp covering concrete live-write h
 user-invocable: true
 context: full
 visibility: exported
-owner: hackforums-council
+owner: hf-mcp
 ---
 
 # HF MCP Writes
 
 Use this skill for hf-mcp write tasks so live-write guardrails stay explicit,
-concrete helper coverage stays truthful, and unsupported families are not
+concrete helper coverage stays accurate, and unsupported families are not
 misread as callable operations.
 
 ## Trigger Conditions
@@ -29,7 +29,7 @@ misread as callable operations.
 
 1. Separate concrete write helpers from unexposed write families before any command drafting.
    - Concrete helpers: `threads.create`, `posts.reply`, `bytes.transfer`, `bytes.deposit`, `bytes.withdraw`, `bytes.bump`.
-   - Not exposed: `contracts.write` (blocked until operator-approved sandbox proof exists), Signature Market writes, and admin-only high-risk writes.
+   - Not exposed: `contracts.write` (not available), Signature Market writes, and admin-only high-risk writes.
 
 2. Require explicit live-write confirmation on concrete helpers.
    - Concrete helpers require `confirm_live=true`.
@@ -47,7 +47,7 @@ misread as callable operations.
 
 5. Treat HF API quote sanitization as an expected live-write safety boundary.
    - Do not promise that quote-heavy code examples posted through `posts.reply` or `threads.create` will preserve copy-ready literal double quotes on the forum page.
-   - Live probes on thread `6324346` showed raw double quotes in `[code]` and inline text read back as `&quot;`; decimal numeric quote entities (`&#34;`) were also canonicalized to `&quot;`.
+   - Hack Forums rewrites double quotes, including `&#34;`, to `&quot;` in posted content, in `[code]` blocks and inline text alike.
    - Frame this as natural HF security/sanitization for API-written forum content, not as a surprising MCP transport bug.
    - For public update posts, prefer quote-light formats, YAML-ish examples, single-quoted examples where valid, screenshots, attachments, paste links, or an explicit note that the snippet is illustrative rather than copy-ready.
 
@@ -91,4 +91,4 @@ misread as callable operations.
 - Do not normalize autonomous posting or unattended live-write loops.
 - Do not invent additional write helpers beyond the shipped documented set.
 - Do not imply `scheduled_at` triggers automatic execution.
-- Do not treat backend entity pre-encoding as a proven workaround for double quotes; `&#34;` was canonicalized to `&quot;` in live API readback.
+- Do not treat entity pre-encoding as a workaround for double quotes; Hack Forums rewrites `&#34;` to `&quot;` as well.

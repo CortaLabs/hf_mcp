@@ -10,6 +10,8 @@ from typing import Any
 import anyio
 import pytest
 
+import hf_mcp
+
 
 from hf_mcp.capabilities import CapabilityPolicy
 from hf_mcp.config import HFMCPSettings, PRESET_CAPABILITIES, PRESET_PARAMETER_FAMILIES
@@ -1696,8 +1698,9 @@ def test_serve_stdio_publishes_dispatcher_contract_for_live_runtime(
     class _FakeFastMCP:
         instances: list["_FakeFastMCP"] = []
 
-        def __init__(self, name: str) -> None:
+        def __init__(self, name: str, version: str = "") -> None:
             self.name = name
+            self.version = version
             self._tool_manager = MCPServer(name=name)._tool_manager
             self.registered_tools: dict[str, dict[str, Any]] = {}
             self.run_calls: list[str] = []
@@ -1743,6 +1746,7 @@ def test_serve_stdio_publishes_dispatcher_contract_for_live_runtime(
     assert len(_FakeFastMCP.instances) == 1
     app = _FakeFastMCP.instances[0]
     assert app.run_calls == ["stdio"]
+    assert app.version == hf_mcp.__version__
 
     for tool_name in (
         "me.read",
@@ -1936,7 +1940,7 @@ def test_serve_stdio_runs_stdio_runtime_once_without_restart_loop(
     registered_names: list[str] = []
 
     class _FakeFastMCP:
-        def __init__(self, name: str) -> None:
+        def __init__(self, name: str, version: str = "") -> None:
             self.name = name
             self._tool_manager = MCPServer(name=name)._tool_manager
 
@@ -1990,7 +1994,7 @@ def test_serve_stdio_does_not_retry_when_stdio_is_closed(
     run_calls: list[str] = []
 
     class _FakeFastMCP:
-        def __init__(self, name: str) -> None:
+        def __init__(self, name: str, version: str = "") -> None:
             self.name = name
             self._tool_manager = MCPServer(name=name)._tool_manager
 
