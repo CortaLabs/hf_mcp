@@ -16,8 +16,7 @@ import hf_mcp
 from hf_mcp.capabilities import CapabilityPolicy
 from hf_mcp.config import HFMCPSettings, PRESET_CAPABILITIES, PRESET_PARAMETER_FAMILIES
 from hf_mcp.dispatcher import RuntimeBundle, register_tools
-from hf_mcp.metadata import get_tool_specs
-from hf_mcp.registry import get_documented_write_specs, mcp_tool_name
+from hf_mcp.registry import get_specs, mcp_tool_name
 from hf_mcp.server import _MCPServerToolAdapter, _with_schema_signature
 from hf_mcp.server import create_server, serve_stdio
 from hf_mcp.token_store import TokenBundle
@@ -763,7 +762,7 @@ transport.read_raw = _stub_read_raw
 settings = HFMCPSettings(
     profile="test",
     enabled_capabilities=frozenset({"me.read"}),
-    enabled_parameter_families=frozenset({"fields.me.basic", "selectors.user"}),
+    enabled_parameter_families=frozenset({"fields.me.basic", "selectors.user", "output.options"}),
 )
 policy = CapabilityPolicy(settings)
 app = MCPServer(name="hf-mcp-probe")
@@ -944,7 +943,7 @@ def test_dispatcher_excludes_disabled_capabilities_even_when_registry_contains_r
     assert mcp_tool_name("admin.high_risk.write") not in server.tools
 
 
-def test_metadata_and_annotations_are_remote_tier4_and_operation_honest() -> None:
+def test_annotations_are_remote_and_operation_honest() -> None:
     policy = _policy(
         enabled_capabilities={"threads.read", "posts.reply"},
         enabled_parameter_families={
@@ -954,97 +953,68 @@ def test_metadata_and_annotations_are_remote_tier4_and_operation_honest() -> Non
         },
     )
 
-    specs = get_tool_specs(policy)
-    assert [spec.tool_name for spec in specs] == ["threads.read", "posts.reply"]
-
     server = _CaptureServer()
     transport = HFTransport(
         token_store=_StubTokenStore(), base_url="https://example.test"
     )
     register_tools(server, policy, RuntimeBundle(transport=transport))
+    assert list(server.tools) == [
+        mcp_tool_name("threads.read"),
+        mcp_tool_name("posts.reply"),
+    ]
 
-    read_annotations = server.tools[mcp_tool_name("threads.read")]["annotations"]
-    assert read_annotations["readOnlyHint"] is True
-    assert read_annotations["destructiveHint"] is False
-    assert read_annotations["openWorldHint"] is True
-    assert read_annotations["_meta"]["x-hf-locality"] == "remote"
-    assert read_annotations["_meta"]["x-hf-runtime-tier"] == 4
-    assert read_annotations["_meta"]["x-hf-operation"] == "read"
-    assert read_annotations["_meta"]["x-hf-output-default"] == "readable"
-    assert read_annotations["_meta"]["x-hf-output-readable"] == "additive"
-    assert (
-        read_annotations["_meta"]["x-hf-output-field-bundles"]
-        == "separate_from_rendering"
-    )
-    assert server.tools[mcp_tool_name("threads.read")]["output_schema"] is not None
-    assert (
-        server.tools[mcp_tool_name("threads.read")]["output_schema"][
-            "x-hf-flow-envelope"
-        ]
-        == "_hf_flow"
-    )
+    read_tool = server.tools[mcp_tool_name("threads.read")]
+    assert read_tool["annotations"] == {
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": True,
+    }
+    assert read_tool["output_schema"] == {
+        "type": "object",
+        "additionalProperties": True,
+    }
 
-    write_annotations = server.tools[mcp_tool_name("posts.reply")]["annotations"]
-    assert write_annotations["readOnlyHint"] is False
-    assert write_annotations["destructiveHint"] is True
-    assert write_annotations["openWorldHint"] is True
-    assert write_annotations["_meta"]["x-hf-locality"] == "remote"
-    assert write_annotations["_meta"]["x-hf-runtime-tier"] == 4
-    assert write_annotations["_meta"]["x-hf-operation"] == "write"
-    assert write_annotations["_meta"]["x-hf-output-default"] == "structured"
-    assert write_annotations["_meta"]["x-hf-output-readable"] == "additive"
-    assert (
-        write_annotations["_meta"]["x-hf-output-field-bundles"]
-        == "separate_from_rendering"
-    )
-    assert server.tools[mcp_tool_name("posts.reply")]["output_schema"] is None
+    write_tool = server.tools[mcp_tool_name("posts.reply")]
+    assert write_tool["annotations"] == {
+        "readOnlyHint": False,
+        "destructiveHint": True,
+        "idempotentHint": False,
+        "openWorldHint": True,
+    }
+    assert write_tool["output_schema"] is None
 
 
-def test_metadata_and_annotations_mark_local_draft_tools_truthfully() -> None:
+def test_annotations_mark_local_draft_tools_truthfully() -> None:
     policy = _policy(
-        enabled_capabilities={"formatting.preflight"},
-        enabled_parameter_families={"formatting.content"},
+        enabled_capabilities={"formatting.preflight", "drafts.read", "drafts.write"},
+        enabled_parameter_families={
+            "formatting.content",
+            "drafts.selector",
+            "drafts.filters",
+            "drafts.metadata",
+            "drafts.confirm_delete",
+        },
     )
 
     server = _CaptureServer()
     register_tools(server, policy, RuntimeBundle())
 
-    list_annotations = server.tools[mcp_tool_name("drafts.list")]["annotations"]
-    assert list_annotations["readOnlyHint"] is True
-    assert list_annotations["destructiveHint"] is False
-    assert list_annotations["openWorldHint"] is False
-    assert list_annotations["_meta"]["x-hf-locality"] == "local"
-    assert list_annotations["_meta"]["x-hf-runtime-tier"] == 1
+    def flags(name: str) -> tuple[bool, bool, bool, bool]:
+        annotations = server.tools[mcp_tool_name(name)]["annotations"]
+        assert "_meta" not in annotations
+        return (
+            annotations["readOnlyHint"],
+            annotations["destructiveHint"],
+            annotations["idempotentHint"],
+            annotations["openWorldHint"],
+        )
 
-    read_annotations = server.tools[mcp_tool_name("drafts.read")]["annotations"]
-    assert read_annotations["readOnlyHint"] is True
-    assert read_annotations["destructiveHint"] is False
-    assert read_annotations["openWorldHint"] is False
-    assert read_annotations["_meta"]["x-hf-locality"] == "local"
-    assert read_annotations["_meta"]["x-hf-runtime-tier"] == 1
-
-    preflight_annotations = server.tools[mcp_tool_name("formatting.preflight")][
-        "annotations"
-    ]
-    assert preflight_annotations["readOnlyHint"] is False
-    assert preflight_annotations["destructiveHint"] is False
-    assert preflight_annotations["openWorldHint"] is False
-    assert preflight_annotations["_meta"]["x-hf-locality"] == "local"
-    assert preflight_annotations["_meta"]["x-hf-runtime-tier"] == 1
-
-    update_annotations = server.tools[mcp_tool_name("drafts.update")]["annotations"]
-    assert update_annotations["readOnlyHint"] is False
-    assert update_annotations["destructiveHint"] is False
-    assert update_annotations["openWorldHint"] is False
-    assert update_annotations["_meta"]["x-hf-locality"] == "local"
-    assert update_annotations["_meta"]["x-hf-runtime-tier"] == 2
-
-    delete_annotations = server.tools[mcp_tool_name("drafts.delete")]["annotations"]
-    assert delete_annotations["readOnlyHint"] is False
-    assert delete_annotations["destructiveHint"] is True
-    assert delete_annotations["openWorldHint"] is False
-    assert delete_annotations["_meta"]["x-hf-locality"] == "local"
-    assert delete_annotations["_meta"]["x-hf-runtime-tier"] == 2
+    assert flags("drafts.list") == (True, False, True, False)
+    assert flags("drafts.read") == (True, False, True, False)
+    assert flags("formatting.preflight") == (False, False, False, False)
+    assert flags("drafts.update") == (False, False, False, False)
+    assert flags("drafts.delete") == (False, True, False, False)
 
 
 def test_create_server_uses_dispatcher_as_single_registration_authority(
@@ -1140,8 +1110,8 @@ def test_create_server_full_api_registers_extended_reads_concretely_and_omits_pl
 
 
 def test_documented_write_specs_omit_unproven_later_lane_writes() -> None:
-    specs = get_documented_write_specs()
-    assert {spec.tool_name for spec in specs} == {
+    specs = get_specs("write")
+    assert {spec.name for spec in specs} == {
         "threads.create",
         "posts.reply",
         "bytes.transfer",
@@ -1192,6 +1162,7 @@ def test_create_server_publishes_truthful_core_read_input_schemas(
                 "fields.me.basic",
                 "fields.me.advanced",
                 "fields.posts.body",
+                "output.options",
             }
         ),
     )
@@ -1420,15 +1391,23 @@ def test_formatting_preflight_registers_local_handler_without_transport(
 def test_dispatcher_registers_concrete_local_draft_handlers_without_transport(
     tmp_path: Path,
 ) -> None:
+    capabilities = {"formatting.preflight", "drafts.read", "drafts.write"}
+    families = {
+        "formatting.content",
+        "drafts.selector",
+        "drafts.filters",
+        "drafts.metadata",
+        "drafts.confirm_delete",
+    }
     policy = _policy(
-        enabled_capabilities={"formatting.preflight"},
-        enabled_parameter_families={"formatting.content"},
+        enabled_capabilities=capabilities,
+        enabled_parameter_families=families,
     )
     runtime = RuntimeBundle(
         settings=HFMCPSettings(
             profile="test",
-            enabled_capabilities=frozenset({"formatting.preflight"}),
-            enabled_parameter_families=frozenset({"formatting.content"}),
+            enabled_capabilities=frozenset(capabilities),
+            enabled_parameter_families=frozenset(families),
             draft_dir=tmp_path,
         )
     )
@@ -1486,8 +1465,8 @@ def test_forums_index_registers_local_handler_without_transport_and_keeps_struct
     assert mcp_tool_name("forums.read") not in server.tools
     tool = server.tools[mcp_tool_name("forums.index")]
     assert tool["annotations"]["readOnlyHint"] is True
-    assert tool["annotations"]["_meta"]["x-hf-locality"] == "local"
-    assert tool["annotations"]["_meta"]["x-hf-runtime-tier"] == 1
+    assert "_meta" not in tool["annotations"]
+    assert tool["annotations"]["openWorldHint"] is False
 
     result = tool["handler"]()
     assert isinstance(result, dict)
@@ -1520,7 +1499,7 @@ def test_dispatcher_extended_read_handler_includes_hf_flow_structured_content(
     register_tools(server, policy, RuntimeBundle(transport=transport))
 
     tool = server.tools[mcp_tool_name("sigmarket.order.read")]
-    assert tool["output_schema"]["x-hf-flow-envelope"] == "_hf_flow"
+    assert tool["output_schema"] == {"type": "object", "additionalProperties": True}
     result = tool["handler"](oid=17)
     assert "_hf_flow" in result["structuredContent"]
     assert (
@@ -1668,7 +1647,6 @@ def test_serve_stdio_publishes_dispatcher_contract_for_live_runtime(
                 "bytes.deposit",
                 "bytes.withdraw",
                 "bytes.bump",
-                "contracts.write",
                 "contracts.read",
                 "disputes.read",
                 "bratings.read",
@@ -1693,6 +1671,7 @@ def test_serve_stdio_publishes_dispatcher_contract_for_live_runtime(
                 "writes.bytes",
                 "writes.content",
                 "confirm.live",
+                "output.options",
             }
         ),
     )
@@ -1787,12 +1766,8 @@ def test_serve_stdio_publishes_dispatcher_contract_for_live_runtime(
             published_annotations = published_annotations.model_dump(
                 by_alias=True, exclude_none=True
             )
-        assert published_annotations == {
-            key: value
-            for key, value in expected_tool.annotations.items()
-            if key != "_meta"
-        }
-        assert published["meta"] == expected_tool.annotations.get("_meta")
+        assert published_annotations == expected_tool.annotations
+        assert published["meta"] is None
         assert published["output_schema"] == expected_tool.output_schema
 
     assert mcp_tool_name("contracts.write") not in app.registered_tools
@@ -1878,7 +1853,7 @@ def test_serve_stdio_publishes_dispatcher_contract_for_live_runtime(
     bump_signature = inspect.signature(
         app.registered_tools[mcp_tool_name("bytes.bump")]["handler"]
     )
-    assert tuple(bump_signature.parameters.keys()) == ("confirm_live", "tid")
+    assert set(bump_signature.parameters.keys()) == {"confirm_live", "tid"}
     assert "target_uid" not in bump_signature.parameters
     assert "amount" not in bump_signature.parameters
     assert "note" not in bump_signature.parameters

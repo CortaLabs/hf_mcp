@@ -8,183 +8,48 @@ from typing import Mapping
 import yaml
 
 from .output_modes import ReadOutputDefaults, parse_read_output_defaults
+from .registry import TOOLS
 
-ALL_CAPABILITIES: frozenset[str] = frozenset(
-    {
-        "me.read",
-        "users.read",
-        "forums.read",
-        "threads.read",
-        "posts.read",
-        "bytes.read",
-        "contracts.read",
-        "disputes.read",
-        "bratings.read",
-        "sigmarket.market.read",
-        "sigmarket.order.read",
-        "admin.high_risk.read",
-        "formatting.preflight",
-        "threads.create",
-        "posts.reply",
-        "bytes.transfer",
-        "bytes.deposit",
-        "bytes.withdraw",
-        "bytes.bump",
-        "contracts.write",
-        "sigmarket.write",
-        "admin.high_risk.write",
-    }
+ALL_CAPABILITIES: frozenset[str] = frozenset(spec.capability for spec in TOOLS)
+ALL_PARAMETER_FAMILIES: frozenset[str] = frozenset().union(
+    *(spec.families for spec in TOOLS)
 )
 
-ALL_PARAMETER_FAMILIES: frozenset[str] = frozenset(
-    {
-        "selectors.user",
-        "selectors.forum",
-        "selectors.thread",
-        "selectors.post",
-        "selectors.bytes",
-        "selectors.contract",
-        "selectors.dispute",
-        "selectors.sigmarket",
-        "filters.pagination",
-        "fields.me.basic",
-        "fields.me.advanced",
-        "fields.users.profile",
-        "fields.posts.body",
-        "fields.bytes.amount",
-        "formatting.content",
-        "writes.content",
-        "writes.bytes",
-        "confirm.live",
-    }
-)
-
-READ_CAPABILITIES: frozenset[str] = frozenset(
-    {
-        "me.read",
-        "users.read",
-        "forums.read",
-        "threads.read",
-        "posts.read",
-        "bytes.read",
-        "contracts.read",
-        "disputes.read",
-        "bratings.read",
-        "sigmarket.market.read",
-        "sigmarket.order.read",
-        "admin.high_risk.read",
-        "formatting.preflight",
-    }
-)
-
-WRITE_CAPABILITIES: frozenset[str] = frozenset(
-    {
-        "threads.create",
-        "posts.reply",
-        "bytes.transfer",
-        "bytes.deposit",
-        "bytes.withdraw",
-        "bytes.bump",
-        "contracts.write",
-        "sigmarket.write",
-        "admin.high_risk.write",
-    }
-)
-
-UNVERIFIED_WRITE_CAPABILITIES: frozenset[str] = frozenset(
-    {
-        "contracts.write",
-        "sigmarket.write",
-        "admin.high_risk.write",
-    }
-)
-
-VERIFIED_CONCRETE_CAPABILITIES: frozenset[str] = (
-    ALL_CAPABILITIES - UNVERIFIED_WRITE_CAPABILITIES
-)
-VERIFIED_CONCRETE_PARAMETER_FAMILIES: frozenset[str] = ALL_PARAMETER_FAMILIES
-
-READ_PARAMETER_FAMILIES: frozenset[str] = frozenset(
-    {
-        "selectors.user",
-        "selectors.forum",
-        "selectors.thread",
-        "selectors.post",
-        "selectors.bytes",
-        "selectors.contract",
-        "selectors.dispute",
-        "selectors.sigmarket",
-        "filters.pagination",
-        "fields.me.basic",
-        "fields.me.advanced",
-        "fields.users.profile",
-        "fields.posts.body",
-        "fields.bytes.amount",
-        "formatting.content",
-    }
-)
-
-FORUM_OPERATOR_CAPABILITIES: frozenset[str] = READ_CAPABILITIES | frozenset(
-    {"threads.create", "posts.reply"}
-)
-
-FORUM_OPERATOR_PARAMETER_FAMILIES: frozenset[str] = READ_PARAMETER_FAMILIES | frozenset(
-    {"writes.content", "confirm.live"}
-)
-
-PRESET_CAPABILITIES: dict[str, frozenset[str]] = {
-    "reader": READ_CAPABILITIES,
-    "forum_operator": FORUM_OPERATOR_CAPABILITIES,
-    "full_api": VERIFIED_CONCRETE_CAPABILITIES,
-    "custom": frozenset(),
-}
-
-PRESET_PARAMETER_FAMILIES: dict[str, frozenset[str]] = {
-    "reader": READ_PARAMETER_FAMILIES,
-    "forum_operator": FORUM_OPERATOR_PARAMETER_FAMILIES,
-    "full_api": VERIFIED_CONCRETE_PARAMETER_FAMILIES,
-    "custom": frozenset(),
-}
-
+# A family is valid only while at least one enabled capability has a tool using it.
 PARAMETER_FAMILY_CAPABILITY_PARENTS: dict[str, frozenset[str]] = {
-    "selectors.user": frozenset({"me.read", "users.read", "bratings.read"}),
-    "selectors.forum": frozenset({"forums.read", "threads.read", "threads.create"}),
-    "selectors.thread": frozenset({"threads.read", "posts.read", "posts.reply"}),
-    "selectors.post": frozenset({"posts.read"}),
-    "selectors.bytes": frozenset(
-        {
-            "bytes.read",
-            "bytes.transfer",
-            "bytes.deposit",
-            "bytes.withdraw",
-            "bytes.bump",
-        }
-    ),
-    "selectors.contract": frozenset({"contracts.read", "contracts.write"}),
-    "selectors.dispute": frozenset({"disputes.read"}),
-    "selectors.sigmarket": frozenset(
-        {"sigmarket.market.read", "sigmarket.order.read", "sigmarket.write"}
-    ),
-    "filters.pagination": READ_CAPABILITIES,
-    "fields.me.basic": frozenset({"me.read"}),
-    "fields.me.advanced": frozenset({"me.read"}),
-    "fields.users.profile": frozenset({"users.read"}),
-    "fields.posts.body": frozenset({"posts.read"}),
-    "fields.bytes.amount": frozenset({"bytes.read"}),
-    "formatting.content": frozenset({"formatting.preflight"}),
-    "writes.content": frozenset(
-        {
-            "threads.create",
-            "posts.reply",
-            "contracts.write",
-            "sigmarket.write",
-            "admin.high_risk.write",
-        }
-    ),
-    "writes.bytes": frozenset(
-        {"bytes.transfer", "bytes.deposit", "bytes.withdraw", "bytes.bump"}
-    ),
-    "confirm.live": WRITE_CAPABILITIES,
+    family: frozenset(spec.capability for spec in TOOLS if family in spec.families)
+    for family in ALL_PARAMETER_FAMILIES
+}
+
+
+def _preset(capabilities: frozenset[str]) -> tuple[frozenset[str], frozenset[str]]:
+    families = frozenset().union(
+        *(spec.families for spec in TOOLS if spec.capability in capabilities)
+    )
+    return capabilities, families
+
+
+_READER_CAPABILITIES = frozenset(
+    spec.capability for spec in TOOLS if spec.group in ("core_read", "extended_read")
+) | {"drafts.read"}
+_FORUM_OPERATOR_CAPABILITIES = _READER_CAPABILITIES | {
+    "formatting.preflight",
+    "drafts.write",
+    "threads.create",
+    "posts.reply",
+}
+
+_PRESETS: dict[str, tuple[frozenset[str], frozenset[str]]] = {
+    "reader": _preset(_READER_CAPABILITIES),
+    "forum_operator": _preset(_FORUM_OPERATOR_CAPABILITIES),
+    "full_api": _preset(ALL_CAPABILITIES),
+    "custom": _preset(frozenset()),
+}
+PRESET_CAPABILITIES: dict[str, frozenset[str]] = {
+    name: caps for name, (caps, _) in _PRESETS.items()
+}
+PRESET_PARAMETER_FAMILIES: dict[str, frozenset[str]] = {
+    name: families for name, (_, families) in _PRESETS.items()
 }
 
 DEFAULT_PROFILE = "reader"
