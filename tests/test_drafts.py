@@ -2,12 +2,29 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 
-from hf_mcp.draft_store import write_draft_artifact
+from hf_mcp.draft_store import read_cached_source_text, write_draft_artifact
+from hf_mcp.registry import MAX_MESSAGE_CHARS
 from hf_mcp.tools.drafts import delete_draft, list_drafts, read_draft, update_draft
 
 PRODUCT_ROOT = Path(__file__).resolve().parents[1]
 SRC_PATH = PRODUCT_ROOT / "src"
+
+
+def test_draft_source_ceiling_is_the_shared_limit_at_the_limit_and_one_over(
+    tmp_path: Path,
+) -> None:
+    at_limit = tmp_path / "at-limit.md"
+    at_limit.write_text("a" * MAX_MESSAGE_CHARS, encoding="utf-8")
+    over = tmp_path / "over.md"
+    over.write_text("a" * (MAX_MESSAGE_CHARS + 1), encoding="utf-8")
+
+    assert len(read_cached_source_text(at_limit, draft_dir=tmp_path)) == (
+        MAX_MESSAGE_CHARS
+    )
+    with pytest.raises(ValueError, match="too large"):
+        read_cached_source_text(over, draft_dir=tmp_path)
 
 
 def _action_tools(result: dict[str, object]) -> set[str]:

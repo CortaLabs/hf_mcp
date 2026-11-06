@@ -19,6 +19,10 @@ Operation = Literal["read", "write", "local"]
 Group = Literal["core_read", "extended_read", "write", "local"]
 
 DRAFT_ID_PATTERN = "^[a-f0-9]{32}$"
+TEMPLATE_NAME_PATTERN = "^[a-z0-9][a-z0-9_-]{0,63}$"
+# One ceiling for every free-text message/source: tool arguments, converter
+# input, rendered templates and draft source files.
+MAX_MESSAGE_CHARS = 500_000
 
 FAMILY_KEY = "x-hf-family"
 WIRE_KEY = "x-hf-wire"
@@ -141,7 +145,7 @@ def _write_content(*, subject: bool = False) -> dict[str, Any]:
     if subject:
         props["subject"] = _p(family, "string", minLength=1)
     props.update(
-        message=_p(family, "string", minLength=1),
+        message=_p(family, "string", minLength=1, maxLength=MAX_MESSAGE_CHARS),
         draft_id=_p(
             family,
             "string",
@@ -418,7 +422,12 @@ TOOLS: tuple[ToolSpec, ...] = (
         "local",
         "Check how MyCode or Markdown formats as Hack Forums MyCode and report conversion findings; preflight can save a local draft.",
         {
-            "message": _p("formatting.content", "string", minLength=1),
+            "message": _p(
+                "formatting.content",
+                "string",
+                minLength=1,
+                maxLength=MAX_MESSAGE_CHARS,
+            ),
             "source_path": _p(
                 "formatting.content",
                 "string",
@@ -437,6 +446,59 @@ TOOLS: tuple[ToolSpec, ...] = (
         any_of=("message", "source_path"),
         required_families=("formatting.content",),
         flags=(False, False, False, False),
+    ),
+    _tool(
+        "formatting.convert",
+        "formatting.convert",
+        "local",
+        "Convert Markdown or MyCode to Hack Forums MyCode and report conversion findings and issues; nothing is saved and nothing is sent.",
+        {
+            "message": _p(
+                "formatting.convert",
+                "string",
+                minLength=1,
+                maxLength=MAX_MESSAGE_CHARS,
+            ),
+            "message_format": _p(
+                "formatting.convert",
+                "string",
+                enum=_MESSAGE_FORMATS,
+                default="markdown",
+                description="Input format of message.",
+            ),
+        },
+        operation="read",
+        required=("message",),
+        required_families=("formatting.convert",),
+        flags=_LOCAL_READ,
+    ),
+    _tool(
+        "templates.list",
+        "templates.read",
+        "local",
+        "List the named post templates in the local templates directory with their placeholders; invalid template files are only counted.",
+        {},
+        operation="read",
+        flags=_LOCAL_READ,
+    ),
+    _tool(
+        "templates.render",
+        "templates.read",
+        "local",
+        "Fill a named local template with string values and return its source text and Hack Forums MyCode; nothing is saved and nothing is sent.",
+        {
+            "name": _p("templates.render", "string", pattern=TEMPLATE_NAME_PATTERN),
+            "values": _p(
+                "templates.render",
+                "object",
+                additionalProperties={"type": "string", "maxLength": MAX_MESSAGE_CHARS},
+                default={},
+            ),
+        },
+        operation="read",
+        required=("name",),
+        required_families=("templates.render",),
+        flags=_LOCAL_READ,
     ),
     _tool(
         "drafts.list",
@@ -587,6 +649,8 @@ def get_specs(group: Group) -> tuple[ToolSpec, ...]:
 __all__ = [
     "DRAFT_ID_PATTERN",
     "FAMILY_KEY",
+    "MAX_MESSAGE_CHARS",
+    "TEMPLATE_NAME_PATTERN",
     "TOOLS",
     "WIRE_KEY",
     "ToolSpec",

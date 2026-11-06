@@ -42,6 +42,7 @@ dev = [
   "pytest-randomly==4.1.0",
   "pytest-socket==0.8.0",
   "pytest-xdist==3.8.0",
+  "referencing==0.37.0",
   "ruff==0.15.22",
   "setuptools==84.2.1",
   "twine==7.0.0",
@@ -76,7 +77,7 @@ markers = [
   "regression: permanent behavior regression tests",
   "formatting: formatting and local draft tool tests",
   "registry: canonical tool registry and metadata tests",
-  "build: package build and export-boundary tests",
+  "build: package build and release-distribution tests",
 ]
 
 [tool.mypy]

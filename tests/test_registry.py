@@ -82,10 +82,10 @@ EXPECTED_WIRE_PAIRS = {
 }
 
 
-def test_table_declares_the_24_published_tools_once() -> None:
-    assert len(TOOLS) == 24
-    assert len({spec.name for spec in TOOLS}) == 24
-    assert len({spec.mcp_name for spec in TOOLS}) == 24
+def test_table_declares_the_27_published_tools_once() -> None:
+    assert len(TOOLS) == 27
+    assert len({spec.name for spec in TOOLS}) == 27
+    assert len({spec.mcp_name for spec in TOOLS}) == 27
     assert get_tool_spec("threads.read").mcp_name == "threads_read"
     with pytest.raises(KeyError):
         get_tool_spec("hf.doctor")
@@ -111,6 +111,9 @@ def test_groups_select_the_handler_modules() -> None:
     assert {s.name for s in get_specs("local")} == {
         "forums.index",
         "formatting.preflight",
+        "formatting.convert",
+        "templates.list",
+        "templates.render",
         "drafts.list",
         "drafts.read",
         "drafts.update",
@@ -129,6 +132,41 @@ def test_every_row_is_a_closed_draft_2020_12_object_with_tagged_properties() -> 
         for branch in schema.get("anyOf", ()):
             assert set(branch["required"]) <= set(properties), spec.name
         assert spec.required_families <= spec.families, spec.name
+
+
+def test_required_properties_belong_to_required_families_for_every_tool() -> None:
+    # capabilities.py relies on this: a required property can never be pruned
+    # away while its tool stays published.
+    for spec in TOOLS:
+        properties = spec.input_schema["properties"]
+        for name in spec.input_schema.get("required", ()):
+            assert properties[name][FAMILY_KEY] in spec.required_families, (
+                spec.name,
+                name,
+            )
+
+
+def test_every_free_text_message_property_publishes_the_shared_max_length() -> None:
+    free_text = [
+        (spec.name, name)
+        for spec in TOOLS
+        for name in spec.input_schema["properties"]
+        if name == "message"
+    ]
+    assert len(free_text) >= 4
+    for tool, name in free_text:
+        prop = get_tool_spec(tool).input_schema["properties"][name]
+        assert prop["maxLength"] == registry.MAX_MESSAGE_CHARS, (tool, name)
+    values = get_tool_spec("templates.render").input_schema["properties"]["values"]
+    assert values["additionalProperties"]["maxLength"] == registry.MAX_MESSAGE_CHARS
+
+
+def test_the_draft_source_ceiling_reuses_the_shared_constant() -> None:
+    from hf_mcp import draft_store
+    from hf_mcp.tools import formatting
+
+    assert draft_store.MAX_MESSAGE_CHARS is registry.MAX_MESSAGE_CHARS
+    assert formatting.MAX_MESSAGE_CHARS is registry.MAX_MESSAGE_CHARS
 
 
 def test_amount_minimum_and_any_of_live_in_their_own_rows() -> None:

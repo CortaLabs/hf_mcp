@@ -90,10 +90,12 @@ def test_build_script_yields_wheel_and_sdist_with_expected_members(
 @pytest.mark.build
 @pytest.mark.regression
 def test_version_ignores_unrelated_pyproject_outside_a_source_tree(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from importlib.metadata import version as installed_version
-
+    # Distribution metadata is stubbed: the real lookup only succeeds while the
+    # build tests have left an egg-info beside the source tree, which made this
+    # test depend on run order and on xdist scheduling.
+    monkeypatch.setattr("importlib.metadata.version", lambda name: "1.2.3+installed")
     site = tmp_path / "lib" / "python3.12" / "site-packages" / "hf_mcp"
     site.mkdir(parents=True)
     (site / "__init__.py").write_bytes(
@@ -104,4 +106,26 @@ def test_version_ignores_unrelated_pyproject_outside_a_source_tree(
     )
     namespace = runpy.run_path(str(site / "__init__.py"))
     assert namespace["_read_local_pyproject_version"]() is None
-    assert namespace["__version__"] == installed_version("hf-mcp")
+    assert namespace["__version__"] == "1.2.3+installed"
+
+
+@pytest.mark.core
+@pytest.mark.build
+@pytest.mark.regression
+def test_smoke_script_fails_with_a_clear_message_when_the_server_never_answers() -> (
+    None
+):
+    namespace = runpy.run_path(str(PRODUCT_ROOT / "scripts" / "smoke_installed.py"))
+    silent = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(60)"],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        with pytest.raises(SystemExit) as raised:
+            namespace["exchange"](silent, "initialize", {}, 1, timeout=0.2)
+    finally:
+        silent.kill()
+        silent.wait()
+    assert "no answer to initialize" in str(raised.value)

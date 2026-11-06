@@ -445,7 +445,7 @@ def test_normal_stdio_read_surface_and_pagination_on_actual_wire(modern: bool) -
                         {**selector, "per_page": "30"},
                         {**selector, "output_mode": "invalid"},
                         {**selector, "include_raw_payload": "true"},
-                        {**selector, "unexpected": "UNTRUSTED-MESSAGE-DO-NOT-ECHO"},
+                        {**selector, "Unexpected": "UNTRUSTED-MESSAGE-DO-NOT-ECHO"},
                         {},
                     ]
                 )
@@ -457,7 +457,7 @@ def test_normal_stdio_read_surface_and_pagination_on_actual_wire(modern: bool) -
                     error = invalid["structuredContent"]["error"]
                     assert error["code"] == "INVALID_ARGUMENT"
                     assert error["tool"] == name
-                    if "unexpected" in arguments:
+                    if "Unexpected" in arguments:
                         assert "unknown parameter" in error["message"]
                         serialized_error = json.dumps(invalid)
                         assert "UNTRUSTED-MESSAGE-DO-NOT-ECHO" not in serialized_error
