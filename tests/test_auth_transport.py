@@ -52,14 +52,13 @@ def test_authorize_via_loopback_rejects_state_mismatch(
         "hf_mcp.auth._await_loopback_callback",
         lambda redirect_uri, timeout_seconds: {"code": "abc", "state": "wrong-state"},
     )
-    monkeypatch.setattr(
-        "hf_mcp.auth._exchange_code_for_token",
-        lambda **_: {
-            "access_token": "token",
-            "token_type": "Bearer",
-            "scope": "Basic Info",
-        },
-    )
+    exchange_calls: list[object] = []
+
+    def _exchange_spy(**kwargs: str) -> dict[str, object]:
+        exchange_calls.append(kwargs)
+        return {"access_token": "token", "token_type": "Bearer", "scope": "Basic Info"}
+
+    monkeypatch.setattr("hf_mcp.auth._exchange_code_for_token", _exchange_spy)
 
     with pytest.raises(ValueError, match="state mismatch"):
         authorize_via_loopback(
@@ -72,6 +71,7 @@ def test_authorize_via_loopback_rejects_state_mismatch(
             ),
             open_browser=False,
         )
+    assert exchange_calls == []
 
 
 def test_authorize_via_loopback_rejects_missing_authorization_code(
@@ -85,6 +85,11 @@ def test_authorize_via_loopback_rejects_missing_authorization_code(
         "hf_mcp.auth._await_loopback_callback",
         lambda redirect_uri, timeout_seconds: {"state": "expected-state"},
     )
+    exchange_calls: list[object] = []
+    monkeypatch.setattr(
+        "hf_mcp.auth._exchange_code_for_token",
+        lambda **kwargs: exchange_calls.append(kwargs) or {},
+    )
 
     with pytest.raises(ValueError, match="missing authorization code"):
         authorize_via_loopback(
@@ -97,6 +102,7 @@ def test_authorize_via_loopback_rejects_missing_authorization_code(
             ),
             open_browser=False,
         )
+    assert exchange_calls == []
 
 
 @pytest.mark.parametrize("missing_name", ["HF_MCP_CLIENT_ID", "HF_MCP_CLIENT_SECRET"])
@@ -131,8 +137,10 @@ def test_authorize_via_loopback_successful_exchange(
     )
 
     exchange_inputs: dict[str, str] = {}
+    exchange_count: list[int] = []
 
     def _fake_exchange(**kwargs: str) -> dict[str, object]:
+        exchange_count.append(1)
         exchange_inputs.update(kwargs)
         return {"access_token": "token", "token_type": "Bearer", "scope": "Basic Info"}
 
@@ -148,6 +156,7 @@ def test_authorize_via_loopback_successful_exchange(
         ),
         open_browser=False,
     )
+    assert len(exchange_count) == 1
 
     assert bundle.access_token == "token"
     assert bundle.token_type == "Bearer"
@@ -888,7 +897,11 @@ def test_clear_removes_regular_file_only(tmp_path: Path) -> None:
 
 def test_loopback_provider_error_param_is_not_reflected(
     monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
+    caplog.set_level(logging.DEBUG)
+
     class _FakeRequest:
         def __init__(self, path: str) -> None:
             self.path = path
@@ -923,6 +936,74 @@ def test_loopback_provider_error_param_is_not_reflected(
     assert caught.value.error["code"] == "AUTH_REJECTED"
     assert MARKER not in str(caught.value)
     assert caught.value.__cause__ is None
+    captured = capsys.readouterr()
+    assert MARKER not in captured.err + captured.out + caplog.text
+
+
+def test_loopback_state_mismatch_is_quiet(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr("hf_mcp.auth.secrets.token_urlsafe", lambda _: MARKER + "-a")
+    monkeypatch.setattr(
+        "hf_mcp.auth._await_loopback_callback",
+        lambda **_: {"code": MARKER, "state": MARKER + "-b"},
+    )
+    caplog.set_level(logging.DEBUG)
+    with pytest.raises(ValueError) as caught:
+        authorize_via_loopback(
+            _settings(
+                runtime_env={
+                    "HF_MCP_CLIENT_ID": "client",
+                    "HF_MCP_CLIENT_SECRET": MARKER,
+                    "HF_MCP_REDIRECT_URI": "http://127.0.0.1:8765/callback",
+                }
+            ),
+            open_browser=False,
+        )
+    assert MARKER not in str(caught.value)
+    captured = capsys.readouterr()
+    assert MARKER not in captured.err + captured.out + caplog.text
+
+
+def test_token_store_failures_are_quiet(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    caplog.set_level(logging.DEBUG)
+    bad_mode = tmp_path / "mode.json"
+    _write_token(bad_mode, 0o644)
+    bad_content = tmp_path / "content.json"
+    bad_content.write_bytes(b'{"x":"' + MARKER.encode())
+    bad_content.chmod(0o600)
+    link = tmp_path / "link.json"
+    link.symlink_to(bad_mode)
+    for path in (bad_mode, bad_content, link):
+        with pytest.raises((PermissionError, ValueError)) as caught:
+            TokenStore(path).load_bundle()
+        assert MARKER not in str(caught.value) and str(tmp_path) not in str(
+            caught.value
+        )
+
+    with pytest.raises(HFAPIError) as missing:
+        TokenStore(tmp_path / "absent.json").require_bundle()
+    assert str(tmp_path) not in str(missing.value)
+
+    work = tmp_path / "work"
+    work.mkdir()
+
+    def _boom(*_: object) -> None:
+        raise OSError("disk")
+
+    monkeypatch.setattr(os, "replace", _boom)
+    with pytest.raises(OSError):
+        TokenStore(work / "token.json").save_bundle(_bundle())
+    captured = capsys.readouterr()
+    assert MARKER not in captured.err + captured.out + caplog.text
+    assert str(tmp_path) not in captured.err + captured.out + caplog.text
 
 
 class _Resp:
@@ -962,7 +1043,13 @@ def _http_error(status: int) -> urllib.error.HTTPError:
     ("make_error", "code"),
     [
         (lambda: _http_error(400), "AUTH_REJECTED"),
-        (lambda: _http_error(500), "AUTH_REJECTED"),
+        (lambda: _http_error(401), "AUTH_REJECTED"),
+        (lambda: _http_error(403), "AUTH_REJECTED"),
+        (lambda: _http_error(429), "RATE_LIMITED"),
+        (lambda: _http_error(500), "UPSTREAM_UNAVAILABLE"),
+        (lambda: _http_error(503), "UPSTREAM_UNAVAILABLE"),
+        (lambda: _http_error(404), "UPSTREAM_REJECTED"),
+        (lambda: _http_error(302), "UPSTREAM_REJECTED"),
         (lambda: urllib.error.URLError(MARKER), "NETWORK_ERROR"),
         (lambda: urllib.error.URLError(TimeoutError(MARKER)), "TIMEOUT"),
         (lambda: TimeoutError(MARKER), "TIMEOUT"),
@@ -1034,4 +1121,108 @@ def test_token_payload_without_access_token_is_protocol_error(
     with pytest.raises(HFAPIError) as caught:
         authorize_via_loopback(settings, open_browser=False)
     assert caught.value.error["code"] == "UPSTREAM_PROTOCOL_ERROR"
+    assert MARKER not in str(caught.value)
+
+
+@pytest.mark.parametrize("env_name", ["HF_MCP_TOKEN_URL", "HF_MCP_AUTHORIZE_URL"])
+@pytest.mark.parametrize(
+    "bad_url",
+    [
+        "http://" + "evil.test/" + MARKER,
+        "evil.test/" + MARKER,
+        "https:///" + MARKER,
+        "ftp://evil.test/" + MARKER,
+        "",
+    ],
+)
+def test_non_https_endpoint_override_is_refused_before_any_action(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
+    env_name: str,
+    bad_url: str,
+) -> None:
+    touched: list[str] = []
+    monkeypatch.setattr(
+        "hf_mcp.auth.webbrowser.open", lambda url: touched.append("browser")
+    )
+    monkeypatch.setattr(
+        "hf_mcp.auth._await_loopback_callback",
+        lambda **_: touched.append("callback") or {},
+    )
+    monkeypatch.setattr(
+        "hf_mcp.auth.urllib.request.urlopen",
+        lambda *a, **k: touched.append("network"),
+    )
+    announced: list[str] = []
+    caplog.set_level(logging.DEBUG)
+    with pytest.raises(HFAPIError) as caught:
+        authorize_via_loopback(
+            _settings(
+                runtime_env={
+                    "HF_MCP_CLIENT_ID": "client",
+                    "HF_MCP_CLIENT_SECRET": MARKER,
+                    "HF_MCP_REDIRECT_URI": "http://127.0.0.1:8765/callback",
+                    env_name: bad_url,
+                }
+            ),
+            open_browser=True,
+            announce_authorize_url=announced.append,
+        )
+    err = caught.value
+    assert err.error["code"] == "INVALID_ARGUMENT"
+    assert touched == [] and announced == []
+    assert "evil.test" not in str(err) and "evil.test" not in repr(err.error)
+    assert MARKER not in str(err) and MARKER not in repr(err.error)
+    assert err.__cause__ is None
+    captured = capsys.readouterr()
+    assert MARKER not in captured.err + captured.out + caplog.text
+
+
+@pytest.mark.parametrize("env_name", ["HF_MCP_TOKEN_URL", "HF_MCP_AUTHORIZE_URL"])
+def test_https_endpoint_override_still_works(
+    monkeypatch: pytest.MonkeyPatch, env_name: str
+) -> None:
+    monkeypatch.setattr("hf_mcp.auth.secrets.token_urlsafe", lambda _: "s")
+    monkeypatch.setattr(
+        "hf_mcp.auth._await_loopback_callback",
+        lambda **_: {"code": "abc", "state": "s"},
+    )
+    seen: dict[str, str] = {}
+
+    def _exchange_ok(**kwargs: str) -> dict[str, object]:
+        seen.update(kwargs)
+        return {"access_token": "token", "token_type": "Bearer"}
+
+    monkeypatch.setattr("hf_mcp.auth._exchange_code_for_token", _exchange_ok)
+    announced: list[str] = []
+    bundle = authorize_via_loopback(
+        _settings(
+            runtime_env={
+                "HF_MCP_CLIENT_ID": "client",
+                "HF_MCP_CLIENT_SECRET": "secret",
+                "HF_MCP_REDIRECT_URI": "http://127.0.0.1:8765/callback",
+                env_name: "https://other.test/oauth",
+            }
+        ),
+        open_browser=False,
+        announce_authorize_url=announced.append,
+    )
+    assert bundle.access_token == "token"
+    if env_name == "HF_MCP_TOKEN_URL":
+        assert seen["token_url"] == "https://other.test/oauth"
+    else:
+        assert announced[0].startswith("https://other.test/oauth?")
+
+
+def test_exchange_http_status_is_recorded_without_provider_text(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def _urlopen(request: object, timeout: int) -> _Resp:
+        raise _http_error(429)
+
+    monkeypatch.setattr("hf_mcp.auth.urllib.request.urlopen", _urlopen)
+    with pytest.raises(HFAPIError) as caught:
+        _exchange()
+    assert caught.value.error["http_status"] == 429
     assert MARKER not in str(caught.value)
