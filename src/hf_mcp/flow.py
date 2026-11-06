@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Collection, Mapping
 import re
-from typing import Any
+from typing import Any, NamedTuple
 
 from hf_mcp import __version__
 from hf_mcp.registry import DRAFT_ID_PATTERN
@@ -48,103 +48,139 @@ _ARGUMENT_KEYS: dict[str, _KeyGroups] = {
     "sigmarket_listing": (("smid", "oid"),),
 }
 
+
 # Relation table: entry tool -> ordered rules. A rule fires once per id of its
-# entity kind (ascending) and emits each template in order. A template is
-# "target_tool:argument:label" ("{}" in the label receives the id); an empty
-# argument means no arguments and a trailing "!" requires confirmation. Pseudo
-# kinds: "once" always fires, "drafts" fires once when any draft id exists.
-_Rule = tuple[str, tuple[str, ...]]
+# entity kind (ascending) and emits each action template in order. A template
+# names the target tool, the one argument that receives the id (empty means no
+# arguments), the label ("{}" receives the id) and whether the action requires
+# confirmation. Pseudo kinds: "once" always fires, "drafts" fires once when any
+# draft id exists.
+class _Action(NamedTuple):
+    tool: str
+    argument: str
+    label: str
+    confirm: bool = False
 
 
-def _r(kind: str, *templates: str) -> _Rule:
-    return (kind, templates)
+class _Rule(NamedTuple):
+    kind: str
+    actions: tuple[_Action, ...]
 
 
-_USER = "users.read:uid:Load user {}"
-_FORUM = "forums.read:fid:Load forum {}"
-_LIST = "drafts.list::List local drafts"
-_LEDGER = ("bytes.read:uid:Load bytes ledger for user {}", _USER)
-_RATINGS = "bratings.read:cid:Load B-ratings for contract {}"
-_TRANSFER = "bytes.transfer:target_uid:Prepare bytes transfer to user {}!"
-_OPEN = "drafts.read:draft_id:Open draft {}"
-_UPDATE = "drafts.update:draft_id:Update metadata for draft {}"
+def _r(kind: str, *actions: _Action) -> _Rule:
+    return _Rule(kind, actions)
+
+
+_USER = _Action("users.read", "uid", "Load user {}")
+_FORUM = _Action("forums.read", "fid", "Load forum {}")
+_LIST = _Action("drafts.list", "", "List local drafts")
+_LEDGER = (_Action("bytes.read", "uid", "Load bytes ledger for user {}"), _USER)
+_RATINGS = _Action("bratings.read", "cid", "Load B-ratings for contract {}")
+_TRANSFER = _Action(
+    "bytes.transfer", "target_uid", "Prepare bytes transfer to user {}", True
+)
+_OPEN = _Action("drafts.read", "draft_id", "Open draft {}")
+_UPDATE = _Action("drafts.update", "draft_id", "Update metadata for draft {}")
 
 _RELATIONS: dict[str, tuple[_Rule, ...]] = {
     "forums.index": (_r("forum", _FORUM),),
     "forums.read": (
-        _r("forum", "threads.read:fid:Load threads in forum {}"),
-        _r("child_forum", "forums.read:fid:Load child forum {}"),
+        _r("forum", _Action("threads.read", "fid", "Load threads in forum {}")),
+        _r("child_forum", _Action("forums.read", "fid", "Load child forum {}")),
     ),
     "threads.read": (
-        _r("thread", "posts.read:tid:Load posts in thread {}"),
+        _r("thread", _Action("posts.read", "tid", "Load posts in thread {}")),
         _r("user", _USER),
         _r("forum", _FORUM),
     ),
     "posts.read": (
-        _r("thread", "threads.read:tid:Load thread {}"),
+        _r("thread", _Action("threads.read", "tid", "Load thread {}")),
         _r("user", _USER),
         _r("forum", _FORUM),
-        _r("post", "posts.read:pid:Reload post {}"),
+        _r("post", _Action("posts.read", "pid", "Reload post {}")),
     ),
     "threads.create": (
         _r(
             "thread",
-            "threads.read:tid:Load thread {}",
-            "posts.read:tid:Load posts in thread {}",
+            _Action("threads.read", "tid", "Load thread {}"),
+            _Action("posts.read", "tid", "Load posts in thread {}"),
         ),
         _r("forum", _FORUM),
     ),
-    "posts.reply": (_r("thread", "posts.read:tid:Load posts in thread {}"),),
+    "posts.reply": (
+        _r("thread", _Action("posts.read", "tid", "Load posts in thread {}")),
+    ),
     "bytes.read": (_r("user", *_LEDGER, _TRANSFER),),
     **{
         tool: (_r("user", *_LEDGER),)
         for tool in ("bytes.transfer", "bytes.deposit", "bytes.withdraw", "bytes.bump")
     },
     "contracts.read": (
-        _r("contract", "disputes.read:cid:Load disputes for contract {}", _RATINGS),
-        _r("dispute", "disputes.read:cdid:Load dispute {}"),
-        _r("rating", "bratings.read:crid:Load B-rating {}"),
-        _r("thread", "threads.read:tid:Load contract thread {}"),
+        _r(
+            "contract",
+            _Action("disputes.read", "cid", "Load disputes for contract {}"),
+            _RATINGS,
+        ),
+        _r("dispute", _Action("disputes.read", "cdid", "Load dispute {}")),
+        _r("rating", _Action("bratings.read", "crid", "Load B-rating {}")),
+        _r("thread", _Action("threads.read", "tid", "Load contract thread {}")),
         _r("user", _USER),
     ),
     "disputes.read": (
-        _r("dispute", "disputes.read:cdid:Reload dispute {}"),
-        _r("contract", "contracts.read:cid:Load contract {}", _RATINGS),
-        _r("thread", "threads.read:tid:Load dispute thread {}"),
+        _r("dispute", _Action("disputes.read", "cdid", "Reload dispute {}")),
+        _r("contract", _Action("contracts.read", "cid", "Load contract {}"), _RATINGS),
+        _r("thread", _Action("threads.read", "tid", "Load dispute thread {}")),
         _r("user", _USER),
     ),
     "bratings.read": (
-        _r("rating", "bratings.read:crid:Reload B-rating {}"),
-        _r("contract", "contracts.read:cid:Load contract {}"),
+        _r("rating", _Action("bratings.read", "crid", "Reload B-rating {}")),
+        _r("contract", _Action("contracts.read", "cid", "Load contract {}")),
         _r("user", _USER),
     ),
     "sigmarket.market.read": (
         _r(
             "user",
             _USER,
-            "sigmarket.order.read:uid:Load signature market orders for user {}",
+            _Action(
+                "sigmarket.order.read",
+                "uid",
+                "Load signature market orders for user {}",
+            ),
         ),
     ),
     "sigmarket.order.read": (
         _r(
             "sigmarket_listing",
-            "sigmarket.order.read:smid:Reload signature market order {}",
+            _Action("sigmarket.order.read", "smid", "Reload signature market order {}"),
         ),
         _r(
             "user",
             _USER,
-            "sigmarket.market.read:uid:Load signature market listing for user {}",
+            _Action(
+                "sigmarket.market.read",
+                "uid",
+                "Load signature market listing for user {}",
+            ),
         ),
     ),
     "formatting.preflight": (_r("drafts", _LIST), _r("draft", _OPEN, _UPDATE)),
     "drafts.list": (_r("draft", _OPEN),),
     "drafts.read": (
-        _r("draft", _UPDATE, "drafts.delete:draft_id:Delete draft {}!"),
-        _r("once", "formatting.preflight::Run another local formatting preflight"),
+        _r(
+            "draft",
+            _UPDATE,
+            _Action("drafts.delete", "draft_id", "Delete draft {}", True),
+        ),
+        _r(
+            "once",
+            _Action(
+                "formatting.preflight", "", "Run another local formatting preflight"
+            ),
+        ),
     ),
     "drafts.update": (
         _r("once", _LIST),
-        _r("draft", "drafts.read:draft_id:Re-open draft {}"),
+        _r("draft", _Action("drafts.read", "draft_id", "Re-open draft {}")),
     ),
     "drafts.delete": (_r("once", _LIST),),
 }
@@ -291,14 +327,15 @@ def build_hf_flow(
     for kind, templates in _RELATIONS.get(tool_name, ()):
         for entity_id in sorted(entities[kind]):
             for template in templates:
-                target_tool, argument, label = template.rstrip("!").split(":", 2)
                 _add_action(
                     actions,
                     seen,
-                    target_tool=target_tool,
-                    action_arguments={argument: entity_id} if argument else {},
-                    label=label.format(entity_id),
-                    requires_confirmation=template.endswith("!"),
+                    target_tool=template.tool,
+                    action_arguments=(
+                        {template.argument: entity_id} if template.argument else {}
+                    ),
+                    label=template.label.format(entity_id),
+                    requires_confirmation=template.confirm,
                 )
     source_value = (source or "").strip()
     return {
@@ -328,6 +365,11 @@ def attach_hf_flow(
     return payload_with_flow
 
 
+def _is_publishable(tool: object, enabled_tools: Collection[str]) -> bool:
+    """A non-string tool is never publishable (and may be unhashable)."""
+    return isinstance(tool, str) and tool in enabled_tools
+
+
 def prune_flow_actions(
     structured_content: Mapping[str, Any], enabled_tools: Collection[str]
 ) -> dict[str, Any]:
@@ -341,7 +383,7 @@ def prune_flow_actions(
                 action
                 for action in flow["next_actions"]
                 if not isinstance(action, Mapping)
-                or action.get("tool") in enabled_tools
+                or _is_publishable(action.get("tool"), enabled_tools)
             ],
         }
     return pruned

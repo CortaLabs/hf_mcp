@@ -396,3 +396,23 @@ def test_prune_flow_actions_returns_a_copy_and_never_mutates_its_input() -> None
     plain = {"ok": True}
     assert prune_flow_actions(plain, {"posts.read"}) == plain
     assert prune_flow_actions(plain, {"posts.read"}) is not plain
+
+
+def test_prune_flow_actions_drops_non_string_and_unhashable_tools() -> None:
+    kept = {"tool": "posts.read", "arguments": {}, "label": "kept"}
+    envelope = {
+        FLOW_KEY: {
+            "next_actions": [
+                {"tool": ["posts.read"], "arguments": {}, "label": "list"},
+                {"tool": {"name": "posts.read"}, "arguments": {}, "label": "dict"},
+                {"tool": 7, "arguments": {}, "label": "int"},
+                {"tool": None, "arguments": {}, "label": "none"},
+                {"arguments": {}, "label": "missing"},
+                kept,
+            ]
+        }
+    }
+
+    pruned = prune_flow_actions(envelope, frozenset({"posts.read"}))
+
+    assert pruned[FLOW_KEY]["next_actions"] == [kept]

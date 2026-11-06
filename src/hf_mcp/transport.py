@@ -41,7 +41,7 @@ _ERROR_MESSAGES: dict[str, str] = {
     ),
     "AUTH_REJECTED": "Hack Forums rejected the access token.",
     "PERMISSION_DENIED": "Hack Forums denied this request for the current token.",
-    "RESOURCE_UNAVAILABLE": "The requested Hack Forums resource is unavailable.",
+    "RESOURCE_UNAVAILABLE": "The requested resource is unavailable.",
     "RATE_LIMITED": "Hack Forums rate limit reached. Try again later.",
     "UPSTREAM_UNAVAILABLE": "Hack Forums is temporarily unavailable.",
     "UPSTREAM_REJECTED": "Hack Forums rejected the request.",

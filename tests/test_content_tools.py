@@ -22,9 +22,13 @@ from hf_mcp.config import (
 )
 from hf_mcp.dispatcher import build_handlers
 from hf_mcp.mycode import markdown_to_mycode
-from hf_mcp.registry import TOOLS, get_tool_spec
+from hf_mcp.registry import MAX_MESSAGE_CHARS, TOOLS, get_tool_spec
 from hf_mcp.server import build_server
-from hf_mcp.templates import MAX_TEMPLATE_BYTES, load_templates
+from hf_mcp.templates import (
+    MAX_TEMPLATE_BYTES,
+    MAX_TEMPLATE_CANDIDATES,
+    load_templates,
+)
 from hf_mcp.token_store import TokenBundle
 from hf_mcp.transport import HFTransport
 
@@ -320,11 +324,17 @@ def test_render_errors(templates_dir: Path) -> None:
     assert unknown_key.structured_content["error"]["code"] == "INVALID_ARGUMENT"
     assert "bogus" in unknown_key.structured_content["error"]["message"]
 
-    for name in ("nope", "linked", "undeclared", "huge", "../etc", "Bad Name"):
+    for name, code in (
+        ("nope", "RESOURCE_UNAVAILABLE"),
+        ("linked", "RESOURCE_UNAVAILABLE"),
+        ("undeclared", "RESOURCE_UNAVAILABLE"),
+        ("huge", "RESOURCE_UNAVAILABLE"),
+        ("../etc", "INVALID_ARGUMENT"),
+        ("Bad Name", "INVALID_ARGUMENT"),
+    ):
         result = _call(server, "templates_render", {"name": name})
         assert result.is_error, name
-        code = result.structured_content["error"]["code"]
-        assert code in {"RESOURCE_UNAVAILABLE", "INVALID_ARGUMENT"}, name
+        assert result.structured_content["error"]["code"] == code, name
         assert MARKER not in json.dumps(result.model_dump(by_alias=True))
     unknown = _call(server, "templates_render", {"name": "nope"})
     assert unknown.structured_content["error"]["code"] == "RESOURCE_UNAVAILABLE"
@@ -357,3 +367,134 @@ def test_house_style_template_renders_without_unknown_tag_findings(
     for tag in ("[css=68]", "[center]", "[size=5]", "[b]", "[img]"):
         assert tag in content["mycode"]
     assert not [f for f in content["conversion_findings"] if "unknown" in f["code"]]
+
+
+def test_house_style_negative_control_flags_an_unknown_tag(
+    templates_dir: Path,
+) -> None:
+    # The [css=68] house-style marker suppresses these findings, so the control
+    # drops it: the same render path must then report the unknown tag.
+    unknown = "[frobnicate]x[/frobnicate]"
+    (templates_dir / "house.mycode").write_text(
+        HOUSE_STYLE.replace("[css=68]", unknown), encoding="utf-8"
+    )
+    result = _call(
+        _reader(templates_dir),
+        "templates_render",
+        {"name": "house", "values": {"headline": "H", "banner": "https://x.test/a"}},
+    )
+    assert not result.is_error
+    codes = [f["code"] for f in result.structured_content["conversion_findings"]]
+    assert "unknown_mycode_tag" in codes
+
+
+def test_convert_input_at_the_cap_is_accepted_and_over_it_is_refused(
+    tmp_path: Path,
+) -> None:
+    server = _reader(tmp_path)
+    at_cap = _call(server, "formatting_convert", {"message": "a" * MAX_MESSAGE_CHARS})
+    assert not at_cap.is_error
+    over = _call(
+        server, "formatting_convert", {"message": "a" * (MAX_MESSAGE_CHARS + 1)}
+    )
+    assert over.is_error
+    assert over.structured_content["error"]["code"] == "INVALID_ARGUMENT"
+
+
+def test_convert_is_idempotent_on_its_own_output(tmp_path: Path) -> None:
+    server = _reader(tmp_path)
+    cases = _golden_markdown_cases()
+    assert cases
+    for case in cases:
+        first = _call(server, "formatting_convert", {"message": case["markdown"]})
+        again = _call(
+            server,
+            "formatting_convert",
+            {
+                "message": first.structured_content["mycode"],
+                "message_format": "mycode",
+            },
+        )
+        assert not again.is_error, case["id"]
+        assert again.structured_content["mycode"] == first.structured_content["mycode"]
+
+
+def test_templates_list_and_render_make_zero_transport_calls(
+    templates_dir: Path,
+) -> None:
+    _fixture_directory(templates_dir)
+    transport = _CountingTransport()
+    server = _server(_settings("reader", templates_dir=templates_dir), transport)
+    assert not _call(server, "templates_list", {}).is_error
+    rendered = _call(
+        server, "templates_render", {"name": "release", "values": {"title": "T"}}
+    )
+    assert not rendered.is_error
+    assert transport.calls == 0
+
+
+def test_render_output_over_the_cap_is_refused(templates_dir: Path) -> None:
+    _fixture_directory(templates_dir)
+    result = _call(
+        _reader(templates_dir),
+        "templates_render",
+        {"name": "release", "values": {"title": "t" * (MAX_MESSAGE_CHARS - 5)}},
+    )
+    assert result.is_error
+    assert result.structured_content["error"]["code"] == "INVALID_ARGUMENT"
+
+
+def test_render_values_summing_over_the_cap_are_refused_before_filling(
+    templates_dir: Path,
+) -> None:
+    _fixture_directory(templates_dir)
+    half = MAX_MESSAGE_CHARS // 2 + 1
+    result = _call(
+        _reader(templates_dir),
+        "templates_render",
+        {"name": "release", "values": {"title": "a" * half, "note": "b" * half}},
+    )
+    assert result.is_error
+    error = result.structured_content["error"]
+    assert error["code"] == "INVALID_ARGUMENT"
+    assert "too large" in error["message"]
+
+
+def test_name_collision_between_md_and_mycode_counts_as_invalid(
+    templates_dir: Path,
+) -> None:
+    (templates_dir / "a.md").write_text(VALID_MD, encoding="utf-8")
+    (templates_dir / "a.mycode").write_text(VALID_MD, encoding="utf-8")
+    templates, invalid = load_templates(templates_dir)
+    assert [t.name for t in templates] == ["a"]
+    assert invalid == 1
+    listed = _call(_reader(templates_dir), "templates_list", {})
+    assert listed.structured_content["invalid_count"] == 1
+
+
+def test_deeply_nested_front_matter_is_invalid_and_does_not_break_siblings(
+    templates_dir: Path,
+) -> None:
+    nested = "---\ndescription: " + "[" * 30_000 + "\n---\nbody"
+    (templates_dir / "deep.md").write_text(nested, encoding="utf-8")
+    (templates_dir / "release.md").write_text(VALID_MD, encoding="utf-8")
+    server = _reader(templates_dir)
+    listed = _call(server, "templates_list", {})
+    assert not listed.is_error
+    assert [t["name"] for t in listed.structured_content["templates"]] == ["release"]
+    assert listed.structured_content["invalid_count"] == 1
+    rendered = _call(
+        server, "templates_render", {"name": "release", "values": {"title": "T"}}
+    )
+    assert not rendered.is_error
+
+
+def test_candidates_beyond_the_per_call_cap_count_as_invalid(
+    templates_dir: Path,
+) -> None:
+    extra = 4
+    for index in range(MAX_TEMPLATE_CANDIDATES + extra):
+        (templates_dir / f"t{index:04d}.md").write_text(VALID_MD, encoding="utf-8")
+    templates, invalid = load_templates(templates_dir)
+    assert len(templates) == MAX_TEMPLATE_CANDIDATES
+    assert invalid == extra

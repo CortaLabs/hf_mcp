@@ -11,7 +11,7 @@ from hf_mcp.capabilities import CapabilityPolicy
 from hf_mcp.config import HFMCPSettings
 from hf_mcp.dispatcher import build_handlers
 from hf_mcp.output_modes import ReadOutputDefaults
-from hf_mcp.registry import get_specs, get_tool_spec
+from hf_mcp.registry import WIRE_KEY, get_specs, get_tool_spec
 from hf_mcp.token_store import TokenBundle
 from hf_mcp.tools.read_core import (
     build_core_read_handlers,
@@ -21,6 +21,7 @@ from hf_mcp.tools.read_core import (
     list_posts,
     list_threads,
 )
+from hf_mcp.tools.read_extended import build_extended_read_handlers
 from hf_mcp.transport import HFTransport
 
 PRODUCT_ROOT = Path(__file__).resolve().parents[1]
@@ -1186,3 +1187,63 @@ def test_core_read_flow_chain_adds_hf_flow_and_preserves_endpoint_root_payloads(
     assert ("users.read", (("uid", 5),)) in post_actions
     assert ("forums.read", (("fid", 375),)) in post_actions
     assert ("posts.read", (("pid", 7),)) in post_actions
+
+
+_TOGGLE_SELECTORS: dict[str, dict[str, Any]] = {
+    "users.read": {"uid": 5},
+    "posts.read": {"tid": 7},
+}
+
+
+def _wire_include_toggles() -> list[tuple[str, str]]:
+    return [
+        (spec.name, name)
+        for spec in get_specs("core_read") + get_specs("extended_read")
+        for name, prop in spec.input_schema["properties"].items()
+        if name.startswith("include_")
+        and name != "include_raw_payload"
+        and prop.get(WIRE_KEY)
+    ]
+
+
+class _AsksRecorder(HFTransport):
+    def __init__(self) -> None:
+        super().__init__(token_store=_StubTokenStore(), base_url="https://x.test")
+        self.asks: dict[str, Any] = {}
+
+    def read_raw(self, asks: Any, helper: str | None = None) -> dict[str, Any]:  # type: ignore[override]
+        self.asks = asks
+        return {}
+
+
+def _toggle_asks(tool_name: str, toggle: str, value: bool) -> dict[str, Any]:
+    recorder = _AsksRecorder()
+    policy = _policy(
+        enabled_capabilities={tool_name},
+        enabled_parameter_families=set(get_tool_spec(tool_name).families),
+    )
+    handlers = build_core_read_handlers(policy, recorder)
+    handlers.update(build_extended_read_handlers(policy, recorder))
+    handlers[tool_name](**_TOGGLE_SELECTORS.get(tool_name, {}), **{toggle: value})
+    (body,) = recorder.asks.values()
+    return dict(body)
+
+
+def test_every_include_toggle_in_the_registry_is_covered() -> None:
+    assert {toggle for _, toggle in _wire_include_toggles()} == {
+        "include_basic_fields",
+        "include_advanced_fields",
+        "include_profile_fields",
+        "include_post_body",
+        "include_amount",
+    }
+
+
+@pytest.mark.parametrize(("tool_name", "toggle"), _wire_include_toggles())
+def test_include_toggle_adds_request_fields_when_on_and_drops_them_when_off(
+    tool_name: str, toggle: str
+) -> None:
+    on = _toggle_asks(tool_name, toggle, True)
+    off = _toggle_asks(tool_name, toggle, False)
+
+    assert set(off) < set(on), (tool_name, toggle)

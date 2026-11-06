@@ -14,6 +14,7 @@ if [[ -d "$OUT_DIR" && -n "$(ls -A "$OUT_DIR")" ]]; then
 fi
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
+# --no-isolation: build backends come pinned from the dev extra, so the release build uses the reviewed toolchain instead of fetching one.
 "$PYTHON" -m build --sdist --wheel --no-isolation --outdir "$OUT_DIR" .
 "$PYTHON" -m twine check "$OUT_DIR"/*
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import inspect
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from functools import partial
@@ -30,7 +31,9 @@ class _Entry:
     tool: types.Tool
     validator: Draft202012Validator
     handler: Handler
-    known_names: frozenset[str]
+
+
+_PARAMETER_NAME = re.compile(r"[a-z][a-z0-9_]{0,63}")
 
 
 def _path_text(path: tuple[str | int, ...]) -> str:
@@ -41,13 +44,13 @@ def _path_text(path: tuple[str | int, ...]) -> str:
     return text or "(arguments)"
 
 
-def _failing_paths(error: ValidationError, known: frozenset[str]) -> list[str]:
+def _failing_paths(error: ValidationError) -> list[str]:
     """Name the failing parameter paths of one schema error, never the values.
 
     jsonschema reports ``required`` and ``additionalProperties`` failures at the
     parent path, so those name the missing or unexpected property instead. An
-    unexpected name is echoed only when the registry declares it for this tool
-    (a parameter the active profile prunes); any other caller text is masked.
+    unexpected name is echoed only when it looks like a parameter name (so a
+    caller typo is visible); any other caller text is masked.
     """
     parent = tuple(error.absolute_path)
     if error.validator == "required" and isinstance(error.validator_value, list):
@@ -63,7 +66,7 @@ def _failing_paths(error: ValidationError, known: frozenset[str]) -> list[str]:
         declared = error.schema.get("properties", {})
         return [
             _path_text((*parent, name))
-            if not parent and name in known
+            if not parent and _PARAMETER_NAME.fullmatch(str(name))
             else "(unknown parameter)"
             for name in sorted(error.instance, key=str)
             if name not in declared
@@ -81,7 +84,7 @@ def _invalid_arguments_message(entry: _Entry, arguments: Any) -> str:
         {
             path
             for error in entry.validator.iter_errors(arguments)
-            for path in _failing_paths(error, entry.known_names)
+            for path in _failing_paths(error)
         }
     )
     shown = paths[:5]
@@ -153,7 +156,6 @@ def build_server(policy: CapabilityPolicy, handlers: Mapping[str, Handler]) -> S
             tool,
             Draft202012Validator(tool.input_schema),
             handler,
-            frozenset(spec.input_schema["properties"]),
         )
     enabled_tools = frozenset(entry.canonical_name for entry in entries.values())
 
@@ -173,12 +175,11 @@ def build_server(policy: CapabilityPolicy, handlers: Mapping[str, Handler]) -> S
             message = _invalid_arguments_message(entry, arguments)
             return _error_result("INVALID_ARGUMENT", params.name, message)
         try:
-            if inspect.iscoroutinefunction(entry.handler):
-                envelope = await entry.handler(**arguments)
-            else:
-                envelope = await anyio.to_thread.run_sync(
-                    partial(entry.handler, **arguments)
-                )
+            envelope = await anyio.to_thread.run_sync(
+                partial(entry.handler, **arguments)
+            )
+            if inspect.isawaitable(envelope):
+                envelope = await envelope
         except Exception as error:
             return _error_call_tool_result(params.name, error)
         try:

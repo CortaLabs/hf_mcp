@@ -15,11 +15,10 @@ from .formatting_engine import (
     prepare_formatting_report,
 )
 from .mycode import ConversionFinding, coerce_message_format
-from .registry import DRAFT_ID_PATTERN
+from .registry import DRAFT_ID_PATTERN, MAX_MESSAGE_CHARS
 
 DraftStatus = Literal["draft", "ready", "approved", "archived"]
 _SOURCE_SUFFIXES = frozenset({".md", ".mycode", ".txt"})
-_MAX_DRAFT_SOURCE_BYTES = 500_000
 _DRAFT_STATUSES = {"draft", "ready", "approved", "archived"}
 
 
@@ -115,7 +114,7 @@ def read_cached_source_text(
     )
     if path.suffix.lower() not in _SOURCE_SUFFIXES:
         raise ValueError("Draft source path must be a .md, .mycode, or .txt file.")
-    if path.stat().st_size > _MAX_DRAFT_SOURCE_BYTES:
+    if path.stat().st_size > MAX_MESSAGE_CHARS:
         raise ValueError("Draft source file is too large.")
     return path.read_text(encoding="utf-8")
 
