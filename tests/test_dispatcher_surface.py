@@ -18,12 +18,13 @@ from hf_mcp.config import HFMCPSettings, PRESET_CAPABILITIES, PRESET_PARAMETER_F
 from hf_mcp.dispatcher import RuntimeBundle, register_tools
 from hf_mcp.metadata import get_tool_specs
 from hf_mcp.registry import get_documented_write_specs, mcp_tool_name
-from hf_mcp.server import _MCPServerToolAdapter
+from hf_mcp.server import _MCPServerToolAdapter, _with_schema_signature
 from hf_mcp.server import create_server, serve_stdio
 from hf_mcp.token_store import TokenBundle
 from hf_mcp.tools.read_core import build_core_read_handlers
 from hf_mcp.tools.read_extended import build_extended_read_handlers
 from hf_mcp.transport import HFTransport
+from hf_mcp.write_preflight import WritePreflightError
 
 PRODUCT_ROOT = Path(__file__).resolve().parents[1]
 SRC_PATH = PRODUCT_ROOT / "src"
@@ -2032,3 +2033,232 @@ def test_serve_stdio_does_not_retry_when_stdio_is_closed(
     with pytest.raises(ValueError, match="closed file"):
         serve_stdio(settings)
     assert run_calls == ["stdio"]
+
+
+def test_runtime_stdio_client_session_returns_error_v1_for_failed_read_and_write() -> (
+    None
+):
+    from mcp import ClientSession
+    from mcp.client.stdio import StdioServerParameters, stdio_client
+
+    server_probe = """
+import email.message
+import io
+import urllib.error
+import hf_mcp.transport as hf_transport
+from hf_mcp.capabilities import CapabilityPolicy
+from hf_mcp.config import HFMCPSettings, PRESET_PARAMETER_FAMILIES
+from hf_mcp.dispatcher import RuntimeBundle, register_tools
+from hf_mcp.server import _MCPServerToolAdapter
+from hf_mcp.token_store import TokenBundle
+from hf_mcp.transport import HFTransport
+from mcp.server.mcpserver import MCPServer
+
+class _ProbeTokenStore:
+    def require_bundle(self):
+        return TokenBundle(access_token="TOKENSEED", token_type="Bearer", scope=frozenset({"read"}))
+
+class _FailingOpener:
+    def open(self, request, timeout=None):
+        if request.full_url.endswith("/write"):
+            raise TimeoutError("WRITESEED upstream text")
+        headers = email.message.Message()
+        headers["Retry-After"] = "7"
+        raise urllib.error.HTTPError(
+            request.full_url, 503, "unavailable", headers, io.BytesIO(b"BODYSEED upstream text")
+        )
+
+hf_transport._OPENER = _FailingOpener()
+transport = HFTransport(token_store=_ProbeTokenStore(), base_url="https://example.test")
+settings = HFMCPSettings(
+    profile="test",
+    enabled_capabilities=frozenset({"me.read", "posts.reply"}),
+    enabled_parameter_families=PRESET_PARAMETER_FAMILIES["full_api"],
+)
+policy = CapabilityPolicy(settings)
+app = MCPServer(name="hf-mcp-probe")
+adapter = _MCPServerToolAdapter(app)
+register_tools(adapter, policy, RuntimeBundle(transport=transport))
+app.run(transport="stdio")
+"""
+
+    async def _run_probe() -> tuple[Any, Any]:
+        env = dict(os.environ)
+        pythonpath = env.get("PYTHONPATH")
+        src_path = str(SRC_PATH)
+        env["PYTHONPATH"] = f"{src_path}:{pythonpath}" if pythonpath else src_path
+        params = StdioServerParameters(
+            command=sys.executable,
+            args=["-c", server_probe],
+            env=env,
+            cwd=str(PRODUCT_ROOT),
+        )
+        async with stdio_client(params) as (read_stream, write_stream):
+            async with ClientSession(read_stream, write_stream) as session:
+                await session.initialize()
+                read_result = await session.call_tool(
+                    "me_read", {"output_mode": "raw", "include_raw_payload": True}
+                )
+                write_result = await session.call_tool(
+                    "posts_reply",
+                    {"tid": 123, "message": "Hello there", "confirm_live": True},
+                )
+                return read_result, write_result
+
+    read_result, write_result = anyio.run(_run_probe)
+
+    expected_fields = {
+        "code",
+        "operation",
+        "tool",
+        "message",
+        "http_status",
+        "retry_after",
+        "retryable",
+        "correlation_id",
+        "mutation_outcome",
+    }
+    cases = (
+        (
+            read_result,
+            "me_read",
+            {
+                "code": "UPSTREAM_UNAVAILABLE",
+                "operation": "read",
+                "http_status": 503,
+                "retry_after": 7,
+                "retryable": True,
+                "mutation_outcome": "not_attempted",
+            },
+        ),
+        (
+            write_result,
+            "posts_reply",
+            {
+                "code": "WRITE_OUTCOME_UNKNOWN",
+                "operation": "write",
+                "http_status": None,
+                "retry_after": None,
+                "retryable": False,
+                "mutation_outcome": "unknown",
+            },
+        ),
+    )
+    for result, tool_name, expected in cases:
+        assert result.is_error is True
+        assert result.structured_content is not None
+        assert set(result.structured_content) == {"error"}
+        error = result.structured_content["error"]
+        assert set(error) == expected_fields
+        assert error["tool"] == tool_name
+        for key, value in expected.items():
+            assert error[key] == value
+        assert [part.type for part in result.content] == ["text"]
+        assert result.content[0].text == f"{error['code']}: {error['message']}"
+        dumped = result.model_dump_json(by_alias=True)
+        for seed in ("TOKENSEED", "BODYSEED", "WRITESEED", "example.test"):
+            assert seed not in dumped
+
+
+def _validation_error() -> Exception:
+    from pydantic import BaseModel, ValidationError
+
+    class _Arguments(BaseModel):
+        count: int
+
+    try:
+        _Arguments(count="SECRETSEED")  # type: ignore[arg-type]
+    except ValidationError as error:
+        return error
+    raise AssertionError("expected a validation error")
+
+
+@pytest.mark.parametrize("is_async", [False, True])
+@pytest.mark.parametrize(
+    ("error", "code", "message"),
+    [
+        (
+            WritePreflightError("Write body contains nested code blocks."),
+            "FORMAT_NOT_READY",
+            "Write body contains nested code blocks.",
+        ),
+        (
+            ValueError("tid must be positive."),
+            "INVALID_ARGUMENT",
+            "tid must be positive.",
+        ),
+        (
+            PermissionError("Tool requires confirm_live=True."),
+            "INVALID_ARGUMENT",
+            "Tool requires confirm_live=True.",
+        ),
+        (
+            TypeError("SECRETSEED bad type"),
+            "INVALID_ARGUMENT",
+            "The request arguments are invalid.",
+        ),
+        (
+            _validation_error(),
+            "INVALID_ARGUMENT",
+            "Invalid arguments: count",
+        ),
+        (
+            RuntimeError("SECRETSEED /path"),
+            "INTERNAL_ERROR",
+            "An internal error occurred.",
+        ),
+    ],
+)
+def test_wrapped_handler_maps_every_exception_to_error_v1(
+    caplog: pytest.LogCaptureFixture,
+    is_async: bool,
+    error: Exception,
+    code: str,
+    message: str,
+) -> None:
+    import logging
+
+    if is_async:
+
+        async def handler() -> dict[str, Any]:
+            raise error
+
+    else:
+
+        def handler() -> dict[str, Any]:  # type: ignore[misc]
+            raise error
+
+    wrapped = _with_schema_signature(
+        "posts_reply", handler, {"type": "object", "properties": {}}
+    )
+    caplog.set_level(logging.DEBUG)
+    result = anyio.run(wrapped) if is_async else wrapped()
+
+    assert result.is_error is True
+    assert set(result.structured_content) == {"error"}
+    data = result.structured_content["error"]
+    assert set(data) == {
+        "code",
+        "operation",
+        "tool",
+        "message",
+        "http_status",
+        "retry_after",
+        "retryable",
+        "correlation_id",
+        "mutation_outcome",
+    }
+    assert (data["code"], data["tool"], data["message"]) == (
+        code,
+        "posts_reply",
+        message,
+    )
+    assert (data["operation"], data["retryable"], data["mutation_outcome"]) == (
+        "local",
+        False,
+        "not_attempted",
+    )
+    assert [part.type for part in result.content] == ["text"]
+    assert result.content[0].text == f"{code}: {message}"
+    assert "SECRETSEED" not in result.model_dump_json(by_alias=True)
+    assert "SECRETSEED" not in caplog.text
