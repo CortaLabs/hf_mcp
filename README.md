@@ -61,7 +61,7 @@ Full details and selectors are in [`docs/tool_overview.md`](docs/tool_overview.m
 
 **Draft** (local only, nothing is sent to Hack Forums)
 
-- `formatting.preflight` checks how MyCode or Markdown converts to Hack Forums MyCode and can save a draft
+- `formatting.preflight` checks how MyCode or Markdown converts to Hack Forums MyCode and saves the result as a local draft on every call
 - `formatting.convert` converts Markdown or MyCode to Hack Forums MyCode and reports what could not be carried over; nothing is saved
 - `templates.list`, `templates.render` list and fill your own named post templates from `templates_dir`
 - `drafts.list`, `drafts.read`, `drafts.update`, `drafts.delete`

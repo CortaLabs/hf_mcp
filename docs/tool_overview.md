@@ -118,7 +118,7 @@ takes `confirm_live`.
 
 | Tool | Availability | What it is for |
 |---|---|---|
-| `formatting.preflight` | available now | Check how MyCode or Markdown converts to Hack Forums MyCode, report conversion findings, and optionally save a local draft |
+| `formatting.preflight` | available now | Check how MyCode or Markdown converts to Hack Forums MyCode, report conversion findings, and save the result as a local draft on every call (use `formatting.convert` to convert without saving) |
 | `formatting.convert` | available now | Convert Markdown or MyCode (`message`, `message_format`) to Hack Forums MyCode and report `conversion_findings`; nothing is saved |
 | `templates.list` | available now | List the named templates in `templates_dir` with their placeholders; invalid files are only counted in `invalid_count` |
 | `templates.render` | available now | Fill a named template (`name`, `values`) and return its `source_text` and Hack Forums `mycode`; nothing is saved |

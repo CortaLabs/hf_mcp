@@ -28,7 +28,7 @@ Live status values: `tested live` and `untested`.
 | `sigmarket.market.read` | read | available now | OpenAPI-confirmed, HF_API_REFERENCE-confirmed | untested | browse-first optional-filter read |
 | `sigmarket.order.read` | read | available now | OpenAPI-confirmed, HF_API_REFERENCE-confirmed | untested | canonical selector `smid`; compatibility alias `oid` accepted |
 | `admin.high_risk.read` | read | available now | OpenAPI-confirmed | untested | privileged scope boundary remains operator-gated |
-| `formatting.preflight` | local | available now | none | untested | local check and optional draft save; nothing is sent |
+| `formatting.preflight` | local | available now | none | untested | local check that saves a local draft on every call; nothing is sent |
 | `formatting.convert` | local | available now | none | untested | local Markdown/MyCode to Hack Forums MyCode conversion; nothing is saved or sent |
 | `templates.list` | local | available now | none | untested | lists valid templates in `templates_dir`; invalid files are only counted |
 | `templates.render` | local | available now | none | untested | fills a named template and returns its source and MyCode; nothing is saved or sent |
