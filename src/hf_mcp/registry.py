@@ -436,7 +436,7 @@ TOOLS: tuple[ToolSpec, ...] = (
         "formatting.preflight",
         "formatting.preflight",
         "local",
-        "Check how MyCode or Markdown formats as Hack Forums MyCode and report conversion findings; preflight can save a local draft.",
+        "Check how MyCode or Markdown formats as Hack Forums MyCode and report conversion findings. Every call saves the result as a local draft and returns its draft_id; nothing is sent to Hack Forums. To convert without saving, use formatting.convert.",
         {
             "message": _p(
                 "formatting.content",

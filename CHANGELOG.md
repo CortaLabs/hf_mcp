@@ -2,6 +2,13 @@
 
 All notable changes to hf-mcp are listed here, newest first.
 
+## 0.8.2
+
+The `formatting.preflight` description now says what the tool does.
+
+- `formatting.preflight` saves the result as a local draft on every call; the tool description, README and docs used to say it only might. The description now says so and points to `formatting.convert` for a conversion that saves nothing. Behavior is unchanged.
+- The converter speed test allows 6 seconds of CPU time per 500,000-character input instead of 2. A correct conversion takes 1.0 to 1.9 seconds depending on machine load, so the old limit failed now and then on a busy machine. The quadratic behavior it guards against takes minutes.
+
 ## 0.8.1
 
 Markdown conversion no longer fails on pathological input, and the installed-build check is more reliable. Deeply nested blockquotes are reported instead of raising an error, and messages that mix `[code]` and `[php]` blocks convert quickly even when they are unbalanced.

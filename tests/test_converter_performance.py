@@ -2,7 +2,10 @@
 
 Each case is a pathological input at the 500,000 character cap that used to grow
 at least quadratically through ``prepare_formatting_report``. CPU time is
-measured, not wall time, so a busy machine cannot fail a correct converter.
+measured, not wall time. CPU time still varies with machine load: a correct
+converter takes 1.0 to 1.9 seconds on these inputs, while the quadratic versions
+took minutes or more. The bound sits well clear of the first and far below the
+second, and the doubling test below checks the growth rate directly.
 """
 
 from __future__ import annotations
@@ -17,7 +20,7 @@ from hf_mcp.mycode import finditer_paired
 from hf_mcp.write_preflight import WritePreflightError, validate_write_body
 
 INPUT_CAP = 500_000
-TIME_BOUND_SECONDS = 2.0
+TIME_BOUND_SECONDS = 6.0
 
 # name -> repeating unit. The first three are the reported patterns; the rest are
 # neighbours that shared a super-linear step (per-opener rescans, per-token string
